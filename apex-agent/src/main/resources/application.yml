@@ -1,0 +1,118 @@
+spring:
+  application:
+    name: apex-agent
+  datasource:
+    url: ${APEX_MEMORY_DATASOURCE_URL:jdbc:postgresql://127.0.0.1:5432/apex_agent}
+    username: ${APEX_MEMORY_DATASOURCE_USERNAME:apex_agent}
+    password: ${APEX_MEMORY_DATASOURCE_PASSWORD:apex_agent}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      initialization-fail-timeout: 0
+      minimum-idle: 0
+  ai:
+    dashscope:
+      api-key: ${DASHSCOPE_API_KEY}
+      chat:
+        options:
+          model: qwen-plus
+
+server:
+  port: 18083
+
+logging:
+  level:
+    root: INFO
+    org.springframework.ai: DEBUG
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    call-setters-on-nulls: true
+
+apex:
+  memory:
+    enabled: true
+    store:
+      type: in-memory
+    profile-enabled: true
+    execution-history-enabled: true
+    experience-enabled: true
+    management-enabled: true
+    compaction:
+      enabled: true
+      token-threshold: 12000
+      retain-recent-messages: 12
+      preflush-enabled: true
+    extraction:
+      async-enabled: true
+      min-confidence: 0.65
+      long-term-idle-minutes: 15
+      long-term-prompt: classpath:prompts/memory/long-term-memory.st
+      execution-history-prompt: classpath:prompts/memory/execution-history-memory.st
+      experience-prompt: classpath:prompts/memory/agent-experience-memory.st
+      optimistic-lock-enabled: true
+  global:
+    agents:
+      default_agent:
+        agent-key: default_agent
+        name: 通用智能体
+        description: 通用智能体，可以帮你处理任何事情。
+        timeout: 300000
+        workspace: classpath:agents/default_agent/
+#        sub-agents:
+#          - meeting_tool
+#          - contacts_tool
+        mcps:
+          - meeting-server
+          - contacts-server
+#        skills:
+#          - meeting-skill
+        default-start-stage: execution
+        default-execution-mode: react
+      deer-flow:
+        agent-key: deer-flow
+        name: 鹿流通用智能体
+        description: 鹿流通用智能体，基于鹿流的系统提示词。
+        timeout: 300000
+        default-start-stage: execution
+        default-execution-mode: react
+      meeting_tool:
+        agent-key: meeting_tool
+        name: 会议室助手
+        description: 会议助手，可以帮你处理会议相关的事宜。所有会议室操作都需要知晓用户的 openId，你可以通过通讯录查到该信息。
+        url: http://localhost:18083/api/sse/chat
+        timeout: 300000
+        workspace: classpath:agents/meeting_tool/
+        mcps:
+          - meeting-server
+        skills:
+          - meeting-skill
+        default-start-stage: execution
+        default-execution-mode: react
+      contacts_tool:
+        agent-key: contacts_tool
+        name: 通讯录助手
+        description: 通讯录专家，负责人员身份识别、组织归属查询及Base地、用户的 openId等诸多详细信息调取。
+        url: http://localhost:18083/api/sse/chat
+        timeout: 300000
+        workspace: classpath:agents/contacts_tool/
+        mcps:
+          - contacts-server
+        skills:
+          - contacts-skill
+        default-start-stage: execution
+        default-execution-mode: react
+    mcps:
+      meeting-server:
+        command: node
+        args:
+          - E:\1tmp\meeting\mcp-servers\meeting-assistant\src\index.js
+      contacts-server:
+        command: node
+        args:
+          - E:\1tmp\meeting\mcp-servers\contacts\src\index.js
+    skills:
+      meeting-skill:
+        dir: E:\1tmp\meeting\.claude\skills\meeting-skills
+      contacts-skill:
+        dir: E:\1tmp\meeting\.claude\skills\contacts

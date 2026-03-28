@@ -1,0 +1,5 @@
+default-start-stage: EXECUTION
+default-execution-mode: REACT
+allow-mcps: ["meeting-server", "contacts-server"]
+allow-sub-agents: []
+allow-skills: ["meeting-skill"]
