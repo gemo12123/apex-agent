@@ -3,6 +3,7 @@ package org.gemo.apex.core;
 import org.gemo.apex.component.tool.BuiltInToolProvider;
 import org.gemo.apex.component.tool.GlobalToolRegistry;
 import org.gemo.apex.constant.ExecutionStatus;
+import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.context.SuperAgentContext;
 import org.gemo.apex.domain.Plan;
 import org.gemo.apex.memory.context.UserContextHolder;
@@ -35,7 +36,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -71,8 +71,7 @@ class SuperAgentFactoryTest {
         when(globalToolRegistry.getMcpToolCallbacks(anyString())).thenReturn(List.of());
         when(globalToolRegistry.getSubAgentToolCallbacks(anyString())).thenReturn(List.of());
         when(globalToolRegistry.getSkillsTool(anyString())).thenReturn(null);
-        when(agentWorkspaceService.getDefaultStartStage(anyString())).thenReturn(SuperAgentContext.Stage.THINKING);
-        when(agentWorkspaceService.getDefaultExecutionMode(anyString())).thenReturn(null);
+        when(agentWorkspaceService.getDefaultExecutionMode(anyString())).thenReturn(ModeEnum.REACT);
         when(memoryRecallService.recall(any(SuperAgentContext.class))).thenReturn(new MemoryRecallPackage());
     }
 
@@ -91,7 +90,8 @@ class SuperAgentFactoryTest {
         assertEquals("agent-1", context.getAgentKey());
         assertEquals("user-1", context.getUserId());
         assertEquals(1, context.getTurnNo());
-        assertEquals(SuperAgentContext.Stage.THINKING, context.getCurrentStage());
+        assertEquals(SuperAgentContext.Stage.EXECUTION, context.getCurrentStage());
+        assertEquals(ModeEnum.REACT, context.getExecutionMode());
         assertEquals(1, context.getPersistedDialogueMessageIndex());
         assertEquals(2L, context.getNextMessageSortNo());
         assertEquals(1, context.getDialogueMessages().size());
@@ -103,6 +103,18 @@ class SuperAgentFactoryTest {
         assertEquals(1, messagesCaptor.getValue().size());
         assertEquals("hello", messagesCaptor.getValue().getFirst().getText());
         verify(sessionContextStore).save(context);
+    }
+
+    @Test
+    void createContextShouldFailFastWhenDefaultExecutionModeMissing() {
+        when(sessionContextStore.load("session-2")).thenReturn(Optional.empty());
+        when(agentWorkspaceService.getDefaultExecutionMode("agent-1")).thenReturn(null);
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> superAgentFactory.createContext("session-2", "agent-1", "hello"));
+
+        assertTrue(exception.getMessage().contains("default execution mode"));
+        verify(sessionContextStore, never()).save(any(SuperAgentContext.class));
     }
 
     @Test
@@ -127,6 +139,8 @@ class SuperAgentFactoryTest {
 
         assertSame(existingContext, context);
         assertEquals(3, context.getTurnNo());
+        assertEquals(SuperAgentContext.Stage.EXECUTION, context.getCurrentStage());
+        assertEquals(ModeEnum.REACT, context.getExecutionMode());
         assertEquals(4L, context.getTurnStartSortNo());
         assertEquals(2, context.getPersistedDialogueMessageIndex());
         assertEquals(7L, context.getNextMessageSortNo());

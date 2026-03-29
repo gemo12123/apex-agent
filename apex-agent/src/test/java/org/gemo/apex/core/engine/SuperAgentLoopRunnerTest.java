@@ -57,23 +57,6 @@ class SuperAgentLoopRunnerTest {
     }
 
     @Test
-    void runShouldTransitionThinkingToModeConfirmationAndContinue() {
-        SuperAgentContext context = new SuperAgentContext();
-        context.setCurrentStage(SuperAgentContext.Stage.THINKING);
-        context.setExecutionStatus(ExecutionStatus.IN_PROGRESS);
-
-        when(modelResponseStreamer.stream(any(), any()))
-                .thenReturn(response("thinking"))
-                .thenReturn(response("confirm"));
-
-        superAgentLoopRunner.run(context);
-
-        assertEquals(SuperAgentContext.Stage.MODE_CONFIRMATION, context.getCurrentStage());
-        verify(modelResponseStreamer, times(2)).stream(any(), any());
-        verify(conversationMemoryManager, times(1)).appendDialogueMessage(any(), any(AssistantMessage.class));
-    }
-
-    @Test
     void runShouldStopOnExecutionWithoutToolCalls() {
         SuperAgentContext context = new SuperAgentContext();
         context.setCurrentStage(SuperAgentContext.Stage.EXECUTION);
@@ -84,6 +67,7 @@ class SuperAgentLoopRunnerTest {
         superAgentLoopRunner.run(context);
 
         verify(modelResponseStreamer, times(1)).stream(any(), any());
+        verify(conversationMemoryManager, times(1)).appendDialogueMessage(any(), any(AssistantMessage.class));
         assertEquals(ExecutionStatus.COMPLETED, context.getExecutionStatus());
     }
 
@@ -109,6 +93,7 @@ class SuperAgentLoopRunnerTest {
 
         verify(conversationMemoryManager, times(1)).appendDialogueMessage(any(), any(ToolResponseMessage.class));
         verify(toolCallProcessor, never()).process(any(), any(), any(), any());
+        assertEquals(ExecutionStatus.COMPLETED, context.getExecutionStatus());
     }
 
     private ChatResponse response(String text) {

@@ -104,9 +104,6 @@ public class ChatController {
     }
 
     private Map<String, Object> buildEndContext(SuperAgentContext context) {
-        if (context.getCurrentStage() == SuperAgentContext.Stage.THINKING) {
-            return Map.of();
-        }
         Map<String, Object> map = new HashMap<>();
         map.put(ContextKeyEnum.MODE.getKey(),
                 context.getExecutionMode() != null ? context.getExecutionMode().getMode() : "");

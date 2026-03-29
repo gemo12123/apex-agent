@@ -2,7 +2,6 @@ package org.gemo.apex.config.model;
 
 import lombok.Data;
 import org.gemo.apex.constant.ModeEnum;
-import org.gemo.apex.context.SuperAgentContext;
 import java.util.List;
 
 /**
@@ -37,9 +36,6 @@ public class AgentConfig {
     /** List of Skills this agent is allowed to use */
     private List<String> skills;
 
-    /** Default initial stage for new conversations */
-    private SuperAgentContext.Stage defaultStartStage;
-
-    /** Default execution mode when the initial stage is EXECUTION */
+    /** Default execution mode for new conversations */
     private ModeEnum defaultExecutionMode;
 }

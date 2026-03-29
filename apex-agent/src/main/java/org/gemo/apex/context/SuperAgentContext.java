@@ -75,7 +75,7 @@ public class SuperAgentContext {
     /**
      * 当前运行阶段。
      */
-    private Stage currentStage = Stage.THINKING;
+    private Stage currentStage = Stage.EXECUTION;
 
     /**
      * 当前执行模式。
@@ -164,8 +164,6 @@ public class SuperAgentContext {
      * 内部阶段枚举。
      */
     public enum Stage {
-        THINKING,
-        MODE_CONFIRMATION,
         EXECUTION
     }
 }

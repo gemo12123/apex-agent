@@ -2,9 +2,7 @@ package org.gemo.apex.component.tool;
 
 import lombok.extern.slf4j.Slf4j;
 import org.gemo.apex.tool.AskHumanTool;
-import org.gemo.apex.tool.DirectAnswerTool;
 import org.gemo.apex.tool.UpdatePlanTool;
-import org.gemo.apex.tool.WriteModeTool;
 import org.gemo.apex.tool.WritePlanTool;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.method.MethodToolCallbackProvider;
@@ -31,8 +29,6 @@ public class BuiltInToolProvider {
         MethodToolCallbackProvider provider = MethodToolCallbackProvider.builder()
                 .toolObjects(
                         new AskHumanTool(),
-                        new DirectAnswerTool(),
-                        new WriteModeTool(),
                         new WritePlanTool(),
                         new UpdatePlanTool())
                 .build();

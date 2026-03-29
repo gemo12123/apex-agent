@@ -1,78 +1,83 @@
 package org.gemo.apex.interceptor;
 
 import org.gemo.apex.component.interceptor.ToolInterceptor;
+import org.gemo.apex.constant.ModeEnum;
+import org.gemo.apex.constant.TaskStatus;
 import org.gemo.apex.context.SuperAgentContext;
+import org.gemo.apex.domain.Plan;
+import org.gemo.apex.domain.Stage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 
+import java.util.ArrayList;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-public class ToolInterceptorTest {
+class ToolInterceptorTest {
 
     private ToolInterceptor toolInterceptor;
     private SuperAgentContext context;
 
     @BeforeEach
-    public void setup() {
+    void setUp() {
         toolInterceptor = new ToolInterceptor();
         context = new SuperAgentContext();
+        context.setCurrentStage(SuperAgentContext.Stage.EXECUTION);
     }
 
     @Test
-    public void testThinkingStage_AllowsActiveSkills() {
-        context.setCurrentStage(SuperAgentContext.Stage.THINKING);
+    void executionStageShouldRejectPlanToolsInReactMode() {
+        context.setExecutionMode(ModeEnum.REACT);
         List<AssistantMessage.ToolCall> toolCalls = List.of(
-                new AssistantMessage.ToolCall("1", "function", "activate_skill", "{}"));
+                new AssistantMessage.ToolCall("1", "function", "write_plan_tool", "{}"),
+                new AssistantMessage.ToolCall("2", "function", "update_plan_tool", "{}"));
 
         ToolResponseMessage response = toolInterceptor.interceptIllegalToolCalls(context, toolCalls);
-        assertNull(response, "THINKING 阶段应该允许 activate_skill，返回 null");
+
+        assertNotNull(response);
+        assertEquals(2, response.getResponses().size());
+        assertTrue(response.getResponses().stream()
+                .allMatch(item -> item.responseData().toString().contains("ReAct")));
     }
 
     @Test
-    public void testThinkingStage_AllowsDirectAnswer() {
-        context.setCurrentStage(SuperAgentContext.Stage.THINKING);
+    void executionStageShouldForceWritePlanBeforeOtherPlanExecutorTools() {
+        context.setExecutionMode(ModeEnum.PLAN_EXECUTOR);
         List<AssistantMessage.ToolCall> toolCalls = List.of(
-                new AssistantMessage.ToolCall("2", "function", "direct_answer", "{}"));
+                new AssistantMessage.ToolCall("1", "function", "meeting_tool", "{}"));
 
         ToolResponseMessage response = toolInterceptor.interceptIllegalToolCalls(context, toolCalls);
-        assertNull(response, "THINKING 阶段应该允许 direct_answer，返回 null");
-    }
 
-    @Test
-    public void testThinkingStage_RejectsOtherTools() {
-        context.setCurrentStage(SuperAgentContext.Stage.THINKING);
-        List<AssistantMessage.ToolCall> toolCalls = List.of(
-                new AssistantMessage.ToolCall("3", "function", "write_mode", "{}"));
-
-        ToolResponseMessage response = toolInterceptor.interceptIllegalToolCalls(context, toolCalls);
-        assertNotNull(response, "THINKING 阶段调用 write_mode 应该被拦截");
+        assertNotNull(response);
         assertEquals(1, response.getResponses().size());
-        assertTrue(response.getResponses().get(0).responseData().toString().contains("不允许执行 [write_mode]"));
+        assertTrue(response.getResponses().getFirst().responseData().toString().contains("write_plan_tool"));
     }
 
     @Test
-    public void testModeConfirmationStage_AllowsWriteMode() {
-        context.setCurrentStage(SuperAgentContext.Stage.MODE_CONFIRMATION);
+    void executionStageShouldAllowPlanExecutorBusinessToolsAfterPlanStartsRunning() {
+        context.setExecutionMode(ModeEnum.PLAN_EXECUTOR);
+        context.setPlan(runningPlan());
         List<AssistantMessage.ToolCall> toolCalls = List.of(
-                new AssistantMessage.ToolCall("4", "function", "write_mode", "{}"));
+                new AssistantMessage.ToolCall("1", "function", "meeting_tool", "{}"));
 
         ToolResponseMessage response = toolInterceptor.interceptIllegalToolCalls(context, toolCalls);
-        assertNull(response, "MODE_CONFIRMATION 阶段应该允许 write_mode");
+
+        assertNull(response);
     }
 
-    @Test
-    public void testModeConfirmationStage_RejectsOtherTools() {
-        context.setCurrentStage(SuperAgentContext.Stage.MODE_CONFIRMATION);
-        List<AssistantMessage.ToolCall> toolCalls = List.of(
-                new AssistantMessage.ToolCall("5", "function", "activate_skill", "{}"));
+    private Plan runningPlan() {
+        Stage stage = new Stage();
+        stage.setId("stage-1");
+        stage.setStatus(TaskStatus.RUNNING);
 
-        ToolResponseMessage response = toolInterceptor.interceptIllegalToolCalls(context, toolCalls);
-        assertNotNull(response, "MODE_CONFIRMATION 阶段不应该允许 activate_skill");
-        assertEquals(1, response.getResponses().size());
-        assertTrue(response.getResponses().get(0).responseData().toString().contains("只能调用 `write_mode` 工具"));
+        Plan plan = new Plan();
+        plan.setStages(new ArrayList<>(List.of(stage)));
+        return plan;
     }
 }

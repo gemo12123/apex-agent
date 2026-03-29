@@ -41,18 +41,12 @@ public class StagePromptBuilder {
         }
 
         String stagePromptTemplate = "";
-        if (context.getCurrentStage() == SuperAgentContext.Stage.THINKING) {
-            stagePromptTemplate = agentWorkspaceService.getThinkingPrompt(agentKey);
-        } else if (context.getCurrentStage() == SuperAgentContext.Stage.MODE_CONFIRMATION) {
-            stagePromptTemplate = agentWorkspaceService.getModeConfirmationPrompt(agentKey);
-        } else if (context.getCurrentStage() == SuperAgentContext.Stage.EXECUTION) {
-            if (context.getExecutionMode() == ModeEnum.PLAN_EXECUTOR) {
-                stagePromptTemplate = context.getPlan() == null
-                        ? agentWorkspaceService.getPlanExecutorWritePlanPrompt(agentKey)
-                        : agentWorkspaceService.getPlanExecutorRunPrompt(agentKey);
-            } else {
-                stagePromptTemplate = agentWorkspaceService.getReActPrompt(agentKey);
-            }
+        if (context.getExecutionMode() == ModeEnum.PLAN_EXECUTOR) {
+            stagePromptTemplate = context.getPlan() == null
+                    ? agentWorkspaceService.getPlanExecutorWritePlanPrompt(agentKey)
+                    : agentWorkspaceService.getPlanExecutorRunPrompt(agentKey);
+        } else {
+            stagePromptTemplate = agentWorkspaceService.getReActPrompt(agentKey);
         }
 
         if (stagePromptTemplate == null) {

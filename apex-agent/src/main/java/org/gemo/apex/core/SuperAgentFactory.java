@@ -167,19 +167,14 @@ public class SuperAgentFactory {
     }
 
     private void applyDefaultStageConfig(SuperAgentContext context, String agentKey) {
-        SuperAgentContext.Stage startStage = agentWorkspaceService.getDefaultStartStage(agentKey);
         ModeEnum executionMode = agentWorkspaceService.getDefaultExecutionMode(agentKey);
 
-        if (startStage == SuperAgentContext.Stage.EXECUTION && executionMode == null) {
+        if (executionMode == null) {
             throw new IllegalStateException(
-                    "Agent " + agentKey + " configured default start stage EXECUTION without default execution mode");
-        }
-        if (startStage != SuperAgentContext.Stage.EXECUTION && executionMode != null) {
-            throw new IllegalStateException(
-                    "Agent " + agentKey + " configured default execution mode when default start stage is not EXECUTION");
+                    "Agent " + agentKey + " is missing required default execution mode");
         }
 
-        context.setCurrentStage(startStage);
+        context.setCurrentStage(SuperAgentContext.Stage.EXECUTION);
         context.setExecutionMode(executionMode);
     }
 }

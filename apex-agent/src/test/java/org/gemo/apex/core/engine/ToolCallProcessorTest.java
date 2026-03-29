@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -40,26 +41,22 @@ class ToolCallProcessorTest {
     }
 
     @Test
-    void processShouldExecuteDirectAnswerAndEmitContent() {
+    void processShouldContinueWhenOtherToolsExecuteSuccessfully() {
         SuperAgentContext context = new SuperAgentContext();
         context.setCurrentStage(SuperAgentContext.Stage.EXECUTION);
-        CapturingSseEmitter emitter = new CapturingSseEmitter();
-        context.setSseEmitter(emitter);
-
         AssistantMessage assistantMessage = AssistantMessage.builder()
-                .toolCalls(List.of(new AssistantMessage.ToolCall("call-1", "function", "direct_answer", "{}")))
+                .toolCalls(List.of(new AssistantMessage.ToolCall("call-1", "function", "meeting_tool", "{}")))
                 .build();
         ToolResponseMessage responseMessage = ToolResponseMessage.builder()
-                .responses(List.of(new ToolResponseMessage.ToolResponse("call-1", "direct_answer", "\"hello\"")))
+                .responses(List.of(new ToolResponseMessage.ToolResponse("call-1", "meeting_tool", "done")))
                 .build();
         when(agentToolExecutor.execute(any(Prompt.class), any(AssistantMessage.class))).thenReturn(responseMessage);
 
         ToolCallProcessingResult result = toolCallProcessor.process(new Prompt(List.of()), assistantMessage, context,
-                SuperAgentContext.Stage.THINKING);
+                SuperAgentContext.Stage.EXECUTION);
 
         verify(conversationMemoryManager).appendDialogueMessage(context, responseMessage);
-        assertTrue(result.directAnswerTriggered());
-        assertTrue(emitter.payloads.stream().anyMatch(payload -> payload.contains("hello")));
+        assertFalse(result.directAnswerTriggered());
     }
 
     @Test

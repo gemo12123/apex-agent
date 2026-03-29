@@ -1,5 +1,6 @@
 package org.gemo.apex.core.engine;
 
+import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.context.SuperAgentContext;
 import org.gemo.apex.service.AgentWorkspaceService;
 import org.gemo.apex.tool.skills.CustomSkillsTool;
@@ -34,13 +35,14 @@ class StagePromptBuilderTest {
     }
 
     @Test
-    void buildShouldMergeTemplateSkillsToolsAndRules() {
+    void buildShouldMergeReactPromptSkillsToolsAndRules() {
         SuperAgentContext context = new SuperAgentContext();
         context.setAgentKey("agent-1");
-        context.setCurrentStage(SuperAgentContext.Stage.THINKING);
+        context.setCurrentStage(SuperAgentContext.Stage.EXECUTION);
+        context.setExecutionMode(ModeEnum.REACT);
         context.setCustomSkillsTool(customSkillsTool);
         when(customSkillsTool.getSkillsXml()).thenReturn("<skill>demo</skill>");
-        when(agentWorkspaceService.getThinkingPrompt("agent-1"))
+        when(agentWorkspaceService.getReActPrompt("agent-1"))
                 .thenReturn("skills={skills}\ntools={available_tools_desc}\ndate={date}");
         when(agentWorkspaceService.getAgentRules("agent-1")).thenReturn("NO_DELETE");
 

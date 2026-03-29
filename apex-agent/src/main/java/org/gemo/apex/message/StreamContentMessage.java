@@ -21,5 +21,16 @@ public class StreamContentMessage extends AgentMessage {
      * 消息内容列表
      */
     @JsonProperty("messages")
-    protected List<StreamThinkMessage.ContentMessage> messages;
+    protected List<ContentMessage> messages;
+
+    @Data
+    @NoArgsConstructor
+    public static class ContentMessage {
+        @JsonProperty("content")
+        private String content;
+
+        public ContentMessage(String content) {
+            this.content = content;
+        }
+    }
 }

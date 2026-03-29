@@ -1,4 +1,6 @@
 spring:
+  profiles:
+    active: dev
   application:
     name: apex-agent
   datasource:
@@ -67,14 +69,12 @@ apex:
           - contacts-server
 #        skills:
 #          - meeting-skill
-        default-start-stage: execution
         default-execution-mode: react
       deer-flow:
         agent-key: deer-flow
         name: 鹿流通用智能体
         description: 鹿流通用智能体，基于鹿流的系统提示词。
         timeout: 300000
-        default-start-stage: execution
         default-execution-mode: react
       meeting_tool:
         agent-key: meeting_tool
@@ -87,7 +87,6 @@ apex:
           - meeting-server
         skills:
           - meeting-skill
-        default-start-stage: execution
         default-execution-mode: react
       contacts_tool:
         agent-key: contacts_tool
@@ -100,7 +99,6 @@ apex:
           - contacts-server
         skills:
           - contacts-skill
-        default-start-stage: execution
         default-execution-mode: react
     mcps:
       meeting-server:

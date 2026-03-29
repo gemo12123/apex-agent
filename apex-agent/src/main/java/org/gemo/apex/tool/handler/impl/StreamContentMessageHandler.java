@@ -3,7 +3,6 @@ package org.gemo.apex.tool.handler.impl;
 import lombok.extern.slf4j.Slf4j;
 import org.gemo.apex.message.AgentMessage;
 import org.gemo.apex.message.StreamContentMessage;
-import org.gemo.apex.message.StreamThinkMessage;
 import org.gemo.apex.tool.handler.AbstractMessageHandler;
 import org.gemo.apex.tool.handler.MessageHandlerContext;
 import org.springframework.stereotype.Component;
@@ -50,7 +49,7 @@ public class StreamContentMessageHandler extends AbstractMessageHandler {
             return "";
         }
         return message.getMessages().stream()
-                .map(StreamThinkMessage.ContentMessage::getContent)
+                .map(StreamContentMessage.ContentMessage::getContent)
                 .collect(Collectors.joining(""));
     }
 }

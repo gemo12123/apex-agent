@@ -43,7 +43,6 @@ public class SuperAgentLoopRunner {
         while (loopCount < MAX_ITERATIONS) {
             loopCount++;
 
-            SuperAgentContext.Stage currentLoopOrigStage = context.getCurrentStage();
             StageToolPlan toolPlan = stageToolResolver.resolve(context);
             Prompt promptToLlm = agentPromptAssembler.assemble(context, toolPlan);
 
@@ -51,35 +50,24 @@ public class SuperAgentLoopRunner {
             ChatResponse response = modelResponseStreamer.stream(promptToLlm, context);
             AssistantMessage assistantMessage = response.getResult().getOutput();
 
-            if (currentLoopOrigStage != SuperAgentContext.Stage.MODE_CONFIRMATION) {
-                conversationMemoryManager.appendDialogueMessage(context, assistantMessage);
-            }
+            conversationMemoryManager.appendDialogueMessage(context, assistantMessage);
 
             if (EngineContextHelper.hasToolCalls(assistantMessage)) {
                 ToolResponseMessage interceptRes = toolInterceptor.interceptIllegalToolCalls(context,
                         assistantMessage.getToolCalls());
                 if (interceptRes != null) {
-                    if (currentLoopOrigStage != SuperAgentContext.Stage.MODE_CONFIRMATION) {
-                        conversationMemoryManager.appendDialogueMessage(context, interceptRes);
-                    }
+                    conversationMemoryManager.appendDialogueMessage(context, interceptRes);
                     continue;
                 }
                 ToolCallProcessingResult result = toolCallProcessor.process(promptToLlm, assistantMessage, context,
-                        currentLoopOrigStage);
+                        context.getCurrentStage());
                 if (result.directAnswerTriggered()) {
                     break;
                 }
                 continue;
             }
 
-            if (context.getCurrentStage() == SuperAgentContext.Stage.THINKING) {
-                context.setCurrentStage(SuperAgentContext.Stage.MODE_CONFIRMATION);
-                continue;
-            }
-            if (context.getCurrentStage() == SuperAgentContext.Stage.MODE_CONFIRMATION
-                    || context.getCurrentStage() == SuperAgentContext.Stage.EXECUTION) {
-                break;
-            }
+            break;
         }
 
         if (loopCount >= MAX_ITERATIONS) {

@@ -7,7 +7,6 @@ import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.constant.TaskStatus;
 import org.gemo.apex.context.SuperAgentContext;
 import org.gemo.apex.message.StreamContentMessage;
-import org.gemo.apex.message.StreamThinkMessage;
 import org.gemo.apex.message.TaskThinkChangeMessage;
 import org.gemo.apex.util.MessageUtils;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -54,41 +53,25 @@ public class ModelResponseStreamer {
             }
 
             fullContent.append(output.getText());
-            if (context.getCurrentStage() == SuperAgentContext.Stage.THINKING) {
-                MessageUtils.sendMessage(context, StreamThinkMessage.builder()
-                        .context(EngineContextHelper.buildMessageContext(context,
-                                ContextKeyEnum.CONTENT_ID.getKey(), interactionId))
-                        .messages(List.of(new StreamThinkMessage.ContentMessage(output.getText())))
-                        .build());
-            } else if (context.getCurrentStage() == SuperAgentContext.Stage.EXECUTION) {
-                if (context.getExecutionMode() == ModeEnum.PLAN_EXECUTOR && context.getPlan() != null) {
-                    boolean allCompleted = context.getPlan().getStages() != null
-                            && context.getPlan().getStages().stream()
-                            .allMatch(stage -> stage.getStatus() == TaskStatus.COMPLETED);
-                    if (!allCompleted && context.getCurrentStageId() != null) {
-                        MessageUtils.sendMessage(context, TaskThinkChangeMessage.builder()
-                                .context(EngineContextHelper.buildMessageContext(context,
-                                        ContextKeyEnum.CONTENT_ID.getKey(), interactionId))
-                                .messages(List.of(TaskThinkChangeMessage.TaskThinkChangeDetail.builder()
-                                        .taskId(context.getCurrentStageId())
-                                        .changeType(ChangeType.CONTENT_APPEND.name())
-                                        .content(output.getText())
-                                        .build()))
-                                .build());
-                    } else {
-                        MessageUtils.sendMessage(context, StreamContentMessage.builder()
-                                .context(EngineContextHelper.buildMessageContext(context,
-                                        ContextKeyEnum.CONTENT_ID.getKey(), interactionId))
-                                .messages(List.of(new StreamThinkMessage.ContentMessage(output.getText())))
-                                .build());
-                    }
-                } else if (context.getExecutionMode() == ModeEnum.REACT) {
-                    MessageUtils.sendMessage(context, StreamContentMessage.builder()
+            if (context.getExecutionMode() == ModeEnum.PLAN_EXECUTOR && context.getPlan() != null) {
+                boolean allCompleted = context.getPlan().getStages() != null
+                        && context.getPlan().getStages().stream()
+                        .allMatch(stage -> stage.getStatus() == TaskStatus.COMPLETED);
+                if (!allCompleted && context.getCurrentStageId() != null) {
+                    MessageUtils.sendMessage(context, TaskThinkChangeMessage.builder()
                             .context(EngineContextHelper.buildMessageContext(context,
                                     ContextKeyEnum.CONTENT_ID.getKey(), interactionId))
-                            .messages(List.of(new StreamThinkMessage.ContentMessage(output.getText())))
+                            .messages(List.of(TaskThinkChangeMessage.TaskThinkChangeDetail.builder()
+                                    .taskId(context.getCurrentStageId())
+                                    .changeType(ChangeType.CONTENT_APPEND.name())
+                                    .content(output.getText())
+                                    .build()))
                             .build());
+                } else {
+                    sendStreamContent(context, interactionId, output.getText());
                 }
+            } else if (context.getExecutionMode() == ModeEnum.REACT) {
+                sendStreamContent(context, interactionId, output.getText());
             }
         }, error -> {
             log.error("Stream model response failed: {}", error.getMessage(), error);
@@ -116,5 +99,13 @@ public class ModelResponseStreamer {
             throw new IllegalStateException("Model returned neither content nor tool calls");
         }
         return finalResponseRef.get();
+    }
+
+    private void sendStreamContent(SuperAgentContext context, String interactionId, String content) {
+        MessageUtils.sendMessage(context, StreamContentMessage.builder()
+                .context(EngineContextHelper.buildMessageContext(context,
+                        ContextKeyEnum.CONTENT_ID.getKey(), interactionId))
+                .messages(List.of(new StreamContentMessage.ContentMessage(content)))
+                .build());
     }
 }

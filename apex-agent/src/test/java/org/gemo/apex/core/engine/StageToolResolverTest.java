@@ -20,27 +20,16 @@ class StageToolResolverTest {
     private final StageToolResolver resolver = new StageToolResolver();
 
     @Test
-    void resolveShouldAllowOnlySkillAndDirectAnswerInThinking() {
+    void resolveShouldAllowBusinessToolsAndSkillsInReactExecution() {
         SuperAgentContext context = baseContext();
-        context.setCurrentStage(SuperAgentContext.Stage.THINKING);
+        context.setCurrentStage(SuperAgentContext.Stage.EXECUTION);
+        context.setExecutionMode(ModeEnum.REACT);
 
         StageToolPlan plan = resolver.resolve(context);
 
-        assertEquals(List.of("activate_skill", "direct_answer"),
+        assertEquals(List.of("activate_skill", "ask_human", "meeting_tool"),
                 plan.callableTools().stream().map(tool -> tool.getToolDefinition().name()).toList());
-        assertEquals(List.of("ask_human", "meeting_tool"),
-                plan.promptDescribedTools().stream().map(tool -> tool.getToolDefinition().name()).toList());
-    }
-
-    @Test
-    void resolveShouldAllowOnlyWriteModeInModeConfirmation() {
-        SuperAgentContext context = baseContext();
-        context.setCurrentStage(SuperAgentContext.Stage.MODE_CONFIRMATION);
-
-        StageToolPlan plan = resolver.resolve(context);
-
-        assertEquals(List.of("write_mode"),
-                plan.callableTools().stream().map(tool -> tool.getToolDefinition().name()).toList());
+        assertEquals(List.of(), plan.promptDescribedTools().stream().map(tool -> tool.getToolDefinition().name()).toList());
     }
 
     @Test
@@ -53,6 +42,8 @@ class StageToolResolverTest {
 
         assertEquals(List.of("write_plan_tool"),
                 plan.callableTools().stream().map(tool -> tool.getToolDefinition().name()).toList());
+        assertEquals(List.of("activate_skill", "ask_human", "update_plan_tool", "meeting_tool"),
+                plan.promptDescribedTools().stream().map(tool -> tool.getToolDefinition().name()).toList());
     }
 
     @Test
@@ -66,7 +57,7 @@ class StageToolResolverTest {
 
         StageToolPlan plan = resolver.resolve(context);
 
-        assertEquals(List.of("ask_human", "update_plan_tool", "meeting_tool"),
+        assertEquals(List.of("activate_skill", "ask_human", "update_plan_tool", "meeting_tool"),
                 plan.callableTools().stream().map(tool -> tool.getToolDefinition().name()).toList());
     }
 
@@ -74,9 +65,7 @@ class StageToolResolverTest {
         SuperAgentContext context = new SuperAgentContext();
         context.setAvailableTools(List.of(
                 tool("activate_skill"),
-                tool("direct_answer"),
                 tool("ask_human"),
-                tool("write_mode"),
                 tool("write_plan_tool"),
                 tool("update_plan_tool"),
                 tool("meeting_tool")));

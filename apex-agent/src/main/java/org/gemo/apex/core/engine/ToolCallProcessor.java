@@ -3,15 +3,12 @@ package org.gemo.apex.core.engine;
 import com.alibaba.fastjson.JSON;
 import com.fasterxml.jackson.core.type.TypeReference;
 import org.gemo.apex.constant.AskHumanInteractionType;
-import org.gemo.apex.constant.ContextKeyEnum;
 import org.gemo.apex.constant.ExecutionStatus;
 import org.gemo.apex.constant.ToolNames;
 import org.gemo.apex.context.SuperAgentContext;
 import org.gemo.apex.exception.HumanInTheLoopException;
 import org.gemo.apex.memory.conversation.ConversationMemoryManager;
 import org.gemo.apex.message.AskHumanMessage;
-import org.gemo.apex.message.StreamContentMessage;
-import org.gemo.apex.message.StreamThinkMessage;
 import org.gemo.apex.tool.AskHumanTool;
 import org.gemo.apex.util.JacksonUtils;
 import org.gemo.apex.util.MessageUtils;
@@ -23,7 +20,6 @@ import org.springframework.util.CollectionUtils;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 
 @Component
 public class ToolCallProcessor {
@@ -39,93 +35,47 @@ public class ToolCallProcessor {
 
     public ToolCallProcessingResult process(Prompt input, AssistantMessage assistantMessage,
             SuperAgentContext context, SuperAgentContext.Stage currentLoopOrigStage) {
-        List<AssistantMessage.ToolCall> allToolCalls = assistantMessage.getToolCalls();
         List<AssistantMessage.ToolCall> askHumanCalls = new ArrayList<>();
-        List<AssistantMessage.ToolCall> directAnswerCalls = new ArrayList<>();
         List<AssistantMessage.ToolCall> otherToolCalls = new ArrayList<>();
 
-        for (AssistantMessage.ToolCall toolCall : allToolCalls) {
+        for (AssistantMessage.ToolCall toolCall : assistantMessage.getToolCalls()) {
             if (ToolNames.ASK_HUMAN.equals(toolCall.name())) {
                 askHumanCalls.add(toolCall);
-            } else if (ToolNames.DIRECT_ANSWER.equals(toolCall.name())) {
-                directAnswerCalls.add(toolCall);
             } else {
                 otherToolCalls.add(toolCall);
             }
         }
 
-        if (!directAnswerCalls.isEmpty()) {
-            return processDirectAnswer(input, context, currentLoopOrigStage, directAnswerCalls.getFirst());
-        }
-
         if (!otherToolCalls.isEmpty()) {
-            processOtherTools(input, context, currentLoopOrigStage, otherToolCalls);
+            processOtherTools(input, context, otherToolCalls);
         }
 
         if (!askHumanCalls.isEmpty()) {
-            processAskHuman(context, currentLoopOrigStage, askHumanCalls);
+            processAskHuman(context, askHumanCalls);
         }
 
         return ToolCallProcessingResult.continueLoop();
     }
 
-    private ToolCallProcessingResult processDirectAnswer(Prompt input, SuperAgentContext context,
-            SuperAgentContext.Stage currentLoopOrigStage, AssistantMessage.ToolCall directAnswerCall) {
-        try {
-            ToolResponseMessage responseMessage = agentToolExecutor.execute(input,
-                    AssistantMessage.builder().toolCalls(List.of(directAnswerCall)).build());
-            conversationMemoryManager.appendDialogueMessage(context, responseMessage);
-
-            String answerContent = responseMessage.getResponses().stream()
-                    .filter(resp -> directAnswerCall.id().equals(resp.id()))
-                    .map(ToolResponseMessage.ToolResponse::responseData)
-                    .findFirst()
-                    .map(this::normalizeDirectAnswerContent)
-                    .orElse("");
-            if (!answerContent.isEmpty()) {
-                String interactionId = UUID.randomUUID().toString();
-                MessageUtils.sendMessage(context, StreamContentMessage.builder()
-                        .context(EngineContextHelper.buildMessageContext(context,
-                                ContextKeyEnum.CONTENT_ID.getKey(), interactionId))
-                        .messages(List.of(new StreamThinkMessage.ContentMessage(answerContent)))
-                        .build());
-            }
-        } catch (Exception ex) {
-            if (currentLoopOrigStage != SuperAgentContext.Stage.MODE_CONFIRMATION) {
-                conversationMemoryManager.appendDialogueMessage(context,
-                        ToolResponseMessage.builder()
-                                .responses(List.of(new ToolResponseMessage.ToolResponse(directAnswerCall.id(),
-                                        directAnswerCall.name(), "direct_answer 执行异常: " + ex.getMessage())))
-                                .build());
-            }
-        }
-        return ToolCallProcessingResult.terminateLoop();
-    }
-
     private void processOtherTools(Prompt input, SuperAgentContext context,
-            SuperAgentContext.Stage currentLoopOrigStage, List<AssistantMessage.ToolCall> otherToolCalls) {
+            List<AssistantMessage.ToolCall> otherToolCalls) {
         try {
             ToolResponseMessage responseMessage = agentToolExecutor.execute(input,
                     AssistantMessage.builder().toolCalls(otherToolCalls).build());
-            if (currentLoopOrigStage != SuperAgentContext.Stage.MODE_CONFIRMATION) {
-                conversationMemoryManager.appendDialogueMessage(context, responseMessage);
-            }
+            conversationMemoryManager.appendDialogueMessage(context, responseMessage);
         } catch (Exception ex) {
-            if (currentLoopOrigStage != SuperAgentContext.Stage.MODE_CONFIRMATION) {
-                conversationMemoryManager.appendDialogueMessage(context,
-                        ToolResponseMessage.builder()
-                                .responses(otherToolCalls.stream()
-                                        .map(toolCall -> new ToolResponseMessage.ToolResponse(toolCall.id(),
-                                                toolCall.name(),
-                                                "工具调用异常，请检查参数。错误: " + ex.getMessage()))
-                                        .toList())
-                                .build());
-            }
+            conversationMemoryManager.appendDialogueMessage(context,
+                    ToolResponseMessage.builder()
+                            .responses(otherToolCalls.stream()
+                                    .map(toolCall -> new ToolResponseMessage.ToolResponse(toolCall.id(),
+                                            toolCall.name(),
+                                            "工具调用异常，请检查参数。错误: " + ex.getMessage()))
+                                    .toList())
+                            .build());
         }
     }
 
-    private void processAskHuman(SuperAgentContext context, SuperAgentContext.Stage currentLoopOrigStage,
-            List<AssistantMessage.ToolCall> askHumanCalls) {
+    private void processAskHuman(SuperAgentContext context, List<AssistantMessage.ToolCall> askHumanCalls) {
         boolean hasQuestions = false;
         List<String> allQuestions = new ArrayList<>();
         List<ToolResponseMessage.ToolResponse> errorResponses = new ArrayList<>();
@@ -164,10 +114,8 @@ public class ToolCallProcessor {
         }
 
         if (!errorResponses.isEmpty()) {
-            if (currentLoopOrigStage != SuperAgentContext.Stage.MODE_CONFIRMATION) {
-                conversationMemoryManager.appendDialogueMessage(context,
-                        ToolResponseMessage.builder().responses(errorResponses).build());
-            }
+            conversationMemoryManager.appendDialogueMessage(context,
+                    ToolResponseMessage.builder().responses(errorResponses).build());
             return;
         }
 
@@ -175,16 +123,5 @@ public class ToolCallProcessor {
             context.setExecutionStatus(ExecutionStatus.HUMAN_IN_THE_LOOP);
             throw new HumanInTheLoopException("等待用户输入: " + String.join(", ", allQuestions));
         }
-    }
-
-    private String normalizeDirectAnswerContent(String answerContent) {
-        if (answerContent.startsWith("\"") && answerContent.endsWith("\"") && answerContent.length() >= 2) {
-            try {
-                return JSON.parseObject(answerContent, String.class);
-            } catch (Exception ignore) {
-                return answerContent.substring(1, answerContent.length() - 1);
-            }
-        }
-        return answerContent;
     }
 }

@@ -14,9 +14,6 @@ final class EngineContextHelper {
     }
 
     static Map<String, Object> buildMessageContext(SuperAgentContext context, String... extraEntries) {
-        if (context.getCurrentStage() == SuperAgentContext.Stage.THINKING) {
-            return Map.of();
-        }
         Map<String, Object> map = new HashMap<>();
         map.put(ContextKeyEnum.MODE.getKey(),
                 context.getExecutionMode() != null ? context.getExecutionMode().getMode() : "");

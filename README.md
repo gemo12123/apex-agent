@@ -4,7 +4,7 @@
 
 ## 项目特点
 
-- 三阶段执行链路：`THINKING -> MODE_CONFIRMATION -> EXECUTION`
+- 单阶段执行链路：`EXECUTION`
 - 两种执行模式：`react` 与 `plan-executor`
 - 统一工具体系：内置工具、MCP、SubAgent、Skills
 - 记忆系统：会话持久化、摘要压缩、长期记忆抽取、记忆管理接口
@@ -53,4 +53,3 @@ mvn spring-boot:run
 - 默认记忆存储是 `in-memory`，切换到 `jdbc` 后需先执行 `apex-agent/src/main/resources/db/memory-schema-postgresql.sql`
 - `application.yml` 与 `application-dev.yml` 中的 MCP 和 Skills 路径是示例绝对路径，落地时需要替换为你自己的本地路径
 - 默认模型来自 DashScope，当前配置为 `qwen-plus`
-

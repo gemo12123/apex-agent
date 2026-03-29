@@ -111,9 +111,7 @@ public final class SessionContextEntityConverter {
         context.setSessionId(sessionEntity.getSessionId());
         context.setAgentKey(sessionEntity.getAgentKey());
         context.setUserId(sessionEntity.getUserId());
-        if (sessionEntity.getCurrentStage() != null) {
-            context.setCurrentStage(SuperAgentContext.Stage.valueOf(sessionEntity.getCurrentStage()));
-        }
+        context.setCurrentStage(parseCurrentStage(sessionEntity.getCurrentStage()));
         if (sessionEntity.getExecutionMode() != null) {
             context.setExecutionMode(ModeEnum.valueOf(sessionEntity.getExecutionMode()));
         }
@@ -170,5 +168,22 @@ public final class SessionContextEntityConverter {
             return summaryEntity.getSourceTurnNo();
         }
         return 0;
+    }
+
+    private static SuperAgentContext.Stage parseCurrentStage(String rawValue) {
+        if (rawValue == null) {
+            throw new IllegalStateException("Unsupported current stage: null. Only EXECUTION is supported.");
+        }
+        try {
+            SuperAgentContext.Stage stage = SuperAgentContext.Stage.valueOf(rawValue);
+            if (stage != SuperAgentContext.Stage.EXECUTION) {
+                throw new IllegalStateException(
+                        "Unsupported current stage: " + rawValue + ". Only EXECUTION is supported.");
+            }
+            return stage;
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalStateException(
+                    "Unsupported current stage: " + rawValue + ". Only EXECUTION is supported.", ex);
+        }
     }
 }
