@@ -34,7 +34,7 @@ export function createApexApiClient(): ApexApiClient {
       })
 
       if (!response.ok) {
-        throw new Error(`Failed to load agents: ${response.status}`)
+        throw new Error(`加载代理列表失败（${response.status}）`)
       }
 
       const payload = (await response.json()) as ApiResponse<AgentSummary[]>
@@ -48,7 +48,7 @@ export function createApexApiClient(): ApexApiClient {
         signal,
         async onopen(response) {
           if (!response.ok) {
-            throw new Error(`Stream failed: ${response.status}`)
+            throw new Error(`流式请求失败（${response.status}）`)
           }
         },
         onmessage(event) {

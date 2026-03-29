@@ -261,7 +261,7 @@ function ensureStage(state: SessionViewModel, stageId?: string): StageRecord {
 
   const stage: StageRecord = {
     id: resolvedStageId,
-    name: resolvedStageId === 'react-stage' ? 'Live execution' : 'Execution stage',
+    name: resolvedStageId === 'react-stage' ? '实时执行' : '执行阶段',
     description: '',
     status: 'RUNNING',
     invocations: [],

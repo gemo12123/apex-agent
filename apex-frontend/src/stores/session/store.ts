@@ -86,8 +86,8 @@ export const useSessionStore = defineStore('session', () => {
           : nextAgents[0].agentKey
       }
     } catch (error) {
-      errorMessage.value = error instanceof Error ? error.message : 'Failed to load agents.'
-      agents.value = [{ agentKey: 'default_agent', name: 'Default Agent' }]
+      errorMessage.value = error instanceof Error ? error.message : '加载代理列表失败。'
+      agents.value = [{ agentKey: 'default_agent', name: '默认代理' }]
     } finally {
       isLoadingAgents.value = false
     }
@@ -183,7 +183,7 @@ export const useSessionStore = defineStore('session', () => {
       }
 
       session.value.status = 'error'
-      errorMessage.value = error instanceof Error ? error.message : 'The stream failed.'
+      errorMessage.value = error instanceof Error ? error.message : '流式请求失败。'
     } finally {
       if (activeController.value === controller) {
         activeController.value = null

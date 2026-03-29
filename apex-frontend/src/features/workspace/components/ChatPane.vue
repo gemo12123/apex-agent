@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
 import HumanPromptCard from '@/features/workspace/components/HumanPromptCard.vue'
+import { formatSessionStatus } from '@/features/workspace/presentation'
 import { renderMarkdown } from '@/utils/markdown'
-import type { HumanPromptRecord, MessageRecord } from '@/types/apex'
+import type { HumanPromptRecord, MessageRecord, SessionViewModel } from '@/types/apex'
 
 const props = defineProps<{
   messages: MessageRecord[]
   pendingPrompts: HumanPromptRecord[]
-  status: string
+  status: SessionViewModel['status']
 }>()
 
 const emit = defineEmits<{
@@ -45,10 +46,10 @@ function submitMessage(): void {
   <section class="chat-pane">
     <header class="chat-pane__header">
       <div>
-        <p class="chat-pane__eyebrow">Conversation</p>
-        <h2 class="chat-pane__title">Agent stream</h2>
+        <p class="chat-pane__eyebrow">对话区</p>
+        <h2 class="chat-pane__title">实时输出</h2>
       </div>
-      <span class="status-pill" :class="`status-pill--${props.status}`">{{ props.status }}</span>
+      <span class="status-pill" :class="`status-pill--${props.status}`">{{ formatSessionStatus(props.status) }}</span>
     </header>
 
     <div ref="transcriptRef" class="chat-pane__transcript">
@@ -63,10 +64,10 @@ function submitMessage(): void {
 
           <template v-else>
             <details v-if="message.think" class="chat-message__think">
-              <summary>Reasoning trace</summary>
+              <summary>查看思考过程</summary>
               <div class="markdown" v-html="renderMarkdown(message.think)" />
             </details>
-            <div class="markdown" v-html="renderMarkdown(message.content || '_Streaming response..._')" />
+            <div class="markdown" v-html="renderMarkdown(message.content || '_正在生成回复..._')" />
           </template>
         </div>
       </article>
@@ -86,7 +87,7 @@ function submitMessage(): void {
         v-model="draft"
         class="chat-pane__textarea"
         rows="4"
-        placeholder="Send a new task to Apex..."
+        placeholder="继续输入任务，或补充你想让 Apex 执行的内容。"
         :disabled="props.status === 'streaming' || props.status === 'waiting-human'"
         @keydown.enter.exact.prevent="submitMessage"
       />
@@ -98,7 +99,7 @@ function submitMessage(): void {
           :disabled="props.status !== 'streaming'"
           @click="emit('stop')"
         >
-          Stop stream
+          停止接收
         </button>
         <button
           class="accent-button"
@@ -106,7 +107,7 @@ function submitMessage(): void {
           :disabled="!draft.trim() || props.status === 'streaming' || props.status === 'waiting-human'"
           @click="submitMessage"
         >
-          Send
+          发送
         </button>
       </div>
     </footer>
@@ -119,8 +120,8 @@ function submitMessage(): void {
   grid-template-rows: auto 1fr auto;
   min-height: 0;
   border: 1px solid var(--border-strong);
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.9);
+  border-radius: 20px;
+  background: var(--surface);
   box-shadow: var(--shadow-panel);
 }
 
@@ -129,30 +130,26 @@ function submitMessage(): void {
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  padding: 20px 22px;
+  padding: 18px 20px;
   border-bottom: 1px solid var(--border);
 }
 
 .chat-pane__eyebrow {
   margin: 0 0 6px;
   color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 0.86rem;
 }
 
 .chat-pane__title {
-  margin: 0;
-  font-size: 1.2rem;
+  font-size: 1.16rem;
 }
 
 .chat-pane__transcript {
   min-height: 0;
   overflow: auto;
-  padding: 22px;
+  padding: 20px;
   display: grid;
-  gap: 18px;
+  gap: 16px;
 }
 
 .chat-message {
@@ -165,18 +162,18 @@ function submitMessage(): void {
 
 .chat-message__card {
   max-width: min(78ch, 100%);
-  padding: 16px 18px;
-  border-radius: 20px;
+  padding: 14px 16px;
+  border-radius: 16px;
 }
 
 .chat-message--user .chat-message__card {
-  background: linear-gradient(135deg, var(--accent-strong), var(--accent));
+  background: var(--text-strong);
   color: white;
 }
 
 .chat-message--assistant .chat-message__card {
   border: 1px solid var(--border);
-  background: var(--surface-2);
+  background: var(--surface-subtle);
 }
 
 .chat-message__plain {
@@ -185,15 +182,15 @@ function submitMessage(): void {
 }
 
 .chat-message__think {
-  margin-bottom: 14px;
-  padding-bottom: 14px;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
   border-bottom: 1px dashed var(--border);
 }
 
 .chat-message__think summary {
   cursor: pointer;
   color: var(--text-muted);
-  font-family: var(--font-mono);
+  font-size: 0.92rem;
 }
 
 .chat-pane__prompts {
@@ -202,17 +199,17 @@ function submitMessage(): void {
 }
 
 .chat-pane__composer {
-  padding: 18px 22px 22px;
+  padding: 16px 20px 20px;
   border-top: 1px solid var(--border);
 }
 
 .chat-pane__textarea {
   width: 100%;
-  min-height: 112px;
-  padding: 16px;
+  min-height: 108px;
+  padding: 14px 16px;
   border: 1px solid var(--border);
-  border-radius: 20px;
-  background: var(--surface-2);
+  border-radius: 14px;
+  background: var(--surface-subtle);
   color: var(--text-strong);
   font: inherit;
   resize: vertical;
@@ -221,8 +218,14 @@ function submitMessage(): void {
 
 .chat-pane__actions {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
-  margin-top: 14px;
+  margin-top: 12px;
+}
+
+@media (max-width: 720px) {
+  .chat-pane__actions {
+    flex-direction: column-reverse;
+  }
 }
 </style>

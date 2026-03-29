@@ -55,31 +55,28 @@ function handleHumanPrompt(payload: {
 
     <div v-else class="workspace-page__shell">
       <header class="workspace-page__header">
-        <div>
-          <p class="workspace-page__eyebrow">Apex Workspace</p>
-          <h1 class="workspace-page__headline">Operational view</h1>
+        <div class="workspace-page__intro">
+          <p class="workspace-page__eyebrow">Apex 工作台</p>
+          <h1 class="workspace-page__headline">当前会话</h1>
+          <p class="workspace-page__description">在左侧继续对话，在右侧查看计划、调用和产物。</p>
         </div>
 
         <div class="workspace-page__controls">
           <label class="workspace-page__field">
-            <span>Agent</span>
+            <span>代理</span>
             <select
+              :value="selectedAgentKey"
               class="workspace-page__input"
               @change="sessionStore.setSelectedAgent(($event.target as HTMLSelectElement).value)"
             >
-              <option
-                v-for="agent in agents"
-                :key="agent.agentKey"
-                :value="agent.agentKey"
-                :selected="agent.agentKey === selectedAgentKey"
-              >
+              <option v-for="agent in agents" :key="agent.agentKey" :value="agent.agentKey">
                 {{ agent.name }}
               </option>
             </select>
           </label>
 
           <label class="workspace-page__field">
-            <span>User ID</span>
+            <span>用户 ID</span>
             <input
               :value="userId"
               class="workspace-page__input"
@@ -126,34 +123,44 @@ function handleHumanPrompt(payload: {
 
 .workspace-page__shell {
   min-height: 100vh;
-  padding: 26px;
+  padding: 20px;
 }
 
 .workspace-page__header {
   display: flex;
   justify-content: space-between;
   gap: 20px;
-  align-items: end;
-  padding: 0 4px 20px;
+  align-items: flex-end;
+  margin-bottom: 16px;
+  padding: 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.workspace-page__intro {
+  display: grid;
+  gap: 6px;
 }
 
 .workspace-page__eyebrow {
   margin: 0 0 6px;
   color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 0.84rem;
 }
 
 .workspace-page__headline {
-  margin: 0;
-  font-size: 1.8rem;
+  font-size: 1.56rem;
+}
+
+.workspace-page__description {
+  color: var(--text-soft);
 }
 
 .workspace-page__controls {
   display: flex;
-  gap: 14px;
+  gap: 12px;
 }
 
 .workspace-page__field {
@@ -165,26 +172,26 @@ function handleHumanPrompt(payload: {
 
 .workspace-page__input {
   min-width: 180px;
-  min-height: 44px;
+  min-height: 42px;
   padding: 0 14px;
   border: 1px solid var(--border);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.9);
+  border-radius: 14px;
+  background: var(--surface-subtle);
   color: var(--text-strong);
   font: inherit;
 }
 
 .workspace-page__layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.8fr);
-  gap: 20px;
-  min-height: calc(100vh - 130px);
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+  gap: 16px;
+  min-height: calc(100vh - 152px);
 }
 
 .workspace-page__sidebar {
   display: grid;
   grid-template-rows: minmax(260px, 1fr) minmax(260px, 1fr);
-  gap: 20px;
+  gap: 16px;
   min-height: 0;
 }
 
@@ -192,8 +199,8 @@ function handleHumanPrompt(payload: {
   margin: 0 0 16px;
   padding: 12px 14px;
   border: 1px solid rgba(220, 38, 38, 0.18);
-  border-radius: 16px;
-  background: rgba(254, 242, 242, 0.88);
+  border-radius: 14px;
+  background: #fff3f2;
   color: var(--danger);
 }
 

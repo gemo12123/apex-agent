@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { formatPromptInputType } from '@/features/workspace/presentation'
 import type { HumanPromptRecord } from '@/types/apex'
 
 const props = defineProps<{
@@ -57,7 +58,7 @@ function submit(): void {
 <template>
   <article class="human-prompt-card">
     <header class="human-prompt-card__header">
-      <p class="human-prompt-card__eyebrow">{{ prompt.inputType }}</p>
+      <p class="human-prompt-card__eyebrow">{{ formatPromptInputType(prompt.inputType) }}</p>
       <h3 class="human-prompt-card__title">{{ prompt.question }}</h3>
       <p v-if="prompt.description" class="human-prompt-card__description">{{ prompt.description }}</p>
     </header>
@@ -65,8 +66,8 @@ function submit(): void {
     <div class="human-prompt-card__body">
       <template v-if="prompt.inputType === 'CONFIRM'">
         <div class="human-prompt-card__actions">
-          <button class="ghost-button" type="button" @click="emit('submit', '取消')">Cancel</button>
-          <button class="accent-button" type="button" @click="emit('submit', '确认')">Confirm</button>
+          <button class="ghost-button" type="button" @click="emit('submit', '取消')">取消</button>
+          <button class="accent-button" type="button" @click="emit('submit', '确认')">确认</button>
         </div>
       </template>
 
@@ -94,23 +95,21 @@ function submit(): void {
           </button>
         </div>
 
-        <label class="sr-only" :for="prompt.id">Prompt answer</label>
+        <label class="sr-only" :for="prompt.id">输入回答</label>
         <textarea
           :id="prompt.id"
           v-model="customValue"
           class="human-prompt-card__textarea"
           :placeholder="
             prompt.inputType === 'MULTI_SELECT'
-              ? 'Add an optional custom item...'
-              : 'Type a custom answer if needed...'
+              ? '可补充一个自定义选项...'
+              : '如果需要，也可以直接输入补充说明。'
           "
           rows="3"
         />
 
         <div class="human-prompt-card__actions">
-          <button class="accent-button" type="button" :disabled="!canSubmit" @click="submit">
-            Submit
-          </button>
+          <button class="accent-button" type="button" :disabled="!canSubmit" @click="submit">提交</button>
         </div>
       </template>
     </div>
@@ -120,26 +119,23 @@ function submit(): void {
 <style scoped>
 .human-prompt-card {
   border: 1px solid var(--border-strong);
-  border-radius: 22px;
+  border-radius: 18px;
   background: var(--surface);
   box-shadow: var(--shadow-soft);
 }
 
 .human-prompt-card__header {
-  padding: 18px 18px 0;
+  padding: 16px 16px 0;
 }
 
 .human-prompt-card__eyebrow {
   margin: 0 0 8px;
-  color: var(--accent-strong);
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  color: var(--accent);
+  font-size: 0.84rem;
+  font-weight: 600;
 }
 
 .human-prompt-card__title {
-  margin: 0;
   font-size: 1rem;
 }
 
@@ -150,7 +146,7 @@ function submit(): void {
 }
 
 .human-prompt-card__body {
-  padding: 16px 18px 18px;
+  padding: 14px 16px 16px;
 }
 
 .human-prompt-card__options {
@@ -162,21 +158,18 @@ function submit(): void {
   display: grid;
   gap: 4px;
   width: 100%;
-  padding: 12px 14px;
+  padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 16px;
-  background: var(--surface-2);
+  border-radius: 14px;
+  background: var(--surface-subtle);
   color: var(--text-strong);
   text-align: left;
-  cursor: pointer;
-  transition: border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
 }
 
 .option-chip:hover,
 .option-chip--active {
-  border-color: var(--accent-soft);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-soft);
+  border-color: var(--accent);
+  background: var(--accent-subtle);
 }
 
 .option-chip span {
@@ -189,8 +182,8 @@ function submit(): void {
   margin-top: 14px;
   padding: 14px;
   border: 1px solid var(--border);
-  border-radius: 16px;
-  background: var(--surface-2);
+  border-radius: 14px;
+  background: var(--surface-subtle);
   color: var(--text-strong);
   resize: vertical;
   font: inherit;
