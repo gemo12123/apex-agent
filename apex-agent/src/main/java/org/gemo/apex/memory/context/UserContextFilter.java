@@ -24,12 +24,12 @@ public class UserContextFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
-        String userId = request.getHeader(USER_ID_HEADER);
-        if (!StringUtils.hasText(userId)) {
-            response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Missing required header: " + USER_ID_HEADER);
-            return;
-        }
-
+//        String userId = request.getHeader(USER_ID_HEADER);
+//        if (!StringUtils.hasText(userId)) {
+//            response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Missing required header: " + USER_ID_HEADER);
+//            return;
+//        }
+        String userId = "123";
         UserContextHolder.setUserId(userId);
         try {
             filterChain.doFilter(request, response);

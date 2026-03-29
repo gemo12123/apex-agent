@@ -1,124 +1,78 @@
 package org.gemo.apex.core;
 
-import org.gemo.apex.component.interceptor.ToolInterceptor;
-import org.gemo.apex.component.tool.GlobalToolRegistry;
 import org.gemo.apex.constant.ExecutionStatus;
-import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.context.SuperAgentContext;
-import org.gemo.apex.memory.conversation.ConversationMemoryManager;
-import org.gemo.apex.memory.model.MemoryRecallPackage;
-import org.gemo.apex.memory.recall.MemoryRecallService;
-import org.gemo.apex.memory.session.SessionContextStore;
-import org.gemo.apex.memory.write.MemoryLifecycleManager;
-import org.gemo.apex.service.AgentWorkspaceService;
+import org.gemo.apex.core.engine.ExecutionFinalizer;
+import org.gemo.apex.core.engine.HumanInLoopResumer;
+import org.gemo.apex.core.engine.SuperAgentLoopRunner;
+import org.gemo.apex.exception.HumanInTheLoopException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.springframework.ai.chat.messages.AssistantMessage;
-import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.model.Generation;
-import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.model.tool.ToolCallingManager;
-import reactor.core.publisher.Flux;
-
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
-public class SuperAgentTest {
-
-    @Mock
-    private ChatModel chatModel;
+class SuperAgentTest {
 
     @Mock
-    private ToolInterceptor toolInterceptor;
+    private HumanInLoopResumer humanInLoopResumer;
 
     @Mock
-    private ToolCallingManager toolCallingManager;
+    private SuperAgentLoopRunner superAgentLoopRunner;
 
     @Mock
-    private AgentWorkspaceService agentWorkspaceService;
+    private ExecutionFinalizer executionFinalizer;
 
-    @Mock
-    private ConversationMemoryManager conversationMemoryManager;
-
-    @Mock
-    private MemoryRecallService memoryRecallService;
-
-    @Mock
-    private SessionContextStore sessionContextStore;
-
-    @Mock
-    private MemoryLifecycleManager memoryLifecycleManager;
-
-    @Mock
-    private GlobalToolRegistry globalToolRegistry;
-
-    @InjectMocks
     private SuperAgent superAgent;
 
     @BeforeEach
-    public void setup() {
+    void setUp() {
         MockitoAnnotations.openMocks(this);
-        when(conversationMemoryManager.buildModelMessages(any(SuperAgentContext.class)))
-                .thenReturn(List.of(new UserMessage("hello")));
-        when(memoryRecallService.recall(any(SuperAgentContext.class))).thenReturn(new MemoryRecallPackage());
-        when(agentWorkspaceService.getThinkingPrompt(anyString())).thenReturn("{skills}\n{available_tools_desc}\n{date}");
-        when(agentWorkspaceService.getModeConfirmationPrompt(anyString()))
-                .thenReturn("{skills}\n{available_tools_desc}\n{date}");
-        when(agentWorkspaceService.getReActPrompt(anyString())).thenReturn("{skills}\n{available_tools_desc}\n{date}");
-        when(agentWorkspaceService.getPlanExecutorWritePlanPrompt(anyString()))
-                .thenReturn("{skills}\n{available_tools_desc}\n{date}");
-        when(agentWorkspaceService.getPlanExecutorRunPrompt(anyString()))
-                .thenReturn("{skills}\n{available_tools_desc}\n{date}");
-        when(agentWorkspaceService.getAgentRules(anyString())).thenReturn("");
+        superAgent = new SuperAgent(humanInLoopResumer, superAgentLoopRunner, executionFinalizer);
     }
 
     @Test
-    public void testThinkingStage_EndsWithoutTools() {
+    void executeShouldDelegateAndFinalizeOnSuccess() {
         SuperAgentContext context = new SuperAgentContext();
-        context.setAgentKey("test-agent");
-        context.setCurrentStage(SuperAgentContext.Stage.THINKING);
         context.setExecutionStatus(ExecutionStatus.IN_PROGRESS);
-
-        AssistantMessage msg = new AssistantMessage("I have finished thinking.");
-        ChatResponse response = new ChatResponse(List.of(new Generation(msg)));
-
-        when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.just(response));
 
         superAgent.execute(context);
 
-        assertEquals(SuperAgentContext.Stage.MODE_CONFIRMATION, context.getCurrentStage());
-        verify(chatModel, times(2)).stream(any(Prompt.class));
-        verify(sessionContextStore, times(1)).save(context);
+        verify(humanInLoopResumer).resume(context);
+        verify(superAgentLoopRunner).run(context);
+        verify(executionFinalizer).finalizeTurn(context);
     }
 
     @Test
-    public void testExecutionStage_EndsWithoutTools() {
+    void executeShouldFinalizeOnceAndRethrowWhenHumanInLoop() {
         SuperAgentContext context = new SuperAgentContext();
-        context.setAgentKey("test-agent");
-        context.setCurrentStage(SuperAgentContext.Stage.EXECUTION);
-        context.setExecutionMode(ModeEnum.REACT);
         context.setExecutionStatus(ExecutionStatus.IN_PROGRESS);
+        doAnswer(invocation -> {
+            context.setExecutionStatus(ExecutionStatus.HUMAN_IN_THE_LOOP);
+            throw new HumanInTheLoopException("waiting");
+        }).when(superAgentLoopRunner).run(context);
 
-        AssistantMessage msg = new AssistantMessage("Task completely finished.");
-        ChatResponse response = new ChatResponse(List.of(new Generation(msg)));
+        assertThrows(HumanInTheLoopException.class, () -> superAgent.execute(context));
 
-        when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.just(response));
+        verify(humanInLoopResumer).resume(context);
+        verify(executionFinalizer, times(1)).finalizeTurn(context);
+    }
 
-        superAgent.execute(context);
+    @Test
+    void executeShouldMarkFailedAndFinalizeOnRuntimeException() {
+        SuperAgentContext context = new SuperAgentContext();
+        context.setExecutionStatus(ExecutionStatus.IN_PROGRESS);
+        doThrow(new IllegalStateException("boom")).when(superAgentLoopRunner).run(context);
 
-        assertEquals(SuperAgentContext.Stage.EXECUTION, context.getCurrentStage());
-        verify(chatModel, times(1)).stream(any(Prompt.class));
-        verify(sessionContextStore, times(1)).save(context);
+        assertThrows(IllegalStateException.class, () -> superAgent.execute(context));
+
+        assertEquals(ExecutionStatus.FAILED, context.getExecutionStatus());
+        verify(executionFinalizer).finalizeTurn(context);
     }
 }

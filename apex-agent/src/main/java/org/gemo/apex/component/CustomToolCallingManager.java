@@ -5,7 +5,6 @@ import io.micrometer.observation.ObservationRegistry;
 import org.gemo.apex.constant.ToolContextKeys;
 import org.gemo.apex.context.SuperAgentContext;
 import org.gemo.apex.tool.metadata.CustomToolMetadata;
-import org.gemo.apex.util.ToolExecutionMessageHelper;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -108,17 +107,22 @@ public class CustomToolCallingManager implements ToolCallingManager {
 
     private final ToolExecutionExceptionProcessor toolExecutionExceptionProcessor;
 
+    private final ToolInvocationNotifier toolInvocationNotifier;
+
     private ToolCallingObservationConvention observationConvention = DEFAULT_OBSERVATION_CONVENTION;
 
     public CustomToolCallingManager(ObservationRegistry observationRegistry, ToolCallbackResolver toolCallbackResolver,
-            ToolExecutionExceptionProcessor toolExecutionExceptionProcessor) {
+            ToolExecutionExceptionProcessor toolExecutionExceptionProcessor,
+            ToolInvocationNotifier toolInvocationNotifier) {
         Assert.notNull(observationRegistry, "observationRegistry cannot be null");
         Assert.notNull(toolCallbackResolver, "toolCallbackResolver cannot be null");
         Assert.notNull(toolExecutionExceptionProcessor, "toolCallExceptionConverter cannot be null");
+        Assert.notNull(toolInvocationNotifier, "toolInvocationNotifier cannot be null");
 
         this.observationRegistry = observationRegistry;
         this.toolCallbackResolver = toolCallbackResolver;
         this.toolExecutionExceptionProcessor = toolExecutionExceptionProcessor;
+        this.toolInvocationNotifier = toolInvocationNotifier;
     }
 
     /**
@@ -239,7 +243,7 @@ public class CustomToolCallingManager implements ToolCallingManager {
 
         // 返回工具执行结果
         return ToolExecutionResult.builder()
-                .conversationHistory(List.of(internalToolExecutionResult.toolResponseMessage()))
+                .conversationHistory(conversationHistory)
                 .returnDirect(internalToolExecutionResult.returnDirect())
                 .build();
     }
@@ -419,7 +423,7 @@ public class CustomToolCallingManager implements ToolCallingManager {
             // 生成唯一的 invocation_id
             String invocationId = "invocationId_" + IdUtil.fastSimpleUUID();
 
-            logToolExecutionStart(toolCallback, sessionContext, invocationId);
+            toolInvocationNotifier.beforeExecution(toolCallback, sessionContext, invocationId);
 
             ToolContext finalToolContext = toolContext;
             String toolCallResult = ToolCallingObservationDocumentation.TOOL_CALL
@@ -437,7 +441,7 @@ public class CustomToolCallingManager implements ToolCallingManager {
                     });
 
             // 打印工具执行后的日志并发送 SSE 消息
-            logToolExecutionComplete(toolCallback, sessionContext, invocationId);
+            toolInvocationNotifier.afterExecution(toolCallback, sessionContext, invocationId);
 
             toolResponses.add(new ToolResponseMessage.ToolResponse(toolCall.id(), toolName,
                     toolCallResult != null ? toolCallResult : ""));
@@ -527,85 +531,6 @@ public class CustomToolCallingManager implements ToolCallingManager {
     }
 
     /**
-     * 打印工具执行开始的日志并发送 SSE 消息
-     *
-     * <p>
-     * 根据工具类型（MCP 或 SubAgent）打印不同格式的日志
-     *
-     * @param toolCallback 工具回调对象
-     * @param context      会话上下文，用于发送 SSE 消息
-     */
-    private void logToolExecutionStart(ToolCallback toolCallback, SuperAgentContext context, String invocationId) {
-
-        ToolDefinition toolDefinition = toolCallback.getToolDefinition();
-        String toolName = toolDefinition.name();
-        String toolDescription = toolDefinition.description();
-
-        ToolMetadata toolMetadata = toolCallback.getToolMetadata();
-
-        // 判断是否为 CustomToolMetadata 实例
-        if (toolMetadata instanceof CustomToolMetadata customMetadata) {
-            String type = customMetadata.getType();
-            String name = customMetadata.getName();
-            String description = customMetadata.getDescription();
-
-            // 根据类型打印不同格式的日志
-            if (CustomToolMetadata.ToolMetadataAttribute.TYPE_MCP.equals(type)) {
-                logger.info("正在执行 MCP - {} - {}", toolName, toolDescription);
-                // 发送 SSE 消息给前端
-                ToolExecutionMessageHelper.sendMcpExecutionStart(toolCallback, context, invocationId);
-            } else if (CustomToolMetadata.ToolMetadataAttribute.TYPE_SUB_AGENT.equals(type)) {
-                logger.info("正在执行 SubAgent - {} - {}", name, description);
-            } else {
-                // 未知类型，使用通用格式
-                logger.info("正在执行工具 - {} - {}", name, description);
-            }
-        } else {
-            // 非 CustomToolMetadata 实例，使用工具定义中的信息
-            logger.info("正在执行工具 - {} - {}", toolName, toolDescription);
-        }
-    }
-
-    /**
-     * 打印工具执行完成的日志并发送 SSE 消息
-     *
-     * <p>
-     * 根据工具类型（MCP 或 SubAgent）打印不同格式的日志
-     *
-     * @param toolCallback 工具回调对象
-     * @param context      会话上下文，用于发送 SSE 消息
-     */
-    private void logToolExecutionComplete(ToolCallback toolCallback, SuperAgentContext context, String invocationId) {
-
-        ToolDefinition toolDefinition = toolCallback.getToolDefinition();
-
-        ToolMetadata toolMetadata = toolCallback.getToolMetadata();
-
-        // 判断是否为 CustomToolMetadata 实例
-        if (toolMetadata instanceof CustomToolMetadata customMetadata) {
-            String type = customMetadata.getType();
-            String name = customMetadata.getName();
-            String description = customMetadata.getDescription();
-
-            // 根据类型打印不同格式的日志
-            if (CustomToolMetadata.ToolMetadataAttribute.TYPE_MCP.equals(type)) {
-                logger.info("MCP执行完成 - {} - {}", name, description);
-                // 发送 SSE 消息给前端
-                ToolExecutionMessageHelper.sendMcpExecutionComplete(toolCallback, context, invocationId);
-            } else if (CustomToolMetadata.ToolMetadataAttribute.TYPE_SUB_AGENT.equals(type)) {
-                logger.info("SubAgent执行完成 - {} - {}", name, description);
-            } else {
-                // 未知类型，使用通用格式
-                logger.info("工具执行完成 - {} - {}", name, description);
-            }
-        } else {
-            // 非 CustomToolMetadata 实例，使用工具定义中的信息
-            logger.info("工具执行完成 - {} - {}", toolDefinition.name(), toolDefinition.description());
-        }
-
-    }
-
-    /**
      * CustomToolCallingManager 的构建器
      *
      * <p>
@@ -638,6 +563,8 @@ public class CustomToolCallingManager implements ToolCallingManager {
          * 工具执行异常处理器，用于处理工具执行过程中的异常
          */
         private ToolExecutionExceptionProcessor toolExecutionExceptionProcessor = DEFAULT_TOOL_EXECUTION_EXCEPTION_PROCESSOR;
+
+        private ToolInvocationNotifier toolInvocationNotifier = new DefaultToolInvocationNotifier();
 
         /**
          * 私有构造函数
@@ -679,6 +606,11 @@ public class CustomToolCallingManager implements ToolCallingManager {
             return this;
         }
 
+        public CustomToolCallingManager.Builder toolInvocationNotifier(ToolInvocationNotifier toolInvocationNotifier) {
+            this.toolInvocationNotifier = toolInvocationNotifier;
+            return this;
+        }
+
         /**
          * 构建 CustomToolCallingManager 实例
          *
@@ -686,7 +618,7 @@ public class CustomToolCallingManager implements ToolCallingManager {
          */
         public CustomToolCallingManager build() {
             return new CustomToolCallingManager(this.observationRegistry, this.toolCallbackResolver,
-                    this.toolExecutionExceptionProcessor);
+                    this.toolExecutionExceptionProcessor, this.toolInvocationNotifier);
         }
 
     }
