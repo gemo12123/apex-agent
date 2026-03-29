@@ -1,0 +1,186 @@
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700;800&display=swap');
+
+:root {
+  --page: #edf4ff;
+  --page-deep: #dce8fb;
+  --surface: rgba(255, 255, 255, 0.9);
+  --surface-2: #f8fbff;
+  --text-strong: #0f172a;
+  --text-soft: #425466;
+  --text-muted: #64748b;
+  --border: rgba(148, 163, 184, 0.28);
+  --border-strong: rgba(148, 163, 184, 0.42);
+  --accent: #3b82f6;
+  --accent-strong: #1d4ed8;
+  --accent-soft: rgba(59, 130, 246, 0.32);
+  --success: #059669;
+  --warning: #d97706;
+  --danger: #dc2626;
+  --shadow-panel: 0 32px 80px -48px rgba(15, 23, 42, 0.55);
+  --shadow-soft: 0 18px 32px -28px rgba(15, 23, 42, 0.45);
+  --font-sans: 'Fira Sans', 'Segoe UI', sans-serif;
+  --font-mono: 'Fira Code', Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  color: var(--text-strong);
+  background:
+    radial-gradient(circle at top left, rgba(37, 99, 235, 0.16), transparent 28%),
+    radial-gradient(circle at top right, rgba(14, 165, 233, 0.12), transparent 22%),
+    linear-gradient(180deg, var(--page), var(--page-deep));
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+.accent-button,
+.ghost-button {
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 16px;
+  border: 1px solid transparent;
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease, opacity 180ms ease;
+}
+
+.accent-button {
+  background: linear-gradient(135deg, var(--accent-strong), var(--accent));
+  color: white;
+  font-weight: 700;
+}
+
+.accent-button:hover:enabled,
+.ghost-button:hover:enabled {
+  transform: translateY(-1px);
+}
+
+.accent-button:disabled,
+.ghost-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ghost-button {
+  border-color: var(--border-strong);
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--text-soft);
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.status-pill--idle,
+.status-pill--completed,
+.status-pill--success {
+  background: rgba(5, 150, 105, 0.12);
+  color: var(--success);
+}
+
+.status-pill--streaming,
+.status-pill--active {
+  background: rgba(37, 99, 235, 0.12);
+  color: var(--accent-strong);
+}
+
+.status-pill--waiting-human,
+.status-pill--warning {
+  background: rgba(217, 119, 6, 0.12);
+  color: var(--warning);
+}
+
+.status-pill--aborted,
+.status-pill--error,
+.status-pill--danger {
+  background: rgba(220, 38, 38, 0.12);
+  color: var(--danger);
+}
+
+.markdown {
+  color: var(--text-soft);
+  line-height: 1.72;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown pre,
+.markdown blockquote {
+  margin: 0 0 1em;
+}
+
+.markdown code {
+  padding: 0.12rem 0.4rem;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.06);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+.markdown pre {
+  overflow: auto;
+  padding: 14px;
+  border-radius: 14px;
+  background: #0f172a;
+  color: #e2e8f0;
+}
