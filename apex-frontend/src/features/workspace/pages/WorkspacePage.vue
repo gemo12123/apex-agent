@@ -123,7 +123,7 @@ function handleHumanPrompt(payload: {
 
 .workspace-page__shell {
   min-height: 100vh;
-  padding: 20px;
+  padding: 18px;
 }
 
 .workspace-page__header {
@@ -131,8 +131,8 @@ function handleHumanPrompt(payload: {
   justify-content: space-between;
   gap: 20px;
   align-items: flex-end;
-  margin-bottom: 16px;
-  padding: 18px;
+  margin-bottom: 14px;
+  padding: 16px;
   border: 1px solid var(--border-strong);
   border-radius: 18px;
   background: var(--surface);
@@ -151,7 +151,7 @@ function handleHumanPrompt(payload: {
 }
 
 .workspace-page__headline {
-  font-size: 1.56rem;
+  font-size: 1.42rem;
 }
 
 .workspace-page__description {
@@ -184,14 +184,14 @@ function handleHumanPrompt(payload: {
 .workspace-page__layout {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
-  gap: 16px;
+  gap: 14px;
   min-height: calc(100vh - 152px);
 }
 
 .workspace-page__sidebar {
   display: grid;
   grid-template-rows: minmax(260px, 1fr) minmax(260px, 1fr);
-  gap: 16px;
+  gap: 14px;
   min-height: 0;
 }
 

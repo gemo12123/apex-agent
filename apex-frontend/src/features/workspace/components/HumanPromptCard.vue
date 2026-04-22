@@ -119,13 +119,13 @@ function submit(): void {
 <style scoped>
 .human-prompt-card {
   border: 1px solid var(--border-strong);
-  border-radius: 18px;
+  border-radius: 16px;
   background: var(--surface);
   box-shadow: var(--shadow-soft);
 }
 
 .human-prompt-card__header {
-  padding: 16px 16px 0;
+  padding: 14px 14px 0;
 }
 
 .human-prompt-card__eyebrow {
@@ -136,31 +136,31 @@ function submit(): void {
 }
 
 .human-prompt-card__title {
-  font-size: 1rem;
+  font-size: 0.96rem;
 }
 
 .human-prompt-card__description {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   color: var(--text-soft);
-  line-height: 1.6;
+  line-height: 1.5;
 }
 
 .human-prompt-card__body {
-  padding: 14px 16px 16px;
+  padding: 12px 14px 14px;
 }
 
 .human-prompt-card__options {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .option-chip {
   display: grid;
   gap: 4px;
   width: 100%;
-  padding: 12px;
+  padding: 10px 11px;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--surface-subtle);
   color: var(--text-strong);
   text-align: left;
@@ -179,10 +179,10 @@ function submit(): void {
 
 .human-prompt-card__textarea {
   width: 100%;
-  margin-top: 14px;
-  padding: 14px;
+  margin-top: 12px;
+  padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--surface-subtle);
   color: var(--text-strong);
   resize: vertical;
@@ -194,6 +194,6 @@ function submit(): void {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-  margin-top: 14px;
+  margin-top: 12px;
 }
 </style>

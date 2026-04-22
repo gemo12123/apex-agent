@@ -130,26 +130,28 @@ function submitMessage(): void {
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  padding: 18px 20px;
+  padding: 16px 18px;
   border-bottom: 1px solid var(--border);
 }
 
 .chat-pane__eyebrow {
-  margin: 0 0 6px;
+  margin: 0 0 4px;
   color: var(--text-muted);
-  font-size: 0.86rem;
+  font-size: 0.82rem;
 }
 
 .chat-pane__title {
-  font-size: 1.16rem;
+  font-size: 1.08rem;
 }
 
 .chat-pane__transcript {
   min-height: 0;
   overflow: auto;
-  padding: 20px;
-  display: grid;
-  gap: 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
 }
 
 .chat-message {
@@ -162,8 +164,8 @@ function submitMessage(): void {
 
 .chat-message__card {
   max-width: min(78ch, 100%);
-  padding: 14px 16px;
-  border-radius: 16px;
+  padding: 10px 12px;
+  border-radius: 14px;
 }
 
 .chat-message--user .chat-message__card {
@@ -178,19 +180,19 @@ function submitMessage(): void {
 
 .chat-message__plain {
   white-space: pre-wrap;
-  line-height: 1.7;
+  line-height: 1.65;
 }
 
 .chat-message__think {
-  margin-bottom: 12px;
-  padding-bottom: 12px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
   border-bottom: 1px dashed var(--border);
 }
 
 .chat-message__think summary {
   cursor: pointer;
   color: var(--text-muted);
-  font-size: 0.92rem;
+  font-size: 0.86rem;
 }
 
 .chat-pane__prompts {
@@ -199,14 +201,14 @@ function submitMessage(): void {
 }
 
 .chat-pane__composer {
-  padding: 16px 20px 20px;
+  padding: 14px 18px 18px;
   border-top: 1px solid var(--border);
 }
 
 .chat-pane__textarea {
   width: 100%;
-  min-height: 108px;
-  padding: 14px 16px;
+  min-height: 92px;
+  padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--surface-subtle);
@@ -220,7 +222,7 @@ function submitMessage(): void {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
-  margin-top: 12px;
+  margin-top: 10px;
 }
 
 @media (max-width: 720px) {

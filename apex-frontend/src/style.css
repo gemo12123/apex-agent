@@ -168,7 +168,7 @@ button:focus-visible {
 
 .markdown {
   color: var(--text-soft);
-  line-height: 1.75;
+  line-height: 1.68;
 }
 
 .markdown > :first-child {
@@ -184,7 +184,7 @@ button:focus-visible {
 .markdown ol,
 .markdown pre,
 .markdown blockquote {
-  margin: 0 0 1em;
+  margin: 0 0 0.8em;
 }
 
 .markdown ul,
@@ -202,7 +202,7 @@ button:focus-visible {
 
 .markdown pre {
   overflow: auto;
-  padding: 14px;
+  padding: 12px;
   border-radius: 12px;
   background: #111827;
   color: #e5e7eb;

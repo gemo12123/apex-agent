@@ -87,12 +87,12 @@ const emit = defineEmits<{
 <style scoped>
 .execution-rail {
   display: grid;
-  gap: 14px;
+  gap: 12px;
   min-height: 0;
 }
 
 .execution-rail__header {
-  padding: 16px 18px 0;
+  padding: 12px 14px 0;
 }
 
 .execution-rail__eyebrow,
@@ -104,33 +104,34 @@ const emit = defineEmits<{
 }
 
 .execution-rail__title {
-  font-size: 1.08rem;
+  font-size: 1rem;
 }
 
 .execution-rail__section,
 .stage-card {
   border: 1px solid var(--border-strong);
-  border-radius: 18px;
+  border-radius: 16px;
   background: var(--surface);
   box-shadow: var(--shadow-soft);
 }
 
 .execution-rail__section {
-  padding: 14px;
+  padding: 12px;
 }
 
 .execution-rail__stages {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .stage-card {
-  padding: 16px;
+  padding: 14px;
 }
 
 .stage-card__header {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
   gap: 14px;
 }
 
@@ -140,35 +141,35 @@ const emit = defineEmits<{
 }
 
 .stage-card__description {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   color: var(--text-soft);
-  line-height: 1.6;
+  line-height: 1.5;
 }
 
 .stage-card__group {
-  margin-top: 14px;
+  margin-top: 12px;
 }
 
 .rail-button {
   display: grid;
-  gap: 4px;
+  gap: 2px;
   width: 100%;
-  margin-top: 8px;
-  padding: 12px;
+  margin-top: 6px;
+  padding: 10px 11px;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--surface-subtle);
   color: var(--text-strong);
   text-align: left;
 }
 
 .rail-button strong {
-  font-size: 0.94rem;
+  font-size: 0.9rem;
 }
 
 .rail-button span {
   color: var(--text-soft);
-  font-size: 0.9rem;
+  font-size: 0.84rem;
 }
 
 .rail-button:hover,
@@ -179,9 +180,9 @@ const emit = defineEmits<{
 
 .execution-rail__empty {
   margin: 0;
-  padding: 18px;
+  padding: 14px;
   border: 1px dashed var(--border);
-  border-radius: 18px;
+  border-radius: 16px;
   color: var(--text-soft);
   background: var(--surface-subtle);
 }

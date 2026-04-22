@@ -54,7 +54,7 @@ function downloadArtifact(): void {
   grid-template-rows: auto 1fr;
   min-height: 0;
   border: 1px solid var(--border-strong);
-  border-radius: 20px;
+  border-radius: 18px;
   background: var(--surface);
   box-shadow: var(--shadow-panel);
 }
@@ -64,28 +64,28 @@ function downloadArtifact(): void {
   justify-content: space-between;
   gap: 16px;
   align-items: center;
-  padding: 16px 18px;
+  padding: 14px 16px;
   border-bottom: 1px solid var(--border);
 }
 
 .detail-panel__eyebrow {
-  margin: 0 0 6px;
+  margin: 0 0 4px;
   color: var(--text-muted);
-  font-size: 0.84rem;
+  font-size: 0.8rem;
 }
 
 .detail-panel__title {
-  font-size: 1.08rem;
+  font-size: 1rem;
 }
 
 .detail-panel__body {
   min-height: 0;
   overflow: auto;
-  padding: 18px;
+  padding: 14px 16px;
 }
 
 .detail-panel__empty {
-  padding: 18px;
+  padding: 14px 16px;
   color: var(--text-soft);
 }
 </style>
