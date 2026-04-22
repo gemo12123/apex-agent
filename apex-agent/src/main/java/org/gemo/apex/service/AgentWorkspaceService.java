@@ -3,6 +3,8 @@ package org.gemo.apex.service;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.gemo.apex.config.model.AgentConfig;
+import org.gemo.apex.config.model.AgentHooksConfig;
+import org.gemo.apex.config.model.HookBindingConfig;
 import org.gemo.apex.config.model.McpServerConfig;
 import org.gemo.apex.config.provider.AgentConfigProvider;
 import org.gemo.apex.config.provider.McpConfigProvider;
@@ -22,6 +24,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -132,6 +135,18 @@ public class AgentWorkspaceService {
                 : Collections.emptyList();
     }
 
+    public AgentHooksConfig getHooks(String agentKey) {
+        WorkspaceConfig config = getWorkspaceConfig(agentKey);
+        if (config.isHooksConfigured()) {
+            return config.getHooks();
+        }
+
+        AgentConfig agentConfig = agentConfigProvider.getAgentConfig(agentKey);
+        return agentConfig != null && agentConfig.getHooks() != null
+                ? agentConfig.getHooks()
+                : AgentHooksConfig.empty();
+    }
+
     public McpServerConfig getMcpServerConfig(String mcpKey) {
         return mcpConfigProvider.getMcpConfig(mcpKey);
     }
@@ -200,16 +215,78 @@ public class AgentWorkspaceService {
             if (map.containsKey("default-execution-mode")) {
                 config.setDefaultExecutionMode(parseMode(map.get("default-execution-mode"), agentKey));
             }
+            if (map.containsKey("hooks")) {
+                config.setHooksConfigured(true);
+                config.setHooks(parseHooks(map.get("hooks")));
+            }
 
             log.info(
-                    "Loaded workspace config for agent {}: allowMcps={}, allowSubAgents={}, allowSkills={}, defaultExecutionMode={}",
+                    "Loaded workspace config for agent {}: allowMcps={}, allowSubAgents={}, allowSkills={}, defaultExecutionMode={}, hooksConfigured={}",
                     agentKey, config.getAllowMcps(), config.getAllowSubAgents(), config.getAllowSkills(),
-                    config.getDefaultExecutionMode());
+                    config.getDefaultExecutionMode(), config.isHooksConfigured());
             return config;
         } catch (Exception e) {
             log.error("Failed to parse config.yml for agent {}", agentKey, e);
             return new WorkspaceConfig();
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private AgentHooksConfig parseHooks(Object rawHooks) {
+        if (rawHooks instanceof List<?> list && list.isEmpty()) {
+            return AgentHooksConfig.disabled();
+        }
+
+        if (!(rawHooks instanceof Map<?, ?> hookMap)) {
+            return AgentHooksConfig.empty();
+        }
+
+        return AgentHooksConfig.builder()
+                .preToolCall(parseHookBindings(hookMap.get("pre-tool-call")))
+                .postToolCall(parseHookBindings(hookMap.get("post-tool-call")))
+                .disabled(false)
+                .build();
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<HookBindingConfig> parseHookBindings(Object rawBindings) {
+        if (!(rawBindings instanceof List<?> bindings)) {
+            return Collections.emptyList();
+        }
+
+        return bindings.stream()
+                .filter(Map.class::isInstance)
+                .map(Map.class::cast)
+                .map(this::parseHookBinding)
+                .collect(Collectors.toList());
+    }
+
+    @SuppressWarnings("unchecked")
+    private HookBindingConfig parseHookBinding(Map<?, ?> rawBinding) {
+        Object enabled = rawBinding.get("enabled");
+        Object order = rawBinding.get("order");
+        Object tools = rawBinding.get("tools");
+        Object options = rawBinding.get("options");
+
+        return HookBindingConfig.builder()
+                .bean(rawBinding.get("bean") != null ? String.valueOf(rawBinding.get("bean")) : null)
+                .enabled(enabled == null || Boolean.parseBoolean(String.valueOf(enabled)))
+                .order(order instanceof Number number ? number.intValue() : parseInt(order))
+                .tools(tools instanceof List<?> toolList
+                        ? toolList.stream().map(String::valueOf).toList()
+                        : List.of("*"))
+                .options(options instanceof Map<?, ?> optionMap
+                        ? optionMap.entrySet().stream()
+                                .collect(Collectors.toMap(entry -> String.valueOf(entry.getKey()), Map.Entry::getValue))
+                        : Map.of())
+                .build();
+    }
+
+    private int parseInt(Object rawValue) {
+        if (rawValue == null) {
+            return 0;
+        }
+        return Integer.parseInt(String.valueOf(rawValue).trim());
     }
 
     private ModeEnum parseMode(Object rawValue, String agentKey) {
@@ -232,5 +309,7 @@ public class AgentWorkspaceService {
         private List<String> allowSubAgents = Collections.emptyList();
         private List<String> allowSkills = Collections.emptyList();
         private ModeEnum defaultExecutionMode;
+        private boolean hooksConfigured = false;
+        private AgentHooksConfig hooks = AgentHooksConfig.empty();
     }
 }
