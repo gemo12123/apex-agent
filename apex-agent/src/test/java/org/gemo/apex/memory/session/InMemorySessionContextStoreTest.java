@@ -5,6 +5,9 @@ import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.context.SuperAgentContext;
 import org.gemo.apex.domain.Plan;
 import org.gemo.apex.domain.Stage;
+import org.gemo.apex.domain.interaction.InteractionType;
+import org.gemo.apex.domain.interaction.PendingHumanInteraction;
+import org.gemo.apex.domain.interaction.PendingToolExecution;
 import org.gemo.apex.memory.model.MemoryItem;
 import org.gemo.apex.memory.model.MemoryRecallPackage;
 import org.gemo.apex.memory.persistence.convert.SessionContextEntityConverter;
@@ -120,6 +123,34 @@ class InMemorySessionContextStoreTest {
         assertInstanceOf(SystemMessage.class, reloaded.getLatestCompressedMessage());
         assertEquals(2, reloaded.getDialogueMessages().size());
         assertInstanceOf(AssistantMessage.class, reloaded.getDialogueMessages().get(1));
+    }
+
+    @Test
+    void saveAndLoadShouldPersistPendingConfirmationState() {
+        SuperAgentContext context = buildContext();
+        context.setPendingHumanInteraction(PendingHumanInteraction.builder()
+                .interactionType(InteractionType.TOOL_CONFIRMATION.name())
+                .toolCallId("call-1")
+                .invocationId("invocation-1")
+                .confirmationId("confirm-1")
+                .build());
+        context.setPendingToolExecution(PendingToolExecution.builder()
+                .toolCallId("call-1")
+                .toolName("meeting_tool")
+                .invocationId("invocation-1")
+                .resolvedArguments(Map.of("room", "A1001"))
+                .editableFieldKeys(List.of("room"))
+                .confirmationId("confirm-1")
+                .hookSource("toolConfirmHook")
+                .build());
+
+        store.save(context);
+
+        SuperAgentContext loaded = store.load("session-1").orElseThrow();
+
+        assertEquals("TOOL_CONFIRMATION", loaded.getPendingHumanInteraction().getInteractionType());
+        assertEquals("meeting_tool", loaded.getPendingToolExecution().getToolName());
+        assertEquals(List.of("room"), loaded.getPendingToolExecution().getEditableFieldKeys());
     }
 
     @Test
