@@ -18,6 +18,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -88,5 +89,19 @@ public class DefaultConversationMemoryManagerTest {
         verify(sessionContextStore).appendDialogueMessages("session-1", 2, 12L, List.of(retainedMessage));
         verify(sessionContextStore).compactDialogue("session-1", context.getLatestCompressedMessage(), 12L, 2);
         verify(dialogueSummaryGenerator).generateSummary(latestSummary, List.of(firstUserMessage, firstAssistantMessage));
+    }
+
+    @Test
+    void refreshFixedMessages_ShouldIncludeUserIdAsFixedSystemMessage() {
+        SuperAgentContext context = new SuperAgentContext();
+        context.setUserId("user-123");
+
+        conversationMemoryManager.refreshFixedMessages(context, "stage-system-prompt");
+
+        assertEquals(2, context.getFixedMessages().size());
+        assertInstanceOf(SystemMessage.class, context.getFixedMessages().get(0));
+        assertEquals("stage-system-prompt", context.getFixedMessages().get(0).getText());
+        assertInstanceOf(SystemMessage.class, context.getFixedMessages().get(1));
+        assertTrue(context.getFixedMessages().get(1).getText().contains("user-123"));
     }
 }

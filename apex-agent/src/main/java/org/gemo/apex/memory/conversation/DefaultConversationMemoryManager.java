@@ -43,6 +43,9 @@ public class DefaultConversationMemoryManager implements ConversationMemoryManag
     public void refreshFixedMessages(SuperAgentContext context, String stageSystemPrompt) {
         List<Message> fixedMessages = new ArrayList<>();
         fixedMessages.add(new SystemMessage(stageSystemPrompt));
+        if (context.getUserId() != null && !context.getUserId().isBlank()) {
+            fixedMessages.add(new SystemMessage("Current user id: " + context.getUserId()));
+        }
 
         String recallText = renderRecallText(context.getMemoryRecallPackage());
         if (!recallText.isBlank()) {
