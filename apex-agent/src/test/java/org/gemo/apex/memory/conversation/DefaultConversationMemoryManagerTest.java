@@ -101,7 +101,7 @@ public class DefaultConversationMemoryManagerTest {
         assertEquals(2, context.getFixedMessages().size());
         assertInstanceOf(SystemMessage.class, context.getFixedMessages().get(0));
         assertEquals("stage-system-prompt", context.getFixedMessages().get(0).getText());
-        assertInstanceOf(SystemMessage.class, context.getFixedMessages().get(1));
+        assertInstanceOf(UserMessage.class, context.getFixedMessages().get(1));
         assertTrue(context.getFixedMessages().get(1).getText().contains("user-123"));
     }
 }

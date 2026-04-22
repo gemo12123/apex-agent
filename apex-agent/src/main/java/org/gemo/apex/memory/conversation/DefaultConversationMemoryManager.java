@@ -9,6 +9,7 @@ import org.gemo.apex.memory.session.SessionContextStore;
 import org.gemo.apex.memory.write.MemoryLifecycleManager;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -44,12 +45,12 @@ public class DefaultConversationMemoryManager implements ConversationMemoryManag
         List<Message> fixedMessages = new ArrayList<>();
         fixedMessages.add(new SystemMessage(stageSystemPrompt));
         if (context.getUserId() != null && !context.getUserId().isBlank()) {
-            fixedMessages.add(new SystemMessage("Current user id: " + context.getUserId()));
+            fixedMessages.add(new UserMessage("Current user id: " + context.getUserId()));
         }
 
         String recallText = renderRecallText(context.getMemoryRecallPackage());
         if (!recallText.isBlank()) {
-            fixedMessages.add(new SystemMessage(recallText));
+            fixedMessages.add(new UserMessage(recallText));
         }
         context.setFixedMessages(fixedMessages);
     }
