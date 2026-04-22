@@ -103,6 +103,14 @@ export const useSessionStore = defineStore('session', () => {
     selectedAgentKey.value = agentKey
   }
 
+  function resetSession(): void {
+    activeController.value?.abort()
+    activeController.value = null
+    selection.value = null
+    errorMessage.value = ''
+    session.value = createSessionViewModel()
+  }
+
   async function sendPrompt(query: string): Promise<void> {
     if (!query.trim() || session.value.status === 'streaming') {
       return
@@ -203,6 +211,7 @@ export const useSessionStore = defineStore('session', () => {
     selectedInvocation,
     selectArtifact,
     selectInvocation,
+    resetSession,
     sendPrompt,
     session,
     setSelectedAgent,

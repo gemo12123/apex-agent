@@ -62,6 +62,15 @@ function handleHumanPrompt(payload: {
         </div>
 
         <div class="workspace-page__controls">
+          <button
+            class="workspace-page__home-button ghost-button"
+            type="button"
+            data-testid="back-home"
+            @click="sessionStore.resetSession"
+          >
+            返回首页
+          </button>
+
           <label class="workspace-page__field">
             <span>代理</span>
             <select
@@ -161,6 +170,7 @@ function handleHumanPrompt(payload: {
 .workspace-page__controls {
   display: flex;
   gap: 12px;
+  align-items: flex-end;
 }
 
 .workspace-page__field {
@@ -168,6 +178,10 @@ function handleHumanPrompt(payload: {
   gap: 8px;
   color: var(--text-muted);
   font-size: 0.88rem;
+}
+
+.workspace-page__home-button {
+  white-space: nowrap;
 }
 
 .workspace-page__input {
@@ -216,6 +230,11 @@ function handleHumanPrompt(payload: {
 
   .workspace-page__controls {
     flex-direction: column;
+    align-items: stretch;
+  }
+
+  .workspace-page__home-button {
+    width: 100%;
   }
 
   .workspace-page__layout {
