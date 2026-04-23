@@ -99,7 +99,7 @@ public class GlobalToolRegistry implements DisposableBean {
             for (String skillName : skillNames) {
                 var skillConfig = skillConfigProvider.getSkillConfig(skillName);
                 if (skillConfig != null && skillConfig.getDir() != null) {
-                    loadedSkills.addAll(FileSystemSkillLoader.loadSkills(Path.of(skillConfig.getDir())));
+                    loadedSkills.add(FileSystemSkillLoader.loadSkill(Path.of(skillConfig.getDir())));
                 } else {
                     log.warn("Agent {} missing skill directory config for {}", agentKey, skillName);
                 }
