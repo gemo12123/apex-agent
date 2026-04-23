@@ -1,9 +1,15 @@
-import type { HumanPromptRecord, SessionViewModel } from '@/types/apex'
+import type {
+  HumanPromptRecord,
+  SessionViewModel,
+  ToolConfirmationEditableField,
+  ToolConfirmationRecord,
+} from '@/types/apex'
 
 const sessionStatusLabels: Record<SessionViewModel['status'], string> = {
   idle: '待开始',
   streaming: '处理中',
   'waiting-human': '等待确认',
+  'waiting-confirmation': '等待工具确认',
   completed: '已完成',
   aborted: '已停止',
   error: '异常',
@@ -14,6 +20,21 @@ const promptTypeLabels: Record<HumanPromptRecord['inputType'], string> = {
   SINGLE_SELECT: '单选',
   CONFIRM: '确认',
   MULTI_SELECT: '多选',
+}
+
+const confirmationRiskLabels: Record<string, string> = {
+  LOW: '低风险',
+  MEDIUM: '中风险',
+  HIGH: '高风险',
+}
+
+const editableFieldTypeLabels: Record<ToolConfirmationEditableField['input_type'], string> = {
+  text: '文本',
+  textarea: '长文本',
+  'single-select': '单选',
+  confirm: '确认',
+  date: '日期',
+  datetime: '日期时间',
 }
 
 export function formatSessionStatus(status: SessionViewModel['status']): string {
@@ -66,4 +87,12 @@ export function toneFromStatus(status: string): 'idle' | 'success' | 'active' | 
   }
 
   return 'idle'
+}
+
+export function formatConfirmationRiskLevel(riskLevel: ToolConfirmationRecord['riskLevel']): string {
+  return confirmationRiskLabels[riskLevel.toUpperCase()] ?? riskLevel
+}
+
+export function formatEditableFieldType(type: ToolConfirmationEditableField['input_type']): string {
+  return editableFieldTypeLabels[type] ?? type
 }

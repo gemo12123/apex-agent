@@ -37,6 +37,18 @@ function handleHumanPrompt(payload: {
 }): void {
   void sessionStore.answerPrompt(payload.prompt, payload.answer)
 }
+
+function handleToolConfirmation(payload: {
+  confirmation: (typeof session.value.pendingConfirmations)[number]
+  decision: 'APPROVE' | 'DENY'
+  updatedArgs?: Record<string, unknown>
+}): void {
+  void sessionStore.submitConfirmation(
+    payload.confirmation,
+    payload.decision,
+    payload.updatedArgs ?? {},
+  )
+}
 </script>
 
 <template>
@@ -102,10 +114,12 @@ function handleHumanPrompt(payload: {
         <ChatPane
           :messages="session.messages"
           :pending-prompts="session.pendingPrompts"
+          :pending-confirmations="session.pendingConfirmations"
           :status="session.status"
           @send="handlePromptSubmit"
           @stop="sessionStore.stopStream"
           @submit-prompt="handleHumanPrompt"
+          @submit-confirmation="handleToolConfirmation"
         />
 
         <aside class="workspace-page__sidebar">

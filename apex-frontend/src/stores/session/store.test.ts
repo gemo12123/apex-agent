@@ -154,8 +154,98 @@ describe('useSessionStore', () => {
 
     expect(resumePayload).toEqual({
       'tool-9': {
+        interaction_type: 'ASK_HUMAN',
         answers: {
           '0': '确认',
+        },
+      },
+    })
+    expect(store.session.status).toBe('completed')
+    expect(store.session.messages.at(-1)?.role).toBe('assistant')
+  })
+
+  it('resumes a tool confirmation session with edited arguments', async () => {
+    let resumePayload: ChatRequest['humanResponse']
+    const mockClient: ApexApiClient = {
+      async fetchAgents() {
+        return [{ agentKey: 'default_agent', name: 'Default Agent' }]
+      },
+      async streamChat(request, _userId, _signal, onEnvelope) {
+        if (request.type === 'NEW') {
+          onEnvelope({
+            event_type: 'TOOL_CONFIRMATION',
+            context: { mode: 'react', executor: 'meeting_tool' },
+            messages: [
+              {
+                confirmation_id: 'confirm-1',
+                tool_call_id: 'call-1',
+                invocation_id: 'invocation-1',
+                tool_name: 'meeting_tool',
+                tool_display_name: '会议室助手',
+                title: '预订会议室前确认',
+                description: '请确认会议信息。',
+                risk_level: 'MEDIUM',
+                hook_source: 'toolConfirmHook',
+                editable: true,
+                confirm_label: '确认执行',
+                deny_label: '取消',
+                display_fields: [{ key: 'room', label: '会议室', value: 'A1001', type: 'text' }],
+                editable_fields: [
+                  {
+                    key: 'room',
+                    label: '会议室',
+                    input_type: 'single-select',
+                    value: 'A1001',
+                    required: true,
+                    options: [{ label: 'A1001' }, { label: 'B2001' }],
+                  },
+                ],
+              },
+            ],
+          })
+          onEnvelope({
+            event_type: 'END',
+            context: { mode: 'react' },
+            messages: [],
+          })
+          return
+        }
+
+        resumePayload = request.humanResponse
+        onEnvelope({
+          event_type: 'STREAM_CONTENT',
+          context: { mode: 'react', content_id: 'content-confirmed' },
+          messages: [{ content: 'Tool resumed after confirmation.' }],
+        })
+        onEnvelope({
+          event_type: 'END',
+          context: { mode: 'react' },
+          messages: [],
+        })
+      },
+    }
+
+    setActivePinia(createPinia())
+    setApexApiClientForTesting(mockClient)
+
+    const store = useSessionStore()
+    await store.initialize()
+    await store.sendPrompt('Book the meeting room')
+
+    expect(store.session.status).toBe('waiting-confirmation')
+    expect(store.session.pendingConfirmations).toHaveLength(1)
+
+    await store.submitConfirmation(store.session.pendingConfirmations[0], 'APPROVE', {
+      room: 'B2001',
+    })
+
+    expect(resumePayload).toEqual({
+      'call-1': {
+        interaction_type: 'TOOL_CONFIRMATION',
+        confirmation_id: 'confirm-1',
+        decision: 'APPROVE',
+        updated_args: {
+          room: 'B2001',
         },
       },
     })

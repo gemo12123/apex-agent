@@ -1,10 +1,28 @@
 package org.gemo.apex.component;
 
 import cn.hutool.core.util.IdUtil;
+import com.fasterxml.jackson.core.type.TypeReference;
 import io.micrometer.observation.ObservationRegistry;
+import org.gemo.apex.constant.ContextKeyEnum;
+import org.gemo.apex.constant.ExecutionStatus;
+import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.constant.ToolContextKeys;
 import org.gemo.apex.context.SuperAgentContext;
+import org.gemo.apex.domain.interaction.InteractionType;
+import org.gemo.apex.domain.interaction.PendingHumanInteraction;
+import org.gemo.apex.domain.interaction.PendingToolExecution;
+import org.gemo.apex.exception.HumanInTheLoopException;
+import org.gemo.apex.hook.AgentHookRuntime;
+import org.gemo.apex.hook.NoOpAgentHookRuntime;
+import org.gemo.apex.hook.tool.PostToolCallHookContext;
+import org.gemo.apex.hook.tool.PostToolCallHookResult;
+import org.gemo.apex.hook.tool.PreToolCallHookContext;
+import org.gemo.apex.hook.tool.PreToolCallHookResult;
+import org.gemo.apex.message.InvocationChangeMessage;
+import org.gemo.apex.message.ToolConfirmationMessage;
 import org.gemo.apex.tool.metadata.CustomToolMetadata;
+import org.gemo.apex.util.JacksonUtils;
+import org.gemo.apex.util.MessageUtils;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -109,20 +127,25 @@ public class CustomToolCallingManager implements ToolCallingManager {
 
     private final ToolInvocationNotifier toolInvocationNotifier;
 
+    private final AgentHookRuntime agentHookRuntime;
+
     private ToolCallingObservationConvention observationConvention = DEFAULT_OBSERVATION_CONVENTION;
 
     public CustomToolCallingManager(ObservationRegistry observationRegistry, ToolCallbackResolver toolCallbackResolver,
             ToolExecutionExceptionProcessor toolExecutionExceptionProcessor,
-            ToolInvocationNotifier toolInvocationNotifier) {
+            ToolInvocationNotifier toolInvocationNotifier,
+            AgentHookRuntime agentHookRuntime) {
         Assert.notNull(observationRegistry, "observationRegistry cannot be null");
         Assert.notNull(toolCallbackResolver, "toolCallbackResolver cannot be null");
         Assert.notNull(toolExecutionExceptionProcessor, "toolCallExceptionConverter cannot be null");
         Assert.notNull(toolInvocationNotifier, "toolInvocationNotifier cannot be null");
+        Assert.notNull(agentHookRuntime, "agentHookRuntime cannot be null");
 
         this.observationRegistry = observationRegistry;
         this.toolCallbackResolver = toolCallbackResolver;
         this.toolExecutionExceptionProcessor = toolExecutionExceptionProcessor;
         this.toolInvocationNotifier = toolInvocationNotifier;
+        this.agentHookRuntime = agentHookRuntime;
     }
 
     /**
@@ -422,17 +445,50 @@ public class CustomToolCallingManager implements ToolCallingManager {
                     .get(ToolContextKeys.SESSION_CONTEXT);
             // 生成唯一的 invocation_id
             String invocationId = "invocationId_" + IdUtil.fastSimpleUUID();
+            Map<String, Object> parsedArguments = parseArguments(finalToolInputArguments);
+            Set<String> skippedHookBeans = resolveSkippedHookBeans(toolContext);
 
             toolInvocationNotifier.beforeExecution(toolCallback, sessionContext, invocationId);
 
+            PreToolCallHookResult preResult = agentHookRuntime.runPreHooks(PreToolCallHookContext.builder()
+                    .agentKey(sessionContext != null ? sessionContext.getAgentKey() : null)
+                    .sessionId(sessionContext != null ? sessionContext.getSessionId() : null)
+                    .userId(sessionContext != null ? sessionContext.getUserId() : null)
+                    .toolCallId(toolCall.id())
+                    .invocationId(invocationId)
+                    .toolName(toolName)
+                    .toolDescription(toolCallback.getToolDefinition().description())
+                    .toolType(resolveToolType(toolCallback))
+                    .rawArguments(finalToolInputArguments)
+                    .arguments(new LinkedHashMap<>(parsedArguments))
+                    .skippedHookBeans(skippedHookBeans)
+                    .superAgentContext(sessionContext)
+                    .build());
+
+            Map<String, Object> resolvedArguments = preResult.getUpdatedArgs() != null
+                    ? new LinkedHashMap<>(preResult.getUpdatedArgs())
+                    : new LinkedHashMap<>(parsedArguments);
+
+            if (preResult.getOutcome() == PreToolCallHookResult.Outcome.BLOCK) {
+                toolResponses.add(new ToolResponseMessage.ToolResponse(toolCall.id(), toolName,
+                        preResult.getBlockReason() != null ? preResult.getBlockReason() : ""));
+                continue;
+            }
+
+            if (preResult.getOutcome() == PreToolCallHookResult.Outcome.REQUEST_CONFIRMATION) {
+                suspendForConfirmation(sessionContext, toolCall, toolName, invocationId, resolvedArguments,
+                        preResult.getConfirmationSpec());
+            }
+
             ToolContext finalToolContext = toolContext;
+            String resolvedToolInputArguments = JacksonUtils.toJson(resolvedArguments);
             String toolCallResult = ToolCallingObservationDocumentation.TOOL_CALL
                     .observation(this.observationConvention, DEFAULT_OBSERVATION_CONVENTION, () -> observationContext,
                             this.observationRegistry)
                     .observe(() -> {
                         String toolResult;
                         try {
-                            toolResult = toolCallback.call(finalToolInputArguments, finalToolContext);
+                            toolResult = toolCallback.call(resolvedToolInputArguments, finalToolContext);
                         } catch (ToolExecutionException ex) {
                             toolResult = this.toolExecutionExceptionProcessor.process(ex);
                         }
@@ -441,6 +497,23 @@ public class CustomToolCallingManager implements ToolCallingManager {
                     });
 
             // 打印工具执行后的日志并发送 SSE 消息
+            PostToolCallHookResult postResult = agentHookRuntime.runPostHooks(PostToolCallHookContext.builder()
+                    .agentKey(sessionContext != null ? sessionContext.getAgentKey() : null)
+                    .sessionId(sessionContext != null ? sessionContext.getSessionId() : null)
+                    .userId(sessionContext != null ? sessionContext.getUserId() : null)
+                    .toolCallId(toolCall.id())
+                    .invocationId(invocationId)
+                    .toolName(toolName)
+                    .rawArguments(resolvedToolInputArguments)
+                    .arguments(new LinkedHashMap<>(resolvedArguments))
+                    .originalResult(toolCallResult)
+                    .currentResult(toolCallResult)
+                    .superAgentContext(sessionContext)
+                    .build());
+            if (postResult.getOutcome() == PostToolCallHookResult.Outcome.REPLACE_RESULT) {
+                toolCallResult = postResult.getNextResult();
+            }
+
             toolInvocationNotifier.afterExecution(toolCallback, sessionContext, invocationId);
 
             toolResponses.add(new ToolResponseMessage.ToolResponse(toolCall.id(), toolName,
@@ -482,6 +555,102 @@ public class CustomToolCallingManager implements ToolCallingManager {
         messages.add(assistantMessage);
         messages.add(toolResponseMessage);
         return messages;
+    }
+
+    private Map<String, Object> parseArguments(String rawArguments) {
+        if (!StringUtils.hasText(rawArguments)) {
+            return new LinkedHashMap<>();
+        }
+        try {
+            Map<String, Object> parsed = JacksonUtils.fromJson(rawArguments, new TypeReference<Map<String, Object>>() {
+            });
+            return parsed != null ? new LinkedHashMap<>(parsed) : new LinkedHashMap<>();
+        } catch (Exception ex) {
+            logger.warn("Failed to parse tool arguments: {}", rawArguments, ex);
+            return new LinkedHashMap<>();
+        }
+    }
+
+    private Set<String> resolveSkippedHookBeans(ToolContext toolContext) {
+        Object value = toolContext.getContext().get(ToolContextKeys.SKIP_PRE_HOOK_BEANS);
+        if (value instanceof Collection<?> collection) {
+            LinkedHashSet<String> skipped = new LinkedHashSet<>();
+            for (Object item : collection) {
+                if (item != null && StringUtils.hasText(String.valueOf(item))) {
+                    skipped.add(String.valueOf(item));
+                }
+            }
+            return skipped;
+        }
+        if (value != null && StringUtils.hasText(String.valueOf(value))) {
+            return Set.of(String.valueOf(value));
+        }
+        return Set.of();
+    }
+
+    private String resolveToolType(ToolCallback toolCallback) {
+        ToolMetadata toolMetadata = toolCallback.getToolMetadata();
+        if (toolMetadata instanceof CustomToolMetadata customToolMetadata) {
+            return customToolMetadata.getType();
+        }
+        return null;
+    }
+
+    private void suspendForConfirmation(SuperAgentContext sessionContext,
+            AssistantMessage.ToolCall toolCall,
+            String toolName,
+            String invocationId,
+            Map<String, Object> resolvedArguments,
+            org.gemo.apex.hook.tool.ToolConfirmationSpec confirmationSpec) {
+        Assert.notNull(sessionContext, "sessionContext is required for tool confirmation");
+        Assert.notNull(confirmationSpec, "confirmationSpec is required");
+
+        String hookSource = StringUtils.hasText(confirmationSpec.getHookSource())
+                ? confirmationSpec.getHookSource()
+                : "";
+
+        sessionContext.setPendingHumanInteraction(PendingHumanInteraction.builder()
+                .interactionType(InteractionType.TOOL_CONFIRMATION.name())
+                .toolCallId(toolCall.id())
+                .invocationId(invocationId)
+                .confirmationId(confirmationSpec.getConfirmationId())
+                .build());
+        sessionContext.setPendingToolExecution(PendingToolExecution.builder()
+                .toolCallId(toolCall.id())
+                .toolName(toolName)
+                .invocationId(invocationId)
+                .resolvedArguments(new LinkedHashMap<>(resolvedArguments))
+                .editableFieldKeys(confirmationSpec.editableFieldKeys())
+                .confirmationId(confirmationSpec.getConfirmationId())
+                .hookSource(hookSource)
+                .build());
+        sessionContext.setExecutionStatus(ExecutionStatus.HUMAN_IN_THE_LOOP);
+
+        MessageUtils.sendMessage(sessionContext,
+                ToolConfirmationMessage.from(sessionContext, toolCall, invocationId, confirmationSpec));
+        MessageUtils.sendMessage(sessionContext, InvocationChangeMessage.builder()
+                .context(buildMessageContext(sessionContext, ContextKeyEnum.INVOCATION_ID.getKey(), invocationId))
+                .messages(List.of(InvocationChangeMessage.InvocationChangeDetail.builder()
+                        .changeType("STATUS_CHANGE")
+                        .invocationId(invocationId)
+                        .status("WAITING_CONFIRMATION")
+                        .build()))
+                .build());
+
+        throw new HumanInTheLoopException("waiting for tool confirmation");
+    }
+
+    private Map<String, Object> buildMessageContext(SuperAgentContext context, String... extraEntries) {
+        Map<String, Object> map = new HashMap<>();
+        map.put(ContextKeyEnum.MODE.getKey(),
+                context.getExecutionMode() != null ? context.getExecutionMode().getMode() : "");
+        if (context.getExecutionMode() == ModeEnum.PLAN_EXECUTOR && context.getCurrentStageId() != null) {
+            map.put(ContextKeyEnum.STAGE_ID.getKey(), context.getCurrentStageId());
+        }
+        for (int i = 0; i + 1 < extraEntries.length; i += 2) {
+            map.put(extraEntries[i], extraEntries[i + 1]);
+        }
+        return Map.copyOf(map);
     }
 
     /**
@@ -566,6 +735,8 @@ public class CustomToolCallingManager implements ToolCallingManager {
 
         private ToolInvocationNotifier toolInvocationNotifier = new DefaultToolInvocationNotifier();
 
+        private AgentHookRuntime agentHookRuntime = new NoOpAgentHookRuntime();
+
         /**
          * 私有构造函数
          */
@@ -611,6 +782,11 @@ public class CustomToolCallingManager implements ToolCallingManager {
             return this;
         }
 
+        public CustomToolCallingManager.Builder agentHookRuntime(AgentHookRuntime agentHookRuntime) {
+            this.agentHookRuntime = agentHookRuntime;
+            return this;
+        }
+
         /**
          * 构建 CustomToolCallingManager 实例
          *
@@ -618,7 +794,7 @@ public class CustomToolCallingManager implements ToolCallingManager {
          */
         public CustomToolCallingManager build() {
             return new CustomToolCallingManager(this.observationRegistry, this.toolCallbackResolver,
-                    this.toolExecutionExceptionProcessor, this.toolInvocationNotifier);
+                    this.toolExecutionExceptionProcessor, this.toolInvocationNotifier, this.agentHookRuntime);
         }
 
     }

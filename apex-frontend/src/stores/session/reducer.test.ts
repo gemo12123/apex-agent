@@ -266,12 +266,85 @@ describe('session reducer', () => {
 
     expect(buildHumanResponsePayload(state.pendingPrompts)).toEqual({
       'tool-call-1': {
+        interaction_type: 'ASK_HUMAN',
         answers: {
           '0': 'react',
           '1': 'Keep the workspace responsive.',
         },
       },
     })
+  })
+
+  it('stores tool confirmations and keeps the session waiting-confirmation when the stream ends', () => {
+    let state = createSessionViewModel()
+
+    state = applyEnvelope(state, {
+      event_type: 'TOOL_CONFIRMATION',
+      context: { mode: 'react', executor: 'meeting_tool' },
+      messages: [
+        {
+          confirmation_id: 'confirm-1',
+          tool_call_id: 'call-1',
+          invocation_id: 'invocation-1',
+          tool_name: 'meeting_tool',
+          tool_display_name: '会议室助手',
+          title: '预订会议室前确认',
+          description: '请确认会议信息。',
+          risk_level: 'MEDIUM',
+          hook_source: 'toolConfirmHook',
+          editable: true,
+          confirm_label: '确认执行',
+          deny_label: '取消',
+          display_fields: [{ key: 'room', label: '会议室', value: 'A1001', type: 'text' }],
+          editable_fields: [
+            {
+              key: 'room',
+              label: '会议室',
+              input_type: 'single-select',
+              value: 'A1001',
+              required: true,
+              options: [{ label: 'A1001' }, { label: 'B2001' }],
+            },
+          ],
+        },
+      ],
+    } satisfies SseEnvelope)
+
+    state = applyEnvelope(state, {
+      event_type: 'END',
+      context: { mode: 'react' },
+      messages: [],
+    } satisfies SseEnvelope)
+
+    expect(state.pendingConfirmations).toEqual([
+      {
+        id: 'call-1:confirm-1',
+        confirmationId: 'confirm-1',
+        toolCallId: 'call-1',
+        invocationId: 'invocation-1',
+        toolName: 'meeting_tool',
+        toolDisplayName: '会议室助手',
+        title: '预订会议室前确认',
+        description: '请确认会议信息。',
+        riskLevel: 'MEDIUM',
+        hookSource: 'toolConfirmHook',
+        editable: true,
+        confirmLabel: '确认执行',
+        denyLabel: '取消',
+        displayFields: [{ key: 'room', label: '会议室', value: 'A1001', type: 'text' }],
+        editableFields: [
+          {
+            key: 'room',
+            label: '会议室',
+            input_type: 'single-select',
+            value: 'A1001',
+            required: true,
+            options: [{ label: 'A1001' }, { label: 'B2001' }],
+          },
+        ],
+      },
+    ])
+    expect(state.status).toBe('waiting-confirmation')
   })
 
   it('marks the session as waiting-human or completed when the stream ends', () => {

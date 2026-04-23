@@ -59,7 +59,7 @@ const emit = defineEmits<{
             @click="emit('select-invocation', { stageId: stage.id, invocationId: invocation.id })"
           >
             <strong>{{ invocation.name }}</strong>
-            <span>{{ invocation.invocationType }}</span>
+            <span>{{ invocation.invocationType }} · {{ formatRuntimeStatus(invocation.status) }}</span>
           </button>
         </div>
 

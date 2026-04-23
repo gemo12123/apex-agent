@@ -61,6 +61,14 @@ public class DefaultAgentHookRuntime implements AgentHookRuntime {
                 }
                 continue;
             }
+            if (result.getOutcome() == PreToolCallHookResult.Outcome.REQUEST_CONFIRMATION
+                    && result.getUpdatedArgs() == null) {
+                return PreToolCallHookResult.builder()
+                        .outcome(PreToolCallHookResult.Outcome.REQUEST_CONFIRMATION)
+                        .updatedArgs(new LinkedHashMap<>(currentArguments))
+                        .confirmationSpec(result.getConfirmationSpec())
+                        .build();
+            }
             return result;
         }
 

@@ -20,7 +20,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -90,6 +92,39 @@ class ToolCallProcessorTest {
                         SuperAgentContext.Stage.EXECUTION));
 
         assertTrue(emitter.payloads.stream().anyMatch(payload -> payload.contains("ASK_HUMAN")));
+    }
+
+    @Test
+    void processShouldAppendCompletedResponsesBeforeLaterToolSuspends() {
+        SuperAgentContext context = new SuperAgentContext();
+        context.setCurrentStage(SuperAgentContext.Stage.EXECUTION);
+
+        AssistantMessage.ToolCall firstToolCall =
+                new AssistantMessage.ToolCall("call-1", "function", "contacts_tool", "{}");
+        AssistantMessage.ToolCall secondToolCall =
+                new AssistantMessage.ToolCall("call-2", "function", "meeting_tool", "{}");
+
+        when(agentToolExecutor.execute(any(Prompt.class), argThat(message ->
+                message.getToolCalls().size() == 1
+                        && "contacts_tool".equals(message.getToolCalls().getFirst().name()))))
+                .thenReturn(ToolResponseMessage.builder()
+                        .responses(List.of(new ToolResponseMessage.ToolResponse("call-1", "contacts_tool", "done")))
+                        .build());
+
+        when(agentToolExecutor.execute(any(Prompt.class), argThat(message ->
+                message.getToolCalls().size() == 1
+                        && "meeting_tool".equals(message.getToolCalls().getFirst().name()))))
+                .thenThrow(new HumanInTheLoopException("waiting for confirmation"));
+
+        assertThrows(HumanInTheLoopException.class,
+                () -> toolCallProcessor.process(new Prompt(List.of()),
+                        AssistantMessage.builder().toolCalls(List.of(firstToolCall, secondToolCall)).build(),
+                        context,
+                        SuperAgentContext.Stage.EXECUTION));
+
+        verify(conversationMemoryManager).appendDialogueMessage(eq(context), argThat((ToolResponseMessage response) ->
+                response.getResponses().size() == 1
+                        && "call-1".equals(response.getResponses().getFirst().id())));
     }
 
     private static class CapturingSseEmitter extends SseEmitter {
