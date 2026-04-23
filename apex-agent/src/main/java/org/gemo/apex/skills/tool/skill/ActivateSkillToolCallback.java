@@ -1,17 +1,19 @@
-package org.gemo.apex.tool.skills;
+package org.gemo.apex.skills.tool.skill;
 
+import org.gemo.apex.skills.definition.skill.Skill;
+import org.gemo.apex.skills.tool.AbstractSkillToolCallback;
 import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.ai.tool.metadata.ToolMetadata;
 
 import java.util.Map;
 import java.util.stream.Collectors;
 
-final class ActivateSkillToolCallback extends AbstractSkillToolCallback {
+public final class ActivateSkillToolCallback extends AbstractSkillToolCallback {
 
     private final ActivateSkillToolConfig config;
     private final Map<String, Skill> skillsByName;
 
-    ActivateSkillToolCallback(ActivateSkillToolConfig config, Map<String, Skill> skillsByName) {
+    public ActivateSkillToolCallback(ActivateSkillToolConfig config, Map<String, Skill> skillsByName) {
         super(
                 ToolDefinition.builder()
                         .name(config.name)

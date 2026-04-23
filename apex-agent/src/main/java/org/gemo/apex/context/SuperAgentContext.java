@@ -6,7 +6,7 @@ import org.gemo.apex.constant.ExecutionStatus;
 import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.domain.Plan;
 import org.gemo.apex.memory.model.MemoryRecallPackage;
-import org.gemo.apex.tool.skills.Skills;
+import org.gemo.apex.skills.Skills;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;

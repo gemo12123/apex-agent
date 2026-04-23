@@ -1,4 +1,4 @@
-package org.gemo.apex.tool.skills;
+package org.gemo.apex.skills.tool.skill;
 
 public final class ActivateSkillToolConfig {
 

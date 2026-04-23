@@ -1,16 +1,17 @@
-package org.gemo.apex.tool.skills;
+package org.gemo.apex.skills.tool;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.gemo.apex.skills.support.Validators;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.ai.tool.metadata.ToolMetadata;
 
 import java.util.Map;
 
-abstract class AbstractSkillToolCallback implements ToolCallback {
+public abstract class AbstractSkillToolCallback implements ToolCallback {
 
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };

@@ -1,4 +1,7 @@
-package org.gemo.apex.tool.skills;
+package org.gemo.apex.skills.definition.skill;
+
+import org.gemo.apex.skills.definition.skill.impl.DefaultSkill;
+import org.gemo.apex.skills.definition.resource.SkillResource;
 
 import java.util.List;
 

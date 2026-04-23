@@ -1,4 +1,7 @@
-package org.gemo.apex.tool.skills;
+package org.gemo.apex.skills.tool.resource;
+
+import org.gemo.apex.skills.definition.skill.Skill;
+import org.gemo.apex.skills.definition.resource.SkillResource;
 
 import java.util.List;
 import java.util.function.Function;
@@ -17,14 +20,14 @@ public final class ReadResourceToolConfig {
                     .map(SkillResource::relativePath)
                     .orElse("references/example.txt");
 
-    final String name;
-    final String description;
-    final String skillNameParameterName;
-    final String skillNameParameterDescription;
-    final String relativePathParameterName;
-    final String relativePathParameterDescription;
-    final Function<List<? extends Skill>, String> relativePathParameterDescriptionProvider;
-    final boolean returnDirect;
+    public final String name;
+    public final String description;
+    public final String skillNameParameterName;
+    public final String skillNameParameterDescription;
+    public final String relativePathParameterName;
+    public final String relativePathParameterDescription;
+    public final Function<List<? extends Skill>, String> relativePathParameterDescriptionProvider;
+    public final boolean returnDirect;
 
     private ReadResourceToolConfig(Builder builder) {
         this.name = builder.name == null ? DEFAULT_NAME : builder.name;

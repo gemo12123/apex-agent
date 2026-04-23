@@ -1,5 +1,11 @@
-package org.gemo.apex.tool.skills;
+package org.gemo.apex.skills;
 
+import org.gemo.apex.skills.definition.skill.Skill;
+import org.gemo.apex.skills.support.Validators;
+import org.gemo.apex.skills.tool.resource.ReadResourceToolCallback;
+import org.gemo.apex.skills.tool.resource.ReadResourceToolConfig;
+import org.gemo.apex.skills.tool.skill.ActivateSkillToolCallback;
+import org.gemo.apex.skills.tool.skill.ActivateSkillToolConfig;
 import org.springframework.ai.tool.StaticToolCallbackProvider;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;

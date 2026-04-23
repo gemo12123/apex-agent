@@ -1,4 +1,6 @@
-package org.gemo.apex.tool.skills;
+package org.gemo.apex.skills.definition.skill;
+
+import org.gemo.apex.skills.definition.skill.impl.DefaultFileSystemSkill;
 
 import java.nio.file.Path;
 

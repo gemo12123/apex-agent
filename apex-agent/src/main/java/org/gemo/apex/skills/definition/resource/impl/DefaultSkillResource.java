@@ -1,4 +1,7 @@
-package org.gemo.apex.tool.skills;
+package org.gemo.apex.skills.definition.resource.impl;
+
+import org.gemo.apex.skills.definition.resource.SkillResource;
+import org.gemo.apex.skills.support.Validators;
 
 import java.util.Objects;
 

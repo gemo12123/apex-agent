@@ -1,5 +1,8 @@
-package org.gemo.apex.tool.skills;
+package org.gemo.apex.skills.tool.resource;
 
+import org.gemo.apex.skills.definition.skill.Skill;
+import org.gemo.apex.skills.definition.resource.SkillResource;
+import org.gemo.apex.skills.tool.AbstractSkillToolCallback;
 import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.ai.tool.metadata.ToolMetadata;
 
@@ -7,12 +10,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-final class ReadResourceToolCallback extends AbstractSkillToolCallback {
+public final class ReadResourceToolCallback extends AbstractSkillToolCallback {
 
     private final ReadResourceToolConfig config;
     private final Map<String, Skill> skillsByName;
 
-    ReadResourceToolCallback(ReadResourceToolConfig config, Map<String, Skill> skillsByName,
+    public ReadResourceToolCallback(ReadResourceToolConfig config, Map<String, Skill> skillsByName,
             String relativePathDescription) {
         super(
                 ToolDefinition.builder()

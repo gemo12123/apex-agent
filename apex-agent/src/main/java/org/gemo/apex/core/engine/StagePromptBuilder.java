@@ -5,7 +5,7 @@ import org.gemo.apex.constant.Constant;
 import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.context.SuperAgentContext;
 import org.gemo.apex.service.AgentWorkspaceService;
-import org.gemo.apex.tool.skills.Skills;
+import org.gemo.apex.skills.Skills;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Component;
 

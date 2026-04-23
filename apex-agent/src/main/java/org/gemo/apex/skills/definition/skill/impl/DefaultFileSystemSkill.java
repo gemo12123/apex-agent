@@ -1,4 +1,8 @@
-package org.gemo.apex.tool.skills;
+package org.gemo.apex.skills.definition.skill.impl;
+
+import org.gemo.apex.skills.definition.skill.AbstractSkill;
+import org.gemo.apex.skills.definition.skill.FileSystemSkill;
+import org.gemo.apex.skills.support.Validators;
 
 import java.nio.file.Path;
 import java.util.Objects;

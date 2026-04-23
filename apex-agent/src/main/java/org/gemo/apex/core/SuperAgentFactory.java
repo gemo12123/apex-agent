@@ -10,7 +10,7 @@ import org.gemo.apex.memory.context.UserContextHolder;
 import org.gemo.apex.memory.recall.MemoryRecallService;
 import org.gemo.apex.memory.session.SessionContextStore;
 import org.gemo.apex.service.AgentWorkspaceService;
-import org.gemo.apex.tool.skills.Skills;
+import org.gemo.apex.skills.Skills;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Autowired;

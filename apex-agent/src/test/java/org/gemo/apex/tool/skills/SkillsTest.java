@@ -1,5 +1,8 @@
 package org.gemo.apex.tool.skills;
 
+import org.gemo.apex.skills.Skills;
+import org.gemo.apex.skills.definition.skill.Skill;
+import org.gemo.apex.skills.loader.FileSystemSkillLoader;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.ai.tool.ToolCallback;

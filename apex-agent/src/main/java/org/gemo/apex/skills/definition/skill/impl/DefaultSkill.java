@@ -1,4 +1,6 @@
-package org.gemo.apex.tool.skills;
+package org.gemo.apex.skills.definition.skill.impl;
+
+import org.gemo.apex.skills.definition.skill.AbstractSkill;
 
 public final class DefaultSkill extends AbstractSkill {
 

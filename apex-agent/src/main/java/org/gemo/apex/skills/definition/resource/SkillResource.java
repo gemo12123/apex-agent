@@ -1,4 +1,6 @@
-package org.gemo.apex.tool.skills;
+package org.gemo.apex.skills.definition.resource;
+
+import org.gemo.apex.skills.definition.resource.impl.DefaultSkillResource;
 
 public interface SkillResource {
 

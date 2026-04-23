@@ -1,9 +1,12 @@
-package org.gemo.apex.tool.skills;
+package org.gemo.apex.skills.loader;
 
 import org.commonmark.ext.front.matter.YamlFrontMatterExtension;
 import org.commonmark.ext.front.matter.YamlFrontMatterVisitor;
 import org.commonmark.node.Node;
 import org.commonmark.parser.Parser;
+import org.gemo.apex.skills.definition.resource.impl.DefaultSkillResource;
+import org.gemo.apex.skills.definition.skill.FileSystemSkill;
+import org.gemo.apex.skills.definition.resource.SkillResource;
 
 import java.io.IOException;
 import java.nio.file.Files;

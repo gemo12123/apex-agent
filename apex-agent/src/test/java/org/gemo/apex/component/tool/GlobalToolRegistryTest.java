@@ -5,7 +5,7 @@ import org.gemo.apex.config.provider.SkillConfigProvider;
 import org.gemo.apex.constant.ToolContextKeys;
 import org.gemo.apex.context.SuperAgentContext;
 import org.gemo.apex.service.AgentWorkspaceService;
-import org.gemo.apex.tool.skills.Skills;
+import org.gemo.apex.skills.Skills;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

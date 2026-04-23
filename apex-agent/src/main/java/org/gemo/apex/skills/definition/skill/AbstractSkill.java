@@ -1,4 +1,7 @@
-package org.gemo.apex.tool.skills;
+package org.gemo.apex.skills.definition.skill;
+
+import org.gemo.apex.skills.definition.resource.SkillResource;
+import org.gemo.apex.skills.support.Validators;
 
 import java.util.Collection;
 import java.util.HashSet;
@@ -6,7 +9,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
-abstract class AbstractSkill implements Skill {
+public abstract class AbstractSkill implements Skill {
 
     private final String name;
     private final String description;
@@ -70,7 +73,7 @@ abstract class AbstractSkill implements Skill {
         }
     }
 
-    abstract static class BaseBuilder<B extends BaseBuilder<B>> {
+    protected abstract static class BaseBuilder<B extends BaseBuilder<B>> {
 
         private String name;
         private String description;
