@@ -10,7 +10,7 @@ import org.gemo.apex.memory.context.UserContextHolder;
 import org.gemo.apex.memory.recall.MemoryRecallService;
 import org.gemo.apex.memory.session.SessionContextStore;
 import org.gemo.apex.service.AgentWorkspaceService;
-import org.gemo.apex.tool.skills.CustomSkillsTool;
+import org.gemo.apex.tool.skills.Skills;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -148,7 +149,7 @@ public class SuperAgentFactory {
 
     private void prepareRuntimeContext(SuperAgentContext context, String agentKey) {
         context.setAvailableTools(new java.util.ArrayList<>());
-        context.setCustomSkillsTool(null);
+        context.setSkills(null);
 
         List<ToolCallback> builtInTools = builtInToolProvider.getBuiltInTools();
         context.getAvailableTools().addAll(builtInTools);
@@ -159,10 +160,10 @@ public class SuperAgentFactory {
         List<ToolCallback> subAgentTools = globalToolRegistry.getSubAgentToolCallbacks(agentKey);
         context.getAvailableTools().addAll(subAgentTools);
 
-        CustomSkillsTool customSkillsTool = globalToolRegistry.getSkillsTool(agentKey);
-        if (customSkillsTool != null) {
-            context.getAvailableTools().add(customSkillsTool.getToolCallback());
-            context.setCustomSkillsTool(customSkillsTool);
+        Skills skills = globalToolRegistry.getSkillsTool(agentKey);
+        if (skills != null) {
+            context.getAvailableTools().addAll(Arrays.asList(skills.toolCallbacks()));
+            context.setSkills(skills);
         }
     }
 

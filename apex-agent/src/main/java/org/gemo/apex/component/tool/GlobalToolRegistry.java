@@ -12,7 +12,9 @@ import org.gemo.apex.config.provider.SkillConfigProvider;
 import org.gemo.apex.constant.CacheKeys;
 import org.gemo.apex.constant.ToolContextKeys;
 import org.gemo.apex.service.AgentWorkspaceService;
-import org.gemo.apex.tool.skills.CustomSkillsTool;
+import org.gemo.apex.tool.skills.FileSystemSkill;
+import org.gemo.apex.tool.skills.FileSystemSkillLoader;
+import org.gemo.apex.tool.skills.Skills;
 import org.springframework.ai.mcp.SyncMcpToolCallbackProvider;
 import org.springframework.ai.mcp.ToolContextToMcpMetaConverter;
 import org.springframework.ai.tool.ToolCallback;
@@ -30,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.nio.file.Path;
 
 @Slf4j
 @Component
@@ -46,7 +49,7 @@ public class GlobalToolRegistry implements DisposableBean {
     private SubAgentToolCallbackProvider subAgentToolCallbackProvider;
 
     private final Map<String, List<ToolCallback>> mcpToolCache = new ConcurrentHashMap<>();
-    private final Map<String, CustomSkillsTool> skillsCache = new ConcurrentHashMap<>();
+    private final Map<String, Skills> skillsCache = new ConcurrentHashMap<>();
     private final List<McpSyncClient> createdClients = new CopyOnWriteArrayList<>();
 
     public List<ToolCallback> getMcpToolCallbacks(String agentKey) {
@@ -78,8 +81,8 @@ public class GlobalToolRegistry implements DisposableBean {
         return result;
     }
 
-    public CustomSkillsTool getSkillsTool(String agentKey) {
-        CustomSkillsTool cached = skillsCache.get(agentKey);
+    public Skills getSkillsTool(String agentKey) {
+        Skills cached = skillsCache.get(agentKey);
         if (cached != null) {
             return cached;
         }
@@ -91,25 +94,23 @@ public class GlobalToolRegistry implements DisposableBean {
         }
 
         try {
-            CustomSkillsTool.Builder builder = CustomSkillsTool.builder();
-            boolean hasValidSkills = false;
+            List<FileSystemSkill> loadedSkills = new ArrayList<>();
 
             for (String skillName : skillNames) {
                 var skillConfig = skillConfigProvider.getSkillConfig(skillName);
                 if (skillConfig != null && skillConfig.getDir() != null) {
-                    builder.addSkillsDirectory(skillConfig.getDir());
-                    hasValidSkills = true;
+                    loadedSkills.addAll(FileSystemSkillLoader.loadSkills(Path.of(skillConfig.getDir())));
                 } else {
                     log.warn("Agent {} missing skill directory config for {}", agentKey, skillName);
                 }
             }
 
-            if (!hasValidSkills) {
+            if (loadedSkills.isEmpty()) {
                 log.warn("Agent {} has no valid skill directories", agentKey);
                 return null;
             }
 
-            CustomSkillsTool tool = builder.build();
+            Skills tool = Skills.from(loadedSkills);
             log.info("Agent {} loaded skills {}", agentKey, skillNames);
             skillsCache.put(agentKey, tool);
             return tool;

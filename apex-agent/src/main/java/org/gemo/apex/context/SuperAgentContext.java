@@ -6,7 +6,7 @@ import org.gemo.apex.constant.ExecutionStatus;
 import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.domain.Plan;
 import org.gemo.apex.memory.model.MemoryRecallPackage;
-import org.gemo.apex.tool.skills.CustomSkillsTool;
+import org.gemo.apex.tool.skills.Skills;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -42,7 +42,7 @@ public class SuperAgentContext {
      * 该 Agent 绑定的技能工具实例。
      */
     @JsonIgnore
-    private CustomSkillsTool customSkillsTool;
+    private Skills skills;
 
     /**
      * 不参与压缩的固定消息，如系统提示词、记忆注入消息和环境信息。

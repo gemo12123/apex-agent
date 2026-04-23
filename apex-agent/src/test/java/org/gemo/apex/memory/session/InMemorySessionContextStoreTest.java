@@ -11,7 +11,8 @@ import org.gemo.apex.memory.persistence.convert.SessionContextEntityConverter;
 import org.gemo.apex.memory.persistence.entity.AgentSessionDialogueMessageEntity;
 import org.gemo.apex.memory.persistence.entity.AgentSessionDialogueSummaryEntity;
 import org.gemo.apex.memory.persistence.entity.AgentSessionEntity;
-import org.gemo.apex.tool.skills.CustomSkillsTool;
+import org.gemo.apex.tool.skills.Skill;
+import org.gemo.apex.tool.skills.Skills;
 import org.gemo.apex.util.JacksonUtils;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -72,7 +73,7 @@ class InMemorySessionContextStoreTest {
         context.setDialogueMessages(new ArrayList<>(List.of(new UserMessage("dialogue-mutated"))));
         context.setFixedMessages(new ArrayList<>(List.of(new SystemMessage("fixed-mutated"))));
         context.setAvailableTools(new ArrayList<>());
-        context.setCustomSkillsTool(null);
+        context.setSkills(null);
         context.setMemoryRecallPackage(new MemoryRecallPackage());
         context.setSseEmitter(null);
 
@@ -104,7 +105,7 @@ class InMemorySessionContextStoreTest {
         assertInstanceOf(AssistantMessage.class, loaded.getDialogueMessages().get(1));
         assertTrue(loaded.getFixedMessages().isEmpty());
         assertTrue(loaded.getAvailableTools().isEmpty());
-        assertNull(loaded.getCustomSkillsTool());
+        assertNull(loaded.getSkills());
         assertTrue(loaded.getMemoryRecallPackage().getProfileItems().isEmpty());
         assertNull(loaded.getSseEmitter());
 
@@ -223,7 +224,11 @@ class InMemorySessionContextStoreTest {
         context.setPlan(buildPlan());
         context.setFixedMessages(new ArrayList<>(List.of(new SystemMessage("fixed-1"))));
         context.setAvailableTools(new ArrayList<>(List.of(mock(ToolCallback.class))));
-        context.setCustomSkillsTool(mock(CustomSkillsTool.class));
+        context.setSkills(Skills.from(Skill.builder()
+                .name("demo-skill")
+                .description("demo description")
+                .content("demo instructions")
+                .build()));
         context.setMemoryRecallPackage(buildRecallPackage());
         context.setSseEmitter(new SseEmitter());
         return context;

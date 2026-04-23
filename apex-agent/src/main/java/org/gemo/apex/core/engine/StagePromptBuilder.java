@@ -5,7 +5,7 @@ import org.gemo.apex.constant.Constant;
 import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.context.SuperAgentContext;
 import org.gemo.apex.service.AgentWorkspaceService;
-import org.gemo.apex.tool.skills.CustomSkillsTool;
+import org.gemo.apex.tool.skills.Skills;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Component;
 
@@ -25,9 +25,9 @@ public class StagePromptBuilder {
         String agentKey = context.getAgentKey();
 
         String skillsXml = "";
-        CustomSkillsTool skillsTool = context.getCustomSkillsTool();
-        if (skillsTool != null && skillsTool.getSkillsXml() != null) {
-            skillsXml = skillsTool.getSkillsXml();
+        Skills skills = context.getSkills();
+        if (skills != null) {
+            skillsXml = skills.formatAvailableSkills();
         }
 
         StringBuilder toolsDesc = new StringBuilder();

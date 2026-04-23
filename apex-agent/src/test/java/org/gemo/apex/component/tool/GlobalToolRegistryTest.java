@@ -1,10 +1,14 @@
 package org.gemo.apex.component.tool;
 
+import org.gemo.apex.config.model.SkillConfig;
+import org.gemo.apex.config.provider.SkillConfigProvider;
 import org.gemo.apex.constant.ToolContextKeys;
 import org.gemo.apex.context.SuperAgentContext;
 import org.gemo.apex.service.AgentWorkspaceService;
+import org.gemo.apex.tool.skills.Skills;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
@@ -12,7 +16,10 @@ import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.mcp.ToolContextToMcpMetaConverter;
 import org.springframework.ai.tool.ToolCallback;
 
+import java.io.IOException;
 import java.lang.reflect.Method;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -29,8 +36,14 @@ public class GlobalToolRegistryTest {
     @Mock
     private AgentWorkspaceService agentWorkspaceService;
 
+    @Mock
+    private SkillConfigProvider skillConfigProvider;
+
     @InjectMocks
     private GlobalToolRegistry globalToolRegistry;
+
+    @TempDir
+    Path tempDir;
 
     @BeforeEach
     public void setup() {
@@ -52,6 +65,30 @@ public class GlobalToolRegistryTest {
 
         List<ToolCallback> tools = globalToolRegistry.getMcpToolCallbacks("test_agent");
         assertTrue(tools.isEmpty());
+    }
+
+    @Test
+    public void testGetSkillsTool_ShouldLoadDirectChildSkills() throws IOException {
+        when(agentWorkspaceService.getSkills("test_agent")).thenReturn(List.of("meeting-skill"));
+        SkillConfig config = new SkillConfig();
+        config.setDir(tempDir.toString());
+        when(skillConfigProvider.getSkillConfig("meeting-skill")).thenReturn(config);
+
+        Path skillDir = tempDir.resolve("meeting");
+        Files.createDirectories(skillDir);
+        Files.writeString(skillDir.resolve("SKILL.md"), """
+                ---
+                name: meeting-skill
+                description: Meeting workflow
+                ---
+
+                Follow the meeting workflow
+                """);
+
+        Skills skills = globalToolRegistry.getSkillsTool("test_agent");
+
+        assertEquals("activate_skill", skills.toolCallbacks()[0].getToolDefinition().name());
+        assertTrue(skills.formatAvailableSkills().contains("<name>meeting-skill</name>"));
     }
 
     @Test
