@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
 
-@Component
+//@Component
 public class NoOpAgentHookRuntime implements AgentHookRuntime {
 
     @Override
