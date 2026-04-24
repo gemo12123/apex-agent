@@ -38,4 +38,7 @@ public class AgentConfig {
 
     /** Default execution mode for new conversations */
     private ModeEnum defaultExecutionMode;
+
+    /** Agent-scoped tool hook configuration */
+    private AgentHooksConfig hooks;
 }

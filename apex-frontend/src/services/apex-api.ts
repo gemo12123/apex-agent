@@ -45,6 +45,7 @@ export function createApexApiClient(): ApexApiClient {
         method: 'POST',
         headers: createHeaders(userId),
         body: JSON.stringify(request),
+        openWhenHidden: true,
         signal,
         async onopen(response) {
           if (!response.ok) {

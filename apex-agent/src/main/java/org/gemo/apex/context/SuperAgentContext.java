@@ -5,6 +5,8 @@ import lombok.Data;
 import org.gemo.apex.constant.ExecutionStatus;
 import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.domain.Plan;
+import org.gemo.apex.domain.interaction.PendingHumanInteraction;
+import org.gemo.apex.domain.interaction.PendingToolExecution;
 import org.gemo.apex.memory.model.MemoryRecallPackage;
 import org.gemo.apex.skills.Skills;
 import org.springframework.ai.chat.messages.Message;
@@ -92,6 +94,12 @@ public class SuperAgentContext {
      */
     @JsonIgnore
     private Map<String, Object> pendingToolResult;
+
+    @JsonIgnore
+    private PendingHumanInteraction pendingHumanInteraction;
+
+    @JsonIgnore
+    private PendingToolExecution pendingToolExecution;
 
     /**
      * 当前任务的计划对象。

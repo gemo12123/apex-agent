@@ -32,7 +32,8 @@ import java.util.Map;
                 @JsonSubTypes.Type(value = ArtifactDeclaredMessage.class, name = AgentEventType.ARTIFACT_DECLARED),
                 @JsonSubTypes.Type(value = ArtifactChangeMessage.class, name = AgentEventType.ARTIFACT_CHANGE),
                 @JsonSubTypes.Type(value = EndMessage.class, name = AgentEventType.END),
-                @JsonSubTypes.Type(value = AskHumanMessage.class, name = AgentEventType.ASK_HUMAN)
+                @JsonSubTypes.Type(value = AskHumanMessage.class, name = AgentEventType.ASK_HUMAN),
+                @JsonSubTypes.Type(value = ToolConfirmationMessage.class, name = AgentEventType.TOOL_CONFIRMATION)
 })
 public abstract class AgentMessage {
         /**

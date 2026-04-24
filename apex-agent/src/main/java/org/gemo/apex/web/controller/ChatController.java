@@ -5,6 +5,7 @@ import org.gemo.apex.constant.ContextKeyEnum;
 import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.constant.RequestType;
 import org.gemo.apex.context.SuperAgentContext;
+import org.gemo.apex.core.SessionExecutionGuard;
 import org.gemo.apex.core.SuperAgentFactory;
 import org.gemo.apex.domain.dto.ChatRequest;
 import org.gemo.apex.exception.HumanInTheLoopException;
@@ -19,7 +20,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.springframework.http.HttpStatus;
+import org.springframework.util.StringUtils;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -40,6 +44,9 @@ public class ChatController {
     @Autowired
     private AgentConfigProvider agentConfigProvider;
 
+    @Autowired
+    private SessionExecutionGuard sessionExecutionGuard;
+
     private final ExecutorService executorService = Executors.newFixedThreadPool(10);
 
     @GetMapping(value = "/agents", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -57,48 +64,62 @@ public class ChatController {
 
     @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter executeWithSse(@RequestBody ChatRequest request) {
+        String sessionId = request.getSessionId();
+        if (!StringUtils.hasText(sessionId)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "sessionId must not be blank");
+        }
+        if (!sessionExecutionGuard.tryAcquire(sessionId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Session " + sessionId + " already has an active execution");
+        }
         boolean isResume = request.getType() == RequestType.HUMAN_RESPONSE;
         String userId = UserContextHolder.getUserId();
         log.info("{} SSE 请求，sessionId={}, type={}, agentKey={}, userId={}",
-                isResume ? "恢复" : "新建", request.getSessionId(), request.getType(), request.getAgentKey(), userId);
+                isResume ? "恢复" : "新建", sessionId, request.getType(), request.getAgentKey(), userId);
 
         SseEmitter emitter = new SseEmitter(600000L);
-        executorService.submit(() -> {
-            UserContextHolder.setUserId(userId);
-            SuperAgentContext sessionContext = null;
-            try {
-                if (isResume) {
-                    sessionContext = superAgentFactory.resumeContext(request.getSessionId(), request.getHumanResponse());
-                    if (sessionContext == null) {
-                        log.warn("未找到可恢复的挂起会话, sessionId={}", request.getSessionId());
-                        emitter.complete();
-                        return;
-                    }
-                } else {
-                    sessionContext = superAgentFactory.createContext(request.getSessionId(), request.getAgentKey(),
-                            request.getQuery());
-                }
-
-                sessionContext.setSseEmitter(emitter);
-                superAgentFactory.executeContext(sessionContext);
-            } catch (HumanInTheLoopException e) {
-                log.info("会话挂起等待用户回复, sessionId={}, reason={}", request.getSessionId(), e.getMessage());
-            } catch (Exception e) {
-                log.error("SSE 执行异常, sessionId={}", request.getSessionId(), e);
-            } finally {
+        try {
+            executorService.submit(() -> {
+                UserContextHolder.setUserId(userId);
+                SuperAgentContext sessionContext = null;
                 try {
-                    if (sessionContext != null) {
-                        MessageUtils.sendMessage(sessionContext, EndMessage.builder()
-                                .context(buildEndContext(sessionContext))
-                                .build());
+                    if (isResume) {
+                        sessionContext = superAgentFactory.resumeContext(sessionId, request.getHumanResponse());
+                        if (sessionContext == null) {
+                            log.warn("未找到可恢复的挂起会话, sessionId={}", sessionId);
+                            emitter.complete();
+                            return;
+                        }
+                    } else {
+                        sessionContext = superAgentFactory.createContext(sessionId, request.getAgentKey(),
+                                request.getQuery());
                     }
+
+                    sessionContext.setSseEmitter(emitter);
+                    superAgentFactory.executeContext(sessionContext);
+                } catch (HumanInTheLoopException e) {
+                    log.info("会话挂起等待用户回复, sessionId={}, reason={}", sessionId, e.getMessage());
+                } catch (Exception e) {
+                    log.error("SSE 执行异常, sessionId={}", sessionId, e);
                 } finally {
-                    emitter.complete();
-                    UserContextHolder.clear();
-                    log.info("SSE 连接关闭, sessionId={}", request.getSessionId());
+                    try {
+                        if (sessionContext != null) {
+                            MessageUtils.sendMessage(sessionContext, EndMessage.builder()
+                                    .context(buildEndContext(sessionContext))
+                                    .build());
+                        }
+                    } finally {
+                        emitter.complete();
+                        sessionExecutionGuard.release(sessionId);
+                        UserContextHolder.clear();
+                        log.info("SSE 连接关闭, sessionId={}", sessionId);
+                    }
                 }
-            }
-        });
+            });
+        } catch (RuntimeException ex) {
+            sessionExecutionGuard.release(sessionId);
+            throw ex;
+        }
 
         return emitter;
     }

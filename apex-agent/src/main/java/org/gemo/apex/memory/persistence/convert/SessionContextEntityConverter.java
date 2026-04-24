@@ -43,6 +43,8 @@ public final class SessionContextEntityConverter {
         snapshot.setCurrentStageId(context.getCurrentStageId());
         snapshot.setPlan(context.getPlan());
         snapshot.setPendingToolResult(context.getPendingToolResult());
+        snapshot.setPendingHumanInteraction(context.getPendingHumanInteraction());
+        snapshot.setPendingToolExecution(context.getPendingToolExecution());
         return snapshot;
     }
 
@@ -128,6 +130,8 @@ public final class SessionContextEntityConverter {
             context.setCurrentStageId(snapshot.getCurrentStageId());
             context.setPlan(snapshot.getPlan());
             context.setPendingToolResult(snapshot.getPendingToolResult());
+            context.setPendingHumanInteraction(snapshot.getPendingHumanInteraction());
+            context.setPendingToolExecution(snapshot.getPendingToolExecution());
         }
         if (summaryEntity != null) {
             context.setLatestCompressedMessage(MessageEntityConverter.fromPayload(summaryEntity.getMessagePayload(),

@@ -1,11 +1,19 @@
 package org.gemo.apex.component;
 
+import org.gemo.apex.constant.ExecutionStatus;
+import org.gemo.apex.constant.ToolContextKeys;
 import org.gemo.apex.context.SuperAgentContext;
+import org.gemo.apex.exception.HumanInTheLoopException;
+import org.gemo.apex.hook.AgentHookRuntime;
+import org.gemo.apex.hook.tool.PreToolCallHookResult;
+import org.gemo.apex.hook.tool.ToolConfirmationSpec;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.model.tool.ToolExecutionResult;
@@ -13,14 +21,20 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
 import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.ai.tool.metadata.ToolMetadata;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -65,5 +79,67 @@ class CustomToolCallingManagerTest {
         assertFalse(result.returnDirect());
         verify(notifier, times(1)).beforeExecution(any(), any(), any());
         verify(notifier, times(1)).afterExecution(any(), any(), any());
+    }
+
+    @Test
+    void executeToolCallsShouldSendToolConfirmationAndSuspendBeforeCallingRealTool() {
+        ToolInvocationNotifier notifier = Mockito.mock(ToolInvocationNotifier.class);
+        AgentHookRuntime hookRuntime = Mockito.mock(AgentHookRuntime.class);
+        CustomToolCallingManager manager = CustomToolCallingManager.builder()
+                .toolInvocationNotifier(notifier)
+                .agentHookRuntime(hookRuntime)
+                .build();
+
+        ToolCallback toolCallback = Mockito.mock(ToolCallback.class);
+        ToolDefinition definition = DefaultToolDefinition.builder()
+                .name("meeting_tool")
+                .description("meeting")
+                .inputSchema("{}")
+                .build();
+        when(toolCallback.getToolDefinition()).thenReturn(definition);
+        when(toolCallback.getToolMetadata()).thenReturn(ToolMetadata.builder().returnDirect(false).build());
+        when(toolCallback.call(any(String.class), any())).thenReturn("should-not-run");
+
+        when(hookRuntime.runPreHooks(any())).thenReturn(PreToolCallHookResult.requestConfirmation(
+                ToolConfirmationSpec.builder()
+                        .confirmationId("confirm-1")
+                        .title("预订会议室前确认")
+                        .toolName("meeting_tool")
+                        .toolDisplayName("会议室助手")
+                        .hookSource("toolConfirmHook")
+                        .build()));
+
+        SuperAgentContext sessionContext = new SuperAgentContext();
+        sessionContext.setAgentKey("default_agent");
+        sessionContext.setSessionId("session-1");
+        CapturingSseEmitter emitter = new CapturingSseEmitter();
+        sessionContext.setSseEmitter(emitter);
+
+        ToolCallingChatOptions chatOptions = Mockito.mock(ToolCallingChatOptions.class);
+        when(chatOptions.getToolCallbacks()).thenReturn(List.of(toolCallback));
+        when(chatOptions.getToolNames()).thenReturn(Set.of());
+        when(chatOptions.getToolContext()).thenReturn(Map.of(ToolContextKeys.SESSION_CONTEXT, sessionContext));
+
+        Prompt prompt = new Prompt(List.of(new UserMessage("hello")), chatOptions);
+        AssistantMessage assistantMessage = AssistantMessage.builder()
+                .toolCalls(List.of(new AssistantMessage.ToolCall("call-1", "function", "meeting_tool", "{}")))
+                .build();
+
+        assertThrows(HumanInTheLoopException.class,
+                () -> manager.executeToolCalls(prompt, new ChatResponse(List.of(new Generation(assistantMessage)))));
+
+        verify(toolCallback, never()).call(any(String.class), any());
+        assertEquals(ExecutionStatus.HUMAN_IN_THE_LOOP, sessionContext.getExecutionStatus());
+        assertEquals("TOOL_CONFIRMATION", sessionContext.getPendingHumanInteraction().getInteractionType());
+        assertTrue(emitter.payloads.stream().anyMatch(payload -> payload.contains("TOOL_CONFIRMATION")));
+    }
+
+    private static class CapturingSseEmitter extends SseEmitter {
+        private final List<String> payloads = new ArrayList<>();
+
+        @Override
+        public synchronized void send(Object object) throws IOException {
+            payloads.add(String.valueOf(object));
+        }
     }
 }

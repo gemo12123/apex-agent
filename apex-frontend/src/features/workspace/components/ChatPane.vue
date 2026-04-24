@@ -1,13 +1,20 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
 import HumanPromptCard from '@/features/workspace/components/HumanPromptCard.vue'
+import ToolConfirmationCard from '@/features/workspace/components/ToolConfirmationCard.vue'
 import { formatSessionStatus } from '@/features/workspace/presentation'
 import { renderMarkdown } from '@/utils/markdown'
-import type { HumanPromptRecord, MessageRecord, SessionViewModel } from '@/types/apex'
+import type {
+  HumanPromptRecord,
+  MessageRecord,
+  SessionViewModel,
+  ToolConfirmationRecord,
+} from '@/types/apex'
 
 const props = defineProps<{
   messages: MessageRecord[]
   pendingPrompts: HumanPromptRecord[]
+  pendingConfirmations: ToolConfirmationRecord[]
   status: SessionViewModel['status']
 }>()
 
@@ -15,13 +22,26 @@ const emit = defineEmits<{
   (event: 'send', value: string): void
   (event: 'stop'): void
   (event: 'submit-prompt', payload: { prompt: HumanPromptRecord; answer: string | string[] }): void
+  (
+    event: 'submit-confirmation',
+    payload: {
+      confirmation: ToolConfirmationRecord
+      decision: 'APPROVE' | 'DENY'
+      updatedArgs?: Record<string, unknown>
+    },
+  ): void
 }>()
 
 const draft = ref('')
 const transcriptRef = ref<HTMLElement | null>(null)
 
 watch(
-  () => [props.messages.length, props.pendingPrompts.length, props.status],
+  () => [
+    props.messages.length,
+    props.pendingPrompts.length,
+    props.pendingConfirmations.length,
+    props.status,
+  ],
   async () => {
     await nextTick()
     const element = transcriptRef.value
@@ -49,7 +69,9 @@ function submitMessage(): void {
         <p class="chat-pane__eyebrow">对话区</p>
         <h2 class="chat-pane__title">实时输出</h2>
       </div>
-      <span class="status-pill" :class="`status-pill--${props.status}`">{{ formatSessionStatus(props.status) }}</span>
+      <span class="status-pill" :class="`status-pill--${props.status}`">
+        {{ formatSessionStatus(props.status) }}
+      </span>
     </header>
 
     <div ref="transcriptRef" class="chat-pane__transcript">
@@ -72,6 +94,15 @@ function submitMessage(): void {
         </div>
       </article>
 
+      <div v-if="props.pendingConfirmations.length" class="chat-pane__prompts">
+        <ToolConfirmationCard
+          v-for="confirmation in props.pendingConfirmations"
+          :key="confirmation.id"
+          :confirmation="confirmation"
+          @submit="emit('submit-confirmation', { confirmation, ...$event })"
+        />
+      </div>
+
       <div v-if="props.pendingPrompts.length" class="chat-pane__prompts">
         <HumanPromptCard
           v-for="prompt in props.pendingPrompts"
@@ -88,7 +119,7 @@ function submitMessage(): void {
         class="chat-pane__textarea"
         rows="4"
         placeholder="继续输入任务，或补充你想让 Apex 执行的内容。"
-        :disabled="props.status === 'streaming' || props.status === 'waiting-human'"
+        :disabled="props.status === 'streaming' || props.status === 'waiting-human' || props.status === 'waiting-confirmation'"
         @keydown.enter.exact.prevent="submitMessage"
       />
 
@@ -104,7 +135,7 @@ function submitMessage(): void {
         <button
           class="accent-button"
           type="button"
-          :disabled="!draft.trim() || props.status === 'streaming' || props.status === 'waiting-human'"
+          :disabled="!draft.trim() || props.status === 'streaming' || props.status === 'waiting-human' || props.status === 'waiting-confirmation'"
           @click="submitMessage"
         >
           发送

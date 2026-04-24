@@ -19,7 +19,7 @@ public class ChatRequest {
     /**
      * 会话/任务ID
      */
-    private String sessionId = "1";
+    private String sessionId;
 
     /**
      * 请求类型：NEW（新对话）或 HUMAN_RESPONSE（人类回复）

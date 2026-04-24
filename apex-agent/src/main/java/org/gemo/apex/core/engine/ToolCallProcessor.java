@@ -59,19 +59,21 @@ public class ToolCallProcessor {
 
     private void processOtherTools(Prompt input, SuperAgentContext context,
             List<AssistantMessage.ToolCall> otherToolCalls) {
-        try {
-            ToolResponseMessage responseMessage = agentToolExecutor.execute(input,
-                    AssistantMessage.builder().toolCalls(otherToolCalls).build());
-            conversationMemoryManager.appendDialogueMessage(context, responseMessage);
-        } catch (Exception ex) {
-            conversationMemoryManager.appendDialogueMessage(context,
-                    ToolResponseMessage.builder()
-                            .responses(otherToolCalls.stream()
-                                    .map(toolCall -> new ToolResponseMessage.ToolResponse(toolCall.id(),
-                                            toolCall.name(),
-                                            "工具调用异常，请检查参数。错误: " + ex.getMessage()))
-                                    .toList())
-                            .build());
+        for (AssistantMessage.ToolCall toolCall : otherToolCalls) {
+            try {
+                ToolResponseMessage responseMessage = agentToolExecutor.execute(input,
+                        AssistantMessage.builder().toolCalls(List.of(toolCall)).build());
+                conversationMemoryManager.appendDialogueMessage(context, responseMessage);
+            } catch (HumanInTheLoopException ex) {
+                throw ex;
+            } catch (Exception ex) {
+                conversationMemoryManager.appendDialogueMessage(context,
+                        ToolResponseMessage.builder()
+                                .responses(List.of(new ToolResponseMessage.ToolResponse(toolCall.id(),
+                                        toolCall.name(),
+                                        "工具调用异常，请检查参数。错误: " + ex.getMessage())))
+                                .build());
+            }
         }
     }
 

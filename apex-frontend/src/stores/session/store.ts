@@ -14,6 +14,7 @@ import type {
   ChatRequest,
   HumanPromptRecord,
   InvocationRecord,
+  ToolConfirmationRecord,
 } from '@/types/apex'
 
 const USER_ID_STORAGE_KEY = 'apex:user-id'
@@ -123,6 +124,7 @@ export const useSessionStore = defineStore('session', () => {
     session.value = appendUserMessage(session.value, query.trim())
     session.value = startAssistantMessage(session.value)
     session.value.pendingPrompts = []
+    session.value.pendingConfirmations = []
 
     await runChat({
       sessionId,
@@ -157,6 +159,34 @@ export const useSessionStore = defineStore('session', () => {
       type: 'HUMAN_RESPONSE',
       agentKey: selectedAgentKey.value,
       humanResponse: payload,
+    })
+  }
+
+  async function submitConfirmation(
+    confirmation: ToolConfirmationRecord,
+    decision: 'APPROVE' | 'DENY',
+    updatedArgs: Record<string, unknown> = {},
+  ): Promise<void> {
+    const sessionId = session.value.sessionId ?? crypto.randomUUID()
+    session.value.sessionId = sessionId
+    session.value.pendingConfirmations = []
+    errorMessage.value = ''
+
+    await runChat({
+      sessionId,
+      query: '',
+      type: 'HUMAN_RESPONSE',
+      agentKey: selectedAgentKey.value,
+      humanResponse: {
+        [confirmation.toolCallId]: {
+          interaction_type: 'TOOL_CONFIRMATION',
+          confirmation_id: confirmation.confirmationId,
+          decision,
+          ...(decision === 'APPROVE' && Object.keys(updatedArgs).length > 0
+            ? { updated_args: updatedArgs }
+            : {}),
+        },
+      },
     })
   }
 
@@ -217,6 +247,7 @@ export const useSessionStore = defineStore('session', () => {
     setSelectedAgent,
     setUserId,
     stopStream,
+    submitConfirmation,
     userId,
   }
 })

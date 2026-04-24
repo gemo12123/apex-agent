@@ -1,0 +1,120 @@
+package org.gemo.apex.hook;
+
+import org.gemo.apex.config.model.AgentHooksConfig;
+import org.gemo.apex.config.model.HookBindingConfig;
+import org.gemo.apex.hook.tool.PostToolCallHook;
+import org.gemo.apex.hook.tool.PostToolCallHookContext;
+import org.gemo.apex.hook.tool.PostToolCallHookResult;
+import org.gemo.apex.hook.tool.PreToolCallHook;
+import org.gemo.apex.hook.tool.PreToolCallHookContext;
+import org.gemo.apex.hook.tool.PreToolCallHookResult;
+import org.gemo.apex.service.AgentWorkspaceService;
+import org.springframework.context.ApplicationContext;
+import org.springframework.stereotype.Component;
+
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+
+@Component
+public class DefaultAgentHookRuntime implements AgentHookRuntime {
+
+    private final AgentWorkspaceService agentWorkspaceService;
+    private final ApplicationContext applicationContext;
+    private final ToolMatcher toolMatcher;
+
+    public DefaultAgentHookRuntime(AgentWorkspaceService agentWorkspaceService,
+            ApplicationContext applicationContext,
+            ToolMatcher toolMatcher) {
+        this.agentWorkspaceService = agentWorkspaceService;
+        this.applicationContext = applicationContext;
+        this.toolMatcher = toolMatcher;
+    }
+
+    @Override
+    public PreToolCallHookResult runPreHooks(PreToolCallHookContext context) {
+        AgentHooksConfig hooks = agentWorkspaceService.getHooks(context.getAgentKey());
+        if (hooks == null || hooks.isDisabled()) {
+            return PreToolCallHookResult.proceedWithUpdatedArgs(copyArguments(context));
+        }
+
+        LinkedHashMap<String, Object> currentArguments = copyArguments(context);
+        Set<String> skippedHookBeans = context.getSkippedHookBeans() != null ? context.getSkippedHookBeans() : Set.of();
+
+        for (HookBindingConfig binding : matchingBindings(hooks.getPreToolCall(), context.getToolName())) {
+            if (skippedHookBeans.contains(binding.getBean())) {
+                continue;
+            }
+
+            PreToolCallHook hook = applicationContext.getBean(binding.getBean(), PreToolCallHook.class);
+            PreToolCallHookResult result = hook.apply(context.toBuilder()
+                    .arguments(new LinkedHashMap<>(currentArguments))
+                    .hookOptions(binding.getOptions())
+                    .build());
+
+            if (result.getOutcome() == PreToolCallHookResult.Outcome.PROCEED) {
+                if (result.getUpdatedArgs() != null) {
+                    currentArguments.clear();
+                    currentArguments.putAll(result.getUpdatedArgs());
+                }
+                continue;
+            }
+            if (result.getOutcome() == PreToolCallHookResult.Outcome.REQUEST_CONFIRMATION
+                    && result.getUpdatedArgs() == null) {
+                return PreToolCallHookResult.builder()
+                        .outcome(PreToolCallHookResult.Outcome.REQUEST_CONFIRMATION)
+                        .updatedArgs(new LinkedHashMap<>(currentArguments))
+                        .confirmationSpec(result.getConfirmationSpec())
+                        .build();
+            }
+            return result;
+        }
+
+        return PreToolCallHookResult.proceedWithUpdatedArgs(currentArguments);
+    }
+
+    @Override
+    public PostToolCallHookResult runPostHooks(PostToolCallHookContext context) {
+        AgentHooksConfig hooks = agentWorkspaceService.getHooks(context.getAgentKey());
+        if (hooks == null || hooks.isDisabled()) {
+            return PostToolCallHookResult.keep();
+        }
+
+        String currentResult = context.getCurrentResult();
+        boolean replaced = false;
+
+        for (HookBindingConfig binding : matchingBindings(hooks.getPostToolCall(), context.getToolName())) {
+            PostToolCallHook hook = applicationContext.getBean(binding.getBean(), PostToolCallHook.class);
+            PostToolCallHookResult result = hook.apply(context.toBuilder()
+                    .hookOptions(binding.getOptions())
+                    .hookSource(binding.getBean())
+                    .currentResult(currentResult)
+                    .build());
+            if (result.getOutcome() == PostToolCallHookResult.Outcome.REPLACE_RESULT) {
+                currentResult = result.getNextResult();
+                replaced = true;
+            }
+        }
+
+        return replaced ? PostToolCallHookResult.replaceResult(currentResult) : PostToolCallHookResult.keep();
+    }
+
+    private List<HookBindingConfig> matchingBindings(List<HookBindingConfig> bindings, String toolName) {
+        if (bindings == null || bindings.isEmpty()) {
+            return List.of();
+        }
+
+        return bindings.stream()
+                .filter(Objects::nonNull)
+                .filter(HookBindingConfig::isEnabled)
+                .filter(binding -> toolMatcher.matches(binding.getTools(), toolName))
+                .sorted(Comparator.comparingInt(HookBindingConfig::getOrder))
+                .toList();
+    }
+
+    private LinkedHashMap<String, Object> copyArguments(PreToolCallHookContext context) {
+        return context.getArguments() != null ? new LinkedHashMap<>(context.getArguments()) : new LinkedHashMap<>();
+    }
+}

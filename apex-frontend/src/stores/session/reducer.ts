@@ -12,6 +12,8 @@ import type {
   StageRecord,
   SessionViewModel,
   SseEnvelope,
+  ToolConfirmationEnvelope,
+  ToolConfirmationRecord,
   UserMessageRecord,
 } from '@/types/apex'
 
@@ -29,6 +31,7 @@ export function createSessionViewModel(): SessionViewModel {
     stages: [],
     globalArtifacts: [],
     pendingPrompts: [],
+    pendingConfirmations: [],
   }
 }
 
@@ -75,20 +78,22 @@ export function createHumanPromptRecords(envelope: AskHumanEnvelope): HumanPromp
 
 export function buildHumanResponsePayload(
   prompts: HumanPromptRecord[],
-): Record<string, { answers: Record<string, string | string[]> }> {
+): Record<string, { interaction_type: 'ASK_HUMAN'; answers: Record<string, string | string[]> }> {
   const answeredPrompts = prompts.filter((prompt) => prompt.answered)
   if (answeredPrompts.length === 0) {
     return {}
   }
 
-  return answeredPrompts.reduce<Record<string, { answers: Record<string, string | string[]> }>>(
+  return answeredPrompts.reduce<
+    Record<string, { interaction_type: 'ASK_HUMAN'; answers: Record<string, string | string[]> }>
+  >(
     (accumulator, prompt) => {
       if (prompt.answer === undefined) {
         return accumulator
       }
 
       if (!accumulator[prompt.toolCallId]) {
-        accumulator[prompt.toolCallId] = { answers: {} }
+        accumulator[prompt.toolCallId] = { interaction_type: 'ASK_HUMAN', answers: {} }
       }
 
       accumulator[prompt.toolCallId].answers[String(prompt.index)] = prompt.answer
@@ -203,12 +208,20 @@ export function applyEnvelope(state: SessionViewModel, envelope: SseEnvelope): S
       return nextState
     case 'ASK_HUMAN':
       nextState.pendingPrompts = createHumanPromptRecords(envelope)
+      nextState.pendingConfirmations = []
       nextState.status = 'waiting-human'
       return nextState
+    case 'TOOL_CONFIRMATION':
+      nextState.pendingConfirmations = createToolConfirmationRecords(envelope)
+      nextState.pendingPrompts = []
+      nextState.status = 'waiting-confirmation'
+      return nextState
     case 'END':
-      nextState.status = nextState.pendingPrompts.some((prompt) => !prompt.answered)
-        ? 'waiting-human'
-        : 'completed'
+      nextState.status = nextState.pendingConfirmations.length > 0
+        ? 'waiting-confirmation'
+        : nextState.pendingPrompts.some((prompt) => !prompt.answered)
+          ? 'waiting-human'
+          : 'completed'
       return nextState
     default:
       return nextState
@@ -236,6 +249,14 @@ function cloneState(state: SessionViewModel): SessionViewModel {
       ...prompt,
       options: prompt.options.map((option) => ({ ...option })),
       answer: Array.isArray(prompt.answer) ? [...prompt.answer] : prompt.answer,
+    })),
+    pendingConfirmations: state.pendingConfirmations.map((confirmation) => ({
+      ...confirmation,
+      displayFields: confirmation.displayFields.map((field) => ({ ...field })),
+      editableFields: confirmation.editableFields.map((field) => ({
+        ...field,
+        options: field.options?.map((option) => ({ ...option })),
+      })),
     })),
   }
 }
@@ -367,6 +388,31 @@ function applyInvocationChange(
   if (message.render_type) {
     invocation.renderType = message.render_type
   }
+}
+
+export function createToolConfirmationRecords(
+  envelope: ToolConfirmationEnvelope,
+): ToolConfirmationRecord[] {
+  return envelope.messages.map((message) => ({
+    id: `${message.tool_call_id}:${message.confirmation_id}`,
+    confirmationId: message.confirmation_id,
+    toolCallId: message.tool_call_id,
+    invocationId: message.invocation_id,
+    toolName: message.tool_name,
+    toolDisplayName: message.tool_display_name,
+    title: message.title,
+    description: message.description,
+    riskLevel: message.risk_level,
+    hookSource: message.hook_source,
+    editable: message.editable,
+    confirmLabel: message.confirm_label,
+    denyLabel: message.deny_label,
+    displayFields: message.display_fields.map((field) => ({ ...field })),
+    editableFields: message.editable_fields.map((field) => ({
+      ...field,
+      options: field.options?.map((option) => ({ ...option })),
+    })),
+  }))
 }
 
 function upsertStageArtifact(

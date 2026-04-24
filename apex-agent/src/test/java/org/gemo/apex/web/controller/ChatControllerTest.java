@@ -1,6 +1,7 @@
 package org.gemo.apex.web.controller;
 
 import org.gemo.apex.context.SuperAgentContext;
+import org.gemo.apex.core.SessionExecutionGuard;
 import org.gemo.apex.core.SuperAgentFactory;
 import org.gemo.apex.memory.context.UserContextHolder;
 import org.junit.jupiter.api.AfterEach;
@@ -15,12 +16,15 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
@@ -41,6 +45,7 @@ public class ChatControllerTest {
     @BeforeEach
     public void setup() {
         MockitoAnnotations.openMocks(this);
+        ReflectionTestUtils.setField(chatController, "sessionExecutionGuard", new SessionExecutionGuard());
         UserContextHolder.clear();
         mockMvc = MockMvcBuilders.standaloneSetup(chatController).build();
     }
@@ -132,5 +137,67 @@ public class ChatControllerTest {
 
         verify(superAgentFactory).resumeContext(anyString(), any());
         verify(superAgentFactory, never()).createContext(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    public void testExecuteWithSse_ShouldRejectBlankSessionId() throws Exception {
+        String jsonRequest = """
+                {
+                  "agentKey":"default_agent",
+                  "query":"Hello Super Agent",
+                  "type":"NEW"
+                }
+                """;
+
+        mockMvc.perform(post("/api/sse/chat")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(jsonRequest))
+                .andExpect(status().isBadRequest());
+
+        verify(superAgentFactory, never()).createContext(anyString(), anyString(), anyString());
+        verify(superAgentFactory, never()).executeContext(any(SuperAgentContext.class));
+    }
+
+    @Test
+    public void testExecuteWithSse_ShouldRejectConcurrentRequestsForSameSession() throws Exception {
+        SuperAgentContext mockContext = new SuperAgentContext();
+        CountDownLatch firstExecutionStarted = new CountDownLatch(1);
+        CountDownLatch releaseExecution = new CountDownLatch(1);
+        when(superAgentFactory.createContext(anyString(), anyString(), anyString())).thenReturn(mockContext);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            firstExecutionStarted.countDown();
+            releaseExecution.await(2, TimeUnit.SECONDS);
+            return null;
+        }).when(superAgentFactory).executeContext(any(SuperAgentContext.class));
+
+        String jsonRequest = """
+                {
+                  "sessionId":"session-123",
+                  "agentKey":"default_agent",
+                  "query":"Hello Super Agent",
+                  "type":"NEW"
+                }
+                """;
+
+        MvcResult firstResult = mockMvc.perform(post("/api/sse/chat")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(jsonRequest))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+
+        org.junit.jupiter.api.Assertions.assertTrue(firstExecutionStarted.await(2, TimeUnit.SECONDS));
+
+        mockMvc.perform(post("/api/sse/chat")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(jsonRequest))
+                .andExpect(status().isConflict());
+
+        releaseExecution.countDown();
+
+        mockMvc.perform(asyncDispatch(firstResult))
+                .andExpect(status().isOk());
+
+        verify(superAgentFactory, times(1)).createContext(anyString(), anyString(), anyString());
+        verify(superAgentFactory, times(1)).executeContext(any(SuperAgentContext.class));
     }
 }

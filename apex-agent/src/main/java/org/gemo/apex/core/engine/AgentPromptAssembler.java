@@ -30,16 +30,27 @@ public class AgentPromptAssembler {
         DashScopeChatOptions options = DashScopeChatOptions.builder()
                 .withInternalToolExecutionEnabled(false)
                 .withToolCallbacks(toolPlan.callableTools())
-                .withToolContext(buildToolContext(context))
+                .withToolContext(buildToolContext(context, Map.of()))
                 .build();
 
         return new Prompt(conversationMemoryManager.buildModelMessages(context), options);
     }
 
-    private Map<String, Object> buildToolContext(SuperAgentContext context) {
+    public Prompt assembleToolExecutionPrompt(SuperAgentContext context, Map<String, Object> extraToolContext) {
+        DashScopeChatOptions options = DashScopeChatOptions.builder()
+                .withInternalToolExecutionEnabled(false)
+                .withToolCallbacks(context.getAvailableTools())
+                .withToolContext(buildToolContext(context, extraToolContext != null ? extraToolContext : Map.of()))
+                .build();
+
+        return new Prompt(conversationMemoryManager.buildModelMessages(context), options);
+    }
+
+    private Map<String, Object> buildToolContext(SuperAgentContext context, Map<String, Object> extraToolContext) {
         Map<String, Object> toolContext = new LinkedHashMap<>();
         toolContext.put(ToolContextKeys.SESSION_CONTEXT, context);
         toolContext.put(ToolContextKeys.MCP_SESSION_CONTEXT, buildMcpSessionContext(context));
+        toolContext.putAll(extraToolContext);
         return Map.copyOf(toolContext);
     }
 

@@ -2,6 +2,8 @@ package org.gemo.apex.memory.model;
 
 import lombok.Data;
 import org.gemo.apex.domain.Plan;
+import org.gemo.apex.domain.interaction.PendingHumanInteraction;
+import org.gemo.apex.domain.interaction.PendingToolExecution;
 
 import java.util.Map;
 
@@ -25,4 +27,8 @@ public class SessionRuntimeSnapshot {
      * 人工恢复结果。
      */
     private Map<String, Object> pendingToolResult;
+
+    private PendingHumanInteraction pendingHumanInteraction;
+
+    private PendingToolExecution pendingToolExecution;
 }
