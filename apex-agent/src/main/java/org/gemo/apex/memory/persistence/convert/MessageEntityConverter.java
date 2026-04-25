@@ -23,7 +23,7 @@ public final class MessageEntityConverter {
     public static Message fromPayload(String payload, String role, String content) {
         if (StringUtils.isNotBlank(payload)) {
             Message message = JacksonUtils.fromJson(payload, Message.class);
-            if (message != null && StringUtils.isNotBlank(message.getText())) {
+            if (message != null) {
                 return message;
             }
         }
