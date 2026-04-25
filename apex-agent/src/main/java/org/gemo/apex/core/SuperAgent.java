@@ -27,14 +27,11 @@ public class SuperAgent {
 
     public void execute(SuperAgentContext context) {
         humanInLoopResumer.resume(context);
-        boolean finalized = false;
 
         try {
             superAgentLoopRunner.run(context);
         } catch (HumanInTheLoopException ex) {
-            executionFinalizer.finalizeTurn(context);
-            finalized = true;
-            throw ex;
+            log.info("会话挂起等待用户回复, sessionId={}", context.getSessionId());
         } catch (RuntimeException ex) {
             if (context.getExecutionStatus() == ExecutionStatus.IN_PROGRESS) {
                 context.setExecutionStatus(ExecutionStatus.FAILED);
@@ -42,9 +39,7 @@ public class SuperAgent {
             log.error("SuperAgent execution failed, sessionId={}", context.getSessionId(), ex);
             throw ex;
         } finally {
-            if (!finalized) {
-                executionFinalizer.finalizeTurn(context);
-            }
+            executionFinalizer.finalizeTurn(context);
         }
     }
 }

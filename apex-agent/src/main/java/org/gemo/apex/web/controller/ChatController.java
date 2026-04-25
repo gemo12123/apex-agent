@@ -97,8 +97,6 @@ public class ChatController {
 
                     sessionContext.setSseEmitter(emitter);
                     superAgentFactory.executeContext(sessionContext);
-                } catch (HumanInTheLoopException e) {
-                    log.info("会话挂起等待用户回复, sessionId={}, reason={}", sessionId, e.getMessage());
                 } catch (Exception e) {
                     log.error("SSE 执行异常, sessionId={}", sessionId, e);
                 } finally {
