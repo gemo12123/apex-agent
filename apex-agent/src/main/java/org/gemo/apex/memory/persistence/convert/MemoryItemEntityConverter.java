@@ -60,6 +60,7 @@ public final class MemoryItemEntityConverter {
         entity.setSourceSessionId(item.getSourceSessionId());
         entity.setObservedTime(defaultTime(item.getObservedTime()));
         entity.setUpdateTime(LocalDateTime.now());
+        entity.setSearchText(joinSearchText(item.getTitle(), item.getContent(), item.getTopicKey(), item.getStructuredPayload()));
         return entity;
     }
 
@@ -152,5 +153,23 @@ public final class MemoryItemEntityConverter {
 
     private static LocalDateTime defaultTime(LocalDateTime time) {
         return time != null ? time : LocalDateTime.now();
+    }
+
+    private static String joinSearchText(String... parts) {
+        StringBuilder builder = new StringBuilder();
+        for (String part : parts) {
+            if (part == null) {
+                continue;
+            }
+            String trimmed = part.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            if (builder.length() > 0) {
+                builder.append("\n");
+            }
+            builder.append(trimmed);
+        }
+        return builder.toString();
     }
 }

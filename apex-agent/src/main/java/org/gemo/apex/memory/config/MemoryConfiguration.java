@@ -1,5 +1,7 @@
 package org.gemo.apex.memory.config;
 
+import org.gemo.apex.memory.search.MemoryEmbeddingService;
+import org.gemo.apex.memory.search.SpringAiMemoryEmbeddingService;
 import org.gemo.apex.memory.persistence.repository.InMemoryMemoryManageRepository;
 import org.gemo.apex.memory.persistence.repository.InMemoryMemoryWriteRepository;
 import org.gemo.apex.memory.persistence.repository.JdbcMemoryManageRepository;
@@ -9,9 +11,11 @@ import org.gemo.apex.memory.persistence.repository.MemoryWriteRepository;
 import org.gemo.apex.memory.session.InMemorySessionContextStore;
 import org.gemo.apex.memory.session.JdbcSessionContextStore;
 import org.gemo.apex.memory.session.SessionContextStore;
+import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
@@ -63,5 +67,16 @@ public class MemoryConfiguration {
             return jdbcMemoryManageRepositoryProvider.getIfAvailable();
         }
         return inMemoryMemoryManageRepository;
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(MemoryEmbeddingService.class)
+    public MemoryEmbeddingService memoryEmbeddingService(ObjectProvider<EmbeddingModel> embeddingModelProvider,
+            MemoryProperties properties) {
+        EmbeddingModel embeddingModel = embeddingModelProvider.getIfAvailable();
+        if (embeddingModel != null) {
+            return new SpringAiMemoryEmbeddingService(embeddingModel, properties);
+        }
+        return text -> null;
     }
 }

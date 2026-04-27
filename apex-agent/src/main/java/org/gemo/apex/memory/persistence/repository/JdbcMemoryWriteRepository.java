@@ -2,6 +2,7 @@ package org.gemo.apex.memory.persistence.repository;
 
 import cn.hutool.core.util.IdUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import lombok.extern.slf4j.Slf4j;
 import org.gemo.apex.memory.model.MemoryItem;
 import org.gemo.apex.memory.persistence.convert.MemoryItemEntityConverter;
 import org.gemo.apex.memory.persistence.entity.AgentExperienceMemoryEntity;
@@ -10,6 +11,9 @@ import org.gemo.apex.memory.persistence.entity.UserProfileMemoryEntity;
 import org.gemo.apex.memory.persistence.mapper.AgentExperienceMemoryMapper;
 import org.gemo.apex.memory.persistence.mapper.UserExecutionHistoryMemoryMapper;
 import org.gemo.apex.memory.persistence.mapper.UserProfileMemoryMapper;
+import org.gemo.apex.memory.search.MemoryEmbeddingService;
+import org.gemo.apex.memory.search.PostgresSearchIndexUpdater;
+import org.gemo.apex.memory.search.SearchIndexTextBuilder;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -18,6 +22,7 @@ import java.time.LocalDateTime;
 /**
  * JDBC/MyBatis Plus 记忆写仓储。
  */
+@Slf4j
 @Component
 @ConditionalOnProperty(prefix = "apex.memory.store", name = "type", havingValue = "jdbc")
 public class JdbcMemoryWriteRepository implements MemoryWriteRepository {
@@ -25,13 +30,22 @@ public class JdbcMemoryWriteRepository implements MemoryWriteRepository {
     private final UserProfileMemoryMapper profileMemoryMapper;
     private final UserExecutionHistoryMemoryMapper executionHistoryMemoryMapper;
     private final AgentExperienceMemoryMapper experienceMemoryMapper;
+    private final SearchIndexTextBuilder searchIndexTextBuilder;
+    private final MemoryEmbeddingService memoryEmbeddingService;
+    private final PostgresSearchIndexUpdater searchIndexUpdater;
 
     public JdbcMemoryWriteRepository(UserProfileMemoryMapper profileMemoryMapper,
             UserExecutionHistoryMemoryMapper executionHistoryMemoryMapper,
-            AgentExperienceMemoryMapper experienceMemoryMapper) {
+            AgentExperienceMemoryMapper experienceMemoryMapper,
+            SearchIndexTextBuilder searchIndexTextBuilder,
+            MemoryEmbeddingService memoryEmbeddingService,
+            PostgresSearchIndexUpdater searchIndexUpdater) {
         this.profileMemoryMapper = profileMemoryMapper;
         this.executionHistoryMemoryMapper = executionHistoryMemoryMapper;
         this.experienceMemoryMapper = experienceMemoryMapper;
+        this.searchIndexTextBuilder = searchIndexTextBuilder;
+        this.memoryEmbeddingService = memoryEmbeddingService;
+        this.searchIndexUpdater = searchIndexUpdater;
     }
 
     @Override
@@ -69,6 +83,7 @@ public class JdbcMemoryWriteRepository implements MemoryWriteRepository {
             return;
         }
         UserExecutionHistoryMemoryEntity entity = MemoryItemEntityConverter.toExecutionEntity(item);
+        entity.setSearchText(searchIndexTextBuilder.buildExecutionHistoryText(item));
         if (existing == null) {
             entity.setId(item.getId() != null ? item.getId() : IdUtil.simpleUUID());
             entity.setCreateTime(LocalDateTime.now());
@@ -77,6 +92,12 @@ public class JdbcMemoryWriteRepository implements MemoryWriteRepository {
             entity.setId(existing.getId());
             entity.setCreateTime(existing.getCreateTime());
             executionHistoryMemoryMapper.updateById(entity);
+        }
+        try {
+            searchIndexUpdater.refreshExecutionHistory(entity.getId(), entity.getSearchText(),
+                    memoryEmbeddingService.embed(entity.getSearchText()));
+        } catch (RuntimeException ex) {
+            log.warn("Failed to refresh execution history search index, id={}", entity.getId(), ex);
         }
     }
 
