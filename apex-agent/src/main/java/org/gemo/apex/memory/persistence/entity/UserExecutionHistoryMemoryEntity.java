@@ -69,4 +69,7 @@ public class UserExecutionHistoryMemoryEntity {
 
     @TableField("update_time")
     private LocalDateTime updateTime;
+
+    @TableField("search_text")
+    private String searchText;
 }

@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS vector;
+
 CREATE TABLE IF NOT EXISTS agent_session (
     session_id VARCHAR(64) PRIMARY KEY,
     user_id VARCHAR(64) NOT NULL,
@@ -24,6 +26,9 @@ CREATE TABLE IF NOT EXISTS agent_session_dialogue_message (
     tool_call_id VARCHAR(128),
     token_count INT,
     message_payload TEXT,
+    search_text TEXT,
+    search_vector tsvector GENERATED ALWAYS AS (to_tsvector('simple', COALESCE(search_text, ''))) STORED,
+    embedding vector(1536),
     compacted BOOLEAN NOT NULL DEFAULT FALSE,
     create_time TIMESTAMP NOT NULL
 );
@@ -33,6 +38,12 @@ CREATE INDEX IF NOT EXISTS idx_agent_session_dialogue_message_session_sort
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_agent_session_dialogue_message_session_sort
     ON agent_session_dialogue_message(session_id, sort_no);
+
+CREATE INDEX IF NOT EXISTS idx_agent_session_dialogue_message_search_vector
+    ON agent_session_dialogue_message USING GIN(search_vector);
+
+CREATE INDEX IF NOT EXISTS idx_agent_session_dialogue_message_embedding
+    ON agent_session_dialogue_message USING hnsw(embedding vector_cosine_ops);
 
 CREATE TABLE IF NOT EXISTS agent_session_dialogue_summary (
     session_id VARCHAR(64) PRIMARY KEY,
@@ -44,9 +55,18 @@ CREATE TABLE IF NOT EXISTS agent_session_dialogue_summary (
     source_turn_no INT,
     version_no BIGINT,
     message_payload TEXT,
+    search_text TEXT,
+    search_vector tsvector GENERATED ALWAYS AS (to_tsvector('simple', COALESCE(search_text, ''))) STORED,
+    embedding vector(1536),
     create_time TIMESTAMP NOT NULL,
     update_time TIMESTAMP NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_agent_session_dialogue_summary_search_vector
+    ON agent_session_dialogue_summary USING GIN(search_vector);
+
+CREATE INDEX IF NOT EXISTS idx_agent_session_dialogue_summary_embedding
+    ON agent_session_dialogue_summary USING hnsw(embedding vector_cosine_ops);
 
 CREATE TABLE IF NOT EXISTS user_profile_memory (
     id VARCHAR(64) PRIMARY KEY,
@@ -88,11 +108,23 @@ CREATE TABLE IF NOT EXISTS user_execution_history_memory (
     source_session_id VARCHAR(64),
     observed_time TIMESTAMP,
     create_time TIMESTAMP NOT NULL,
-    update_time TIMESTAMP NOT NULL
+    update_time TIMESTAMP NOT NULL,
+    search_text TEXT,
+    search_vector tsvector GENERATED ALWAYS AS (to_tsvector('simple', COALESCE(search_text, ''))) STORED,
+    embedding vector(1536)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_user_execution_history_session_topic
     ON user_execution_history_memory(user_id, agent_key, source_session_id, topic_key, time_scope);
+
+CREATE INDEX IF NOT EXISTS idx_user_execution_history_memory_search_vector
+    ON user_execution_history_memory USING GIN(search_vector);
+
+CREATE INDEX IF NOT EXISTS idx_user_execution_history_memory_embedding
+    ON user_execution_history_memory USING hnsw(embedding vector_cosine_ops);
+
+CREATE INDEX IF NOT EXISTS idx_user_execution_history_memory_scope_observed
+    ON user_execution_history_memory(user_id, agent_key, observed_time DESC);
 
 CREATE TABLE IF NOT EXISTS agent_experience_memory (
     id VARCHAR(64) PRIMARY KEY,

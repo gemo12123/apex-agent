@@ -45,6 +45,9 @@ public class AgentSessionDialogueSummaryEntity {
     @TableField("message_payload")
     private String messagePayload;
 
+    @TableField("search_text")
+    private String searchText;
+
     @TableField("create_time")
     private LocalDateTime createTime;
 

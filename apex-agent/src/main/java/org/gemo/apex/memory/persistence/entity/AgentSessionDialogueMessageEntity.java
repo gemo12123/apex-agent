@@ -51,6 +51,9 @@ public class AgentSessionDialogueMessageEntity {
     @TableField("message_payload")
     private String messagePayload;
 
+    @TableField("search_text")
+    private String searchText;
+
     @TableField("compacted")
     private Boolean compacted;
 

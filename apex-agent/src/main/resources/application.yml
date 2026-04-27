@@ -45,6 +45,12 @@ apex:
       token-threshold: 12000
       retain-recent-messages: 12
       preflush-enabled: true
+    search:
+      embedding-dimension: 1536
+      text-search-config: simple
+      default-session-search-limit: 8
+      max-session-search-limit: 20
+      min-embedding-text-length: 8
     extraction:
       async-enabled: true
       min-confidence: 0.65

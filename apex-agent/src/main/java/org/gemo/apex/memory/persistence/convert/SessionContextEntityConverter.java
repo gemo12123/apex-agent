@@ -69,6 +69,7 @@ public final class SessionContextEntityConverter {
             entity.setToolCallId(MessageEntityConverter.resolveToolCallId(message));
             entity.setTokenCount(estimateToken(message));
             entity.setMessagePayload(MessageEntityConverter.toPayload(message));
+            entity.setSearchText(message.getText());
             entity.setCompacted(Boolean.FALSE);
             entity.setCreateTime(LocalDateTime.now());
             entities.add(entity);
@@ -96,6 +97,7 @@ public final class SessionContextEntityConverter {
         entity.setSourceTurnNo(turnNo);
         entity.setVersionNo(turnNo != null ? turnNo.longValue() : null);
         entity.setMessagePayload(MessageEntityConverter.toPayload(summaryMessage));
+        entity.setSearchText(summaryMessage.getText());
         entity.setCreateTime(createTime);
         entity.setUpdateTime(LocalDateTime.now());
         return entity;

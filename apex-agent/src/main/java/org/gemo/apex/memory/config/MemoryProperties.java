@@ -48,6 +48,8 @@ public class MemoryProperties {
     /**
      * 记忆抽取配置。
      */
+    private SearchProperties search = new SearchProperties();
+
     private ExtractionProperties extraction = new ExtractionProperties();
 
     @Data
@@ -81,6 +83,15 @@ public class MemoryProperties {
          * 压缩前是否先执行记忆刷新。
          */
         private boolean preflushEnabled = true;
+    }
+
+    @Data
+    public static class SearchProperties {
+        private int embeddingDimension = 1536;
+        private String textSearchConfig = "simple";
+        private int defaultSessionSearchLimit = 8;
+        private int maxSessionSearchLimit = 20;
+        private int minEmbeddingTextLength = 8;
     }
 
     @Data

@@ -3,12 +3,15 @@ package org.gemo.apex.memory.persistence.convert;
 import org.gemo.apex.constant.ExecutionStatus;
 import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.context.SuperAgentContext;
+import org.gemo.apex.memory.persistence.entity.AgentSessionDialogueMessageEntity;
+import org.gemo.apex.memory.persistence.entity.AgentSessionDialogueSummaryEntity;
 import org.gemo.apex.memory.persistence.entity.AgentSessionEntity;
 import org.gemo.apex.util.JacksonUtils;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -54,5 +57,21 @@ class SessionContextEntityConverterTest {
         assertEquals("stage-system-prompt", context.getFixedMessages().get(0).getText());
         assertInstanceOf(UserMessage.class, context.getFixedMessages().get(1));
         assertEquals("Current user id: user-1", context.getFixedMessages().get(1).getText());
+    }
+
+    @Test
+    void toDialogueEntitiesShouldPopulateSearchTextFromMessageContent() {
+        List<AgentSessionDialogueMessageEntity> entities = SessionContextEntityConverter.toDialogueEntities(
+                "session-1", 3, 0L, List.of(new UserMessage("searchable text")));
+
+        assertEquals("searchable text", entities.getFirst().getSearchText());
+    }
+
+    @Test
+    void toSummaryEntityShouldPopulateSearchTextFromSummaryContent() {
+        AgentSessionDialogueSummaryEntity entity = SessionContextEntityConverter.toSummaryEntity(
+                "session-1", new SystemMessage("summary text"), 4L, 3, LocalDateTime.now());
+
+        assertEquals("summary text", entity.getSearchText());
     }
 }
