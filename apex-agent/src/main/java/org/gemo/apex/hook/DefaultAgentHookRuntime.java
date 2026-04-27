@@ -12,6 +12,7 @@ import org.gemo.apex.service.AgentWorkspaceService;
 import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -42,6 +43,7 @@ public class DefaultAgentHookRuntime implements AgentHookRuntime {
 
         LinkedHashMap<String, Object> currentArguments = copyArguments(context);
         Set<String> skippedHookBeans = context.getSkippedHookBeans() != null ? context.getSkippedHookBeans() : Set.of();
+        List<String> executedHookBeans = new ArrayList<>();
 
         for (HookBindingConfig binding : matchingBindings(hooks.getPreToolCall(), context.getToolName())) {
             if (skippedHookBeans.contains(binding.getBean())) {
@@ -59,20 +61,28 @@ public class DefaultAgentHookRuntime implements AgentHookRuntime {
                     currentArguments.clear();
                     currentArguments.putAll(result.getUpdatedArgs());
                 }
+                executedHookBeans.add(binding.getBean());
                 continue;
             }
             if (result.getOutcome() == PreToolCallHookResult.Outcome.REQUEST_CONFIRMATION
                     && result.getUpdatedArgs() == null) {
+                List<String> progress = new ArrayList<>(executedHookBeans);
+                progress.add(binding.getBean());
                 return PreToolCallHookResult.builder()
                         .outcome(PreToolCallHookResult.Outcome.REQUEST_CONFIRMATION)
                         .updatedArgs(new LinkedHashMap<>(currentArguments))
                         .confirmationSpec(result.getConfirmationSpec())
+                        .executedHookBeans(progress)
                         .build();
             }
             return result;
         }
 
-        return PreToolCallHookResult.proceedWithUpdatedArgs(currentArguments);
+        return PreToolCallHookResult.builder()
+                .outcome(PreToolCallHookResult.Outcome.PROCEED)
+                .updatedArgs(currentArguments)
+                .executedHookBeans(List.copyOf(executedHookBeans))
+                .build();
     }
 
     @Override

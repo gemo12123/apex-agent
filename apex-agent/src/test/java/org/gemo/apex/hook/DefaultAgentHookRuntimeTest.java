@@ -43,19 +43,24 @@ class DefaultAgentHookRuntimeTest {
 
     @Test
     void runPreHooksShouldApplyMutationsInOrderAndStopOnConfirmation() {
-        AgentHooksConfig config = AgentHooksConfig.builder()
-                .preToolCall(List.of(
+         AgentHooksConfig config = AgentHooksConfig.builder()
+                 .preToolCall(List.of(
+                         HookBindingConfig.builder()
+                                 .bean("mutateRoomHook")
+                                 .order(10)
+                                 .tools(List.of("meeting_tool"))
+                                 .build(),
+                         HookBindingConfig.builder()
+                                 .bean("toolConfirmHook")
+                                 .order(20)
+                                 .tools(List.of("meeting_tool"))
+                                 .build(),
                         HookBindingConfig.builder()
-                                .bean("mutateRoomHook")
-                                .order(10)
+                                .bean("lateHook")
+                                .order(30)
                                 .tools(List.of("meeting_tool"))
-                                .build(),
-                        HookBindingConfig.builder()
-                                .bean("toolConfirmHook")
-                                .order(20)
-                                .tools(List.of("meeting_tool"))
-                                .build()))
-                .build();
+                                 .build()))
+                 .build();
 
         when(agentWorkspaceService.getHooks("default_agent")).thenReturn(config);
         when(applicationContext.getBean("mutateRoomHook", PreToolCallHook.class))
@@ -71,18 +76,19 @@ class DefaultAgentHookRuntimeTest {
                             .build());
                 });
 
-        PreToolCallHookResult result = runtime.runPreHooks(PreToolCallHookContext.builder()
-                .agentKey("default_agent")
-                .toolName("meeting_tool")
-                .arguments(new LinkedHashMap<>(Map.of(
-                        "room", "A1001",
+         PreToolCallHookResult result = runtime.runPreHooks(PreToolCallHookContext.builder()
+                 .agentKey("default_agent")
+                 .toolName("meeting_tool")
+                 .arguments(new LinkedHashMap<>(Map.of(
+                         "room", "A1001",
                         "date", "2026-04-22")))
                 .build());
 
-        assertEquals(PreToolCallHookResult.Outcome.REQUEST_CONFIRMATION, result.getOutcome());
-        assertEquals("会议室助手", result.getConfirmationSpec().getToolDisplayName());
-        assertEquals("预订会议室前确认", result.getConfirmationSpec().getTitle());
-    }
+         assertEquals(PreToolCallHookResult.Outcome.REQUEST_CONFIRMATION, result.getOutcome());
+         assertEquals("会议室助手", result.getConfirmationSpec().getToolDisplayName());
+         assertEquals("预订会议室前确认", result.getConfirmationSpec().getTitle());
+        assertEquals(List.of("mutateRoomHook", "toolConfirmHook"), result.getExecutedHookBeans());
+     }
 
     @Test
     void runPostHooksShouldReplacePlainTextButKeepJson() {
