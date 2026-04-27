@@ -403,7 +403,6 @@ export function createToolConfirmationRecords(
     title: message.title,
     description: message.description,
     riskLevel: message.risk_level,
-    hookSource: message.hook_source,
     editable: message.editable,
     confirmLabel: message.confirm_label,
     denyLabel: message.deny_label,

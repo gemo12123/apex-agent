@@ -119,7 +119,6 @@ export interface ToolConfirmationDetail {
   title: string
   description?: string
   risk_level: string
-  hook_source: string
   editable: boolean
   confirm_label: string
   deny_label: string
@@ -209,7 +208,6 @@ export interface ToolConfirmationRecord {
   title: string
   description?: string
   riskLevel: string
-  hookSource: string
   editable: boolean
   confirmLabel: string
   denyLabel: string

@@ -108,7 +108,6 @@ class CustomToolCallingManagerTest {
                         .title("预订会议室前确认")
                         .toolName("meeting_tool")
                         .toolDisplayName("会议室助手")
-                        .hookSource("toolConfirmHook")
                         .build())
                 .executedHookBeans(List.of("mutateRoomHook", "toolConfirmHook"))
                 .build());

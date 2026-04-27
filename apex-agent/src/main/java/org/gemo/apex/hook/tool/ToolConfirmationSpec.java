@@ -17,7 +17,6 @@ public class ToolConfirmationSpec {
     private boolean editable;
     private String confirmLabel;
     private String denyLabel;
-    private String hookSource;
 
     @Builder.Default
     private List<ToolConfirmationDisplayField> displayFields = List.of();

@@ -185,7 +185,6 @@ describe('useSessionStore', () => {
                 title: '预订会议室前确认',
                 description: '请确认会议信息。',
                 risk_level: 'MEDIUM',
-                hook_source: 'toolConfirmHook',
                 editable: true,
                 confirm_label: '确认执行',
                 deny_label: '取消',

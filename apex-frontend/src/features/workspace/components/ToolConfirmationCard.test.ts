@@ -15,7 +15,6 @@ describe('ToolConfirmationCard', () => {
           title: '预订会议室前确认',
           description: '请确认会议信息。',
           riskLevel: 'MEDIUM',
-          hookSource: 'toolConfirmHook',
           editable: true,
           confirmLabel: '确认执行',
           denyLabel: '取消',

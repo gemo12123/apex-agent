@@ -41,7 +41,6 @@ public class ToolConfirmationMessage extends AgentMessage {
                         .title(spec.getTitle())
                         .description(spec.getDescription())
                         .riskLevel(spec.getRiskLevel())
-                        .hookSource(spec.getHookSource())
                         .editable(spec.isEditable())
                         .confirmLabel(spec.getConfirmLabel())
                         .denyLabel(spec.getDenyLabel())
@@ -92,9 +91,6 @@ public class ToolConfirmationMessage extends AgentMessage {
 
         @JsonProperty("risk_level")
         private String riskLevel;
-
-        @JsonProperty("hook_source")
-        private String hookSource;
 
         @JsonProperty("editable")
         private boolean editable;

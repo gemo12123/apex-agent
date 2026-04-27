@@ -32,7 +32,6 @@ public class ToolConfirmHook implements PreToolCallHook {
                 .editable(!editableFields.isEmpty())
                 .confirmLabel(option(context, "confirm-label", "确认执行"))
                 .denyLabel(option(context, "deny-label", "取消"))
-                .hookSource("toolConfirmHook")
                 .displayFields(displayFields)
                 .editableFields(editableFields)
                 .build());
