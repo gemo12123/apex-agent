@@ -142,7 +142,7 @@ class InMemorySessionContextStoreTest {
                 .resolvedArguments(Map.of("room", "A1001"))
                 .editableFieldKeys(List.of("room"))
                 .confirmationId("confirm-1")
-                .hookSource("toolConfirmHook")
+                .executedPreHookBeans(List.of("mutateRoomHook", "toolConfirmHook"))
                 .build());
 
         store.save(context);
@@ -152,6 +152,8 @@ class InMemorySessionContextStoreTest {
         assertEquals("TOOL_CONFIRMATION", loaded.getPendingHumanInteraction().getInteractionType());
         assertEquals("meeting_tool", loaded.getPendingToolExecution().getToolName());
         assertEquals(List.of("room"), loaded.getPendingToolExecution().getEditableFieldKeys());
+        assertEquals(List.of("mutateRoomHook", "toolConfirmHook"),
+                loaded.getPendingToolExecution().getExecutedPreHookBeans());
     }
 
     @Test

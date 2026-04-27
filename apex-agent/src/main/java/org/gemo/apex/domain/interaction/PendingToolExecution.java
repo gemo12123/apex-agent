@@ -19,5 +19,5 @@ public class PendingToolExecution {
     private Map<String, Object> resolvedArguments;
     private List<String> editableFieldKeys;
     private String confirmationId;
-    private String hookSource;
+    private List<String> executedPreHookBeans;
 }

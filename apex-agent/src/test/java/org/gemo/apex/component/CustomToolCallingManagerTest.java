@@ -100,14 +100,18 @@ class CustomToolCallingManagerTest {
         when(toolCallback.getToolMetadata()).thenReturn(ToolMetadata.builder().returnDirect(false).build());
         when(toolCallback.call(any(String.class), any())).thenReturn("should-not-run");
 
-        when(hookRuntime.runPreHooks(any())).thenReturn(PreToolCallHookResult.requestConfirmation(
-                ToolConfirmationSpec.builder()
+        when(hookRuntime.runPreHooks(any())).thenReturn(PreToolCallHookResult.builder()
+                .outcome(PreToolCallHookResult.Outcome.REQUEST_CONFIRMATION)
+                .updatedArgs(Map.of("room", "B2001"))
+                .confirmationSpec(ToolConfirmationSpec.builder()
                         .confirmationId("confirm-1")
                         .title("预订会议室前确认")
                         .toolName("meeting_tool")
                         .toolDisplayName("会议室助手")
                         .hookSource("toolConfirmHook")
-                        .build()));
+                        .build())
+                .executedHookBeans(List.of("mutateRoomHook", "toolConfirmHook"))
+                .build());
 
         SuperAgentContext sessionContext = new SuperAgentContext();
         sessionContext.setAgentKey("default_agent");
@@ -131,6 +135,8 @@ class CustomToolCallingManagerTest {
         verify(toolCallback, never()).call(any(String.class), any());
         assertEquals(ExecutionStatus.HUMAN_IN_THE_LOOP, sessionContext.getExecutionStatus());
         assertEquals("TOOL_CONFIRMATION", sessionContext.getPendingHumanInteraction().getInteractionType());
+        assertEquals(List.of("mutateRoomHook", "toolConfirmHook"),
+                sessionContext.getPendingToolExecution().getExecutedPreHookBeans());
         assertTrue(emitter.payloads.stream().anyMatch(payload -> payload.contains("TOOL_CONFIRMATION")));
     }
 

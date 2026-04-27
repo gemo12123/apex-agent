@@ -105,7 +105,7 @@ class HumanInLoopResumerTest {
                 .resolvedArguments(Map.of("room", "A1001", "date", "2026-04-22"))
                 .editableFieldKeys(List.of("room"))
                 .confirmationId("confirm-1")
-                .hookSource("toolConfirmHook")
+                .executedPreHookBeans(List.of("mutateRoomHook", "toolConfirmHook"))
                 .build());
         context.setPendingToolResult(Map.of("call-1", Map.of(
                 "interaction_type", "TOOL_CONFIRMATION",
@@ -123,7 +123,7 @@ class HumanInLoopResumerTest {
         humanInLoopResumer.resume(context);
 
         verify(agentPromptAssembler).assembleToolExecutionPrompt(eq(context), argThat(extra ->
-                List.of("toolConfirmHook").equals(extra.get(ToolContextKeys.SKIP_PRE_HOOK_BEANS))));
+                List.of("mutateRoomHook", "toolConfirmHook").equals(extra.get(ToolContextKeys.SKIP_PRE_HOOK_BEANS))));
         verify(agentToolExecutor).execute(eq(prompt), argThat(message ->
                 message.getToolCalls().size() == 1
                         && "meeting_tool".equals(message.getToolCalls().getFirst().name())

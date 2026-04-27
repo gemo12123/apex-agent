@@ -132,7 +132,10 @@ public class HumanInLoopResumer {
                             : Set.of());
 
             Prompt prompt = agentPromptAssembler.assembleToolExecutionPrompt(context, Map.of(
-                    ToolContextKeys.SKIP_PRE_HOOK_BEANS, List.of(pendingExecution.getHookSource())));
+                    ToolContextKeys.SKIP_PRE_HOOK_BEANS,
+                    pendingExecution.getExecutedPreHookBeans() != null
+                            ? List.copyOf(pendingExecution.getExecutedPreHookBeans())
+                            : List.of()));
 
             AssistantMessage assistantMessage = AssistantMessage.builder()
                     .toolCalls(List.of(new AssistantMessage.ToolCall(

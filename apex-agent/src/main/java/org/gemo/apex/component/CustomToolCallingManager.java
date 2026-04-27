@@ -477,7 +477,7 @@ public class CustomToolCallingManager implements ToolCallingManager {
 
             if (preResult.getOutcome() == PreToolCallHookResult.Outcome.REQUEST_CONFIRMATION) {
                 suspendForConfirmation(sessionContext, toolCall, toolName, invocationId, resolvedArguments,
-                        preResult.getConfirmationSpec());
+                        preResult.getConfirmationSpec(), preResult.getExecutedHookBeans());
             }
 
             ToolContext finalToolContext = toolContext;
@@ -601,13 +601,10 @@ public class CustomToolCallingManager implements ToolCallingManager {
             String toolName,
             String invocationId,
             Map<String, Object> resolvedArguments,
-            org.gemo.apex.hook.tool.ToolConfirmationSpec confirmationSpec) {
+            org.gemo.apex.hook.tool.ToolConfirmationSpec confirmationSpec,
+            List<String> executedPreHookBeans) {
         Assert.notNull(sessionContext, "sessionContext is required for tool confirmation");
         Assert.notNull(confirmationSpec, "confirmationSpec is required");
-
-        String hookSource = StringUtils.hasText(confirmationSpec.getHookSource())
-                ? confirmationSpec.getHookSource()
-                : "";
 
         sessionContext.setPendingHumanInteraction(PendingHumanInteraction.builder()
                 .interactionType(InteractionType.TOOL_CONFIRMATION.name())
@@ -622,7 +619,7 @@ public class CustomToolCallingManager implements ToolCallingManager {
                 .resolvedArguments(new LinkedHashMap<>(resolvedArguments))
                 .editableFieldKeys(confirmationSpec.editableFieldKeys())
                 .confirmationId(confirmationSpec.getConfirmationId())
-                .hookSource(hookSource)
+                .executedPreHookBeans(executedPreHookBeans != null ? List.copyOf(executedPreHookBeans) : List.of())
                 .build());
         sessionContext.setExecutionStatus(ExecutionStatus.HUMAN_IN_THE_LOOP);
 
