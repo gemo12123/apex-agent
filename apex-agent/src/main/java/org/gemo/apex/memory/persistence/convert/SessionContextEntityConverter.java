@@ -33,6 +33,7 @@ public final class SessionContextEntityConverter {
         entity.setExecutionMode(context.getExecutionMode() != null ? context.getExecutionMode().name() : null);
         entity.setLastActiveTime(context.getLastActiveTime());
         entity.setRuntimeSnapshot(JacksonUtils.toJson(toSnapshot(context)));
+        entity.setFixedMessages(MessageEntityConverter.toPayloadList(context.getFixedMessages()));
         entity.setCreateTime(createTime);
         entity.setUpdateTime(LocalDateTime.now());
         return entity;
@@ -123,6 +124,7 @@ public final class SessionContextEntityConverter {
         if (sessionEntity.getLastActiveTime() != null) {
             context.setLastActiveTime(sessionEntity.getLastActiveTime());
         }
+        context.setFixedMessages(MessageEntityConverter.fromPayloadList(sessionEntity.getFixedMessages()));
 
         SessionRuntimeSnapshot snapshot = JacksonUtils.fromJson(sessionEntity.getRuntimeSnapshot(),
                 SessionRuntimeSnapshot.class);

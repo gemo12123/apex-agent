@@ -43,11 +43,11 @@ public class MemoryExtractionService {
         return extractProfileCandidates(context, mergeConversation(context));
     }
 
-    public List<MemoryItem> extractProfileCandidates(SuperAgentContext context, List<Message> rawMessages) {
+    public List<MemoryItem> extractProfileCandidates(SuperAgentContext context, List<Message> messagesForExtraction) {
         if (!memoryConfigService.isProfileEnabled()) {
             return List.of();
         }
-        return invokePromptExtraction(context, rawMessages, MemoryType.LONG_TERM,
+        return invokePromptExtraction(context, messagesForExtraction, MemoryType.LONG_TERM,
                 memoryConfigService.getProperties().getExtraction().getLongTermPrompt());
     }
 
@@ -55,11 +55,11 @@ public class MemoryExtractionService {
         return extractExecutionHistoryCandidates(context, mergeConversation(context));
     }
 
-    public List<MemoryItem> extractExecutionHistoryCandidates(SuperAgentContext context, List<Message> rawMessages) {
+    public List<MemoryItem> extractExecutionHistoryCandidates(SuperAgentContext context, List<Message> messagesForExtraction) {
         if (!memoryConfigService.isExecutionHistoryEnabled()) {
             return List.of();
         }
-        List<MemoryItem> items = invokePromptExtraction(context, rawMessages, MemoryType.EXECUTION_HISTORY,
+        List<MemoryItem> items = invokePromptExtraction(context, messagesForExtraction, MemoryType.EXECUTION_HISTORY,
                 memoryConfigService.getProperties().getExtraction().getExecutionHistoryPrompt());
         for (MemoryItem item : items) {
             if (item.getTimeScope() == null) {
@@ -73,11 +73,11 @@ public class MemoryExtractionService {
         return extractExperienceCandidates(context, mergeConversation(context));
     }
 
-    public List<MemoryItem> extractExperienceCandidates(SuperAgentContext context, List<Message> rawMessages) {
+    public List<MemoryItem> extractExperienceCandidates(SuperAgentContext context, List<Message> messagesForExtraction) {
         if (!memoryConfigService.isExperienceEnabled()) {
             return List.of();
         }
-        return invokePromptExtraction(context, rawMessages, MemoryType.AGENT_EXPERIENCE,
+        return invokePromptExtraction(context, messagesForExtraction, MemoryType.AGENT_EXPERIENCE,
                 memoryConfigService.getProperties().getExtraction().getExperiencePrompt());
     }
 

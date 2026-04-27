@@ -42,6 +42,12 @@ public class AgentSessionEntity {
     @TableField("runtime_snapshot")
     private String runtimeSnapshot;
 
+    /**
+     * 当前会话最新固定消息快照 JSON。
+     */
+    @TableField("fixed_messages")
+    private String fixedMessages;
+
     @TableField("create_time")
     private LocalDateTime createTime;
 

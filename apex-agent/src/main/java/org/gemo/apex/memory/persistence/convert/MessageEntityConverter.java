@@ -1,5 +1,6 @@
 package org.gemo.apex.memory.persistence.convert;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import org.gemo.apex.util.JacksonUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -7,6 +8,9 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 消息对象与持久化字段之间的转换器。
@@ -18,6 +22,10 @@ public final class MessageEntityConverter {
 
     public static String toPayload(Message message) {
         return JacksonUtils.toJson(message);
+    }
+
+    public static String toPayloadList(List<Message> messages) {
+        return JacksonUtils.toJson(messages != null ? messages : List.of());
     }
 
     public static Message fromPayload(String payload, String role, String content) {
@@ -37,6 +45,12 @@ public final class MessageEntityConverter {
             return ToolResponseMessage.builder().responses(java.util.List.of()).build();
         }
         return new SystemMessage(content);
+    }
+
+    public static List<Message> fromPayloadList(String payload) {
+        List<Message> messages = JacksonUtils.fromJson(payload, new TypeReference<List<Message>>() {
+        });
+        return messages != null ? new ArrayList<>(messages) : new ArrayList<>();
     }
 
     public static String resolveRole(Message message) {

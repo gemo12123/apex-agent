@@ -12,11 +12,14 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ScheduledFuture;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -56,15 +59,24 @@ class MemoryLifecycleManagerTest {
     }
 
     @Test
-    void onTurnCompletedShouldExtractMemoriesFromAllRawMessages() {
+    void onTurnCompletedShouldPrependPersistedFixedMessagesForExtraction() {
         SuperAgentContext runtimeContext = new SuperAgentContext();
         runtimeContext.setSessionId("session-1");
         runtimeContext.setUserId("user-1");
         runtimeContext.setAgentKey("agent-1");
         runtimeContext.setTurnNo(3);
         runtimeContext.setLastActiveTime(LocalDateTime.of(2026, 3, 17, 10, 30));
+        runtimeContext.setFixedMessages(new ArrayList<>(List.of(
+                new SystemMessage("stage-system-prompt"),
+                new UserMessage("Current user id: user-1"))));
 
         List<Message> rawMessages = List.of(
+                new UserMessage("user-1"),
+                new AssistantMessage("assistant-1"),
+                new UserMessage("user-2"));
+        List<Message> extractionMessages = List.of(
+                new SystemMessage("stage-system-prompt"),
+                new UserMessage("Current user id: user-1"),
                 new UserMessage("user-1"),
                 new AssistantMessage("assistant-1"),
                 new UserMessage("user-2"));
@@ -80,13 +92,13 @@ class MemoryLifecycleManagerTest {
         List<MemoryItem> experienceCandidates = List.of(experienceItem);
         List<MemoryItem> profileCandidates = List.of(profileItem);
 
-        when(sessionContextStore.load("session-1")).thenReturn(java.util.Optional.of(runtimeContext));
+        when(sessionContextStore.load("session-1")).thenReturn(Optional.of(runtimeContext));
         when(sessionContextStore.loadAllRawDialogueMessages("session-1")).thenReturn(rawMessages);
-        when(memoryExtractionService.extractExecutionHistoryCandidates(runtimeContext, rawMessages))
+        when(memoryExtractionService.extractExecutionHistoryCandidates(runtimeContext, extractionMessages))
                 .thenReturn(executionCandidates);
-        when(memoryExtractionService.extractExperienceCandidates(runtimeContext, rawMessages))
+        when(memoryExtractionService.extractExperienceCandidates(runtimeContext, extractionMessages))
                 .thenReturn(experienceCandidates);
-        when(memoryExtractionService.extractProfileCandidates(runtimeContext, rawMessages))
+        when(memoryExtractionService.extractProfileCandidates(runtimeContext, extractionMessages))
                 .thenReturn(profileCandidates);
         when(taskScheduler.schedule(any(Runnable.class), any(java.util.Date.class))).thenAnswer(invocation -> {
             Runnable runnable = invocation.getArgument(0);
@@ -99,11 +111,35 @@ class MemoryLifecycleManagerTest {
 
         verify(sessionContextStore, times(2)).load("session-1");
         verify(sessionContextStore, times(2)).loadAllRawDialogueMessages("session-1");
-        verify(memoryExtractionService).extractExecutionHistoryCandidates(runtimeContext, rawMessages);
-        verify(memoryExtractionService).extractExperienceCandidates(runtimeContext, rawMessages);
-        verify(memoryExtractionService).extractProfileCandidates(runtimeContext, rawMessages);
+        verify(memoryExtractionService).extractExecutionHistoryCandidates(runtimeContext, extractionMessages);
+        verify(memoryExtractionService).extractExperienceCandidates(runtimeContext, extractionMessages);
+        verify(memoryExtractionService).extractProfileCandidates(runtimeContext, extractionMessages);
         verify(memoryWriteService).persistCandidates(executionCandidates);
         verify(memoryWriteService).persistCandidates(experienceCandidates);
         verify(memoryWriteService).persistCandidates(profileCandidates);
+    }
+
+    @Test
+    void preFlushBeforeCompactionShouldPrependRuntimeFixedMessages() {
+        SuperAgentContext context = new SuperAgentContext();
+        context.setFixedMessages(new ArrayList<>(List.of(
+                new SystemMessage("stage-system-prompt"),
+                new UserMessage("Current user id: user-1"))));
+        List<Message> oldDialogueMessages = List.of(
+                new UserMessage("older-user"),
+                new AssistantMessage("older-assistant"));
+        List<Message> extractionMessages = List.of(
+                new SystemMessage("stage-system-prompt"),
+                new UserMessage("Current user id: user-1"),
+                new UserMessage("older-user"),
+                new AssistantMessage("older-assistant"));
+
+        List<MemoryItem> candidates = List.of(new MemoryItem());
+        when(memoryExtractionService.extractCompactionCandidates(context, extractionMessages)).thenReturn(candidates);
+
+        memoryLifecycleManager.preFlushBeforeCompaction(context, oldDialogueMessages);
+
+        verify(memoryExtractionService).extractCompactionCandidates(context, extractionMessages);
+        verify(memoryWriteService).persistCandidates(candidates);
     }
 }

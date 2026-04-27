@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -43,7 +44,8 @@ public class MemoryLifecycleManager {
     }
 
     public void preFlushBeforeCompaction(SuperAgentContext context, List<Message> oldDialogueMessages) {
-        memoryWriteService.persistCandidates(memoryExtractionService.extractCompactionCandidates(context, oldDialogueMessages));
+        List<Message> extractionMessages = assembleExtractionMessages(context.getFixedMessages(), oldDialogueMessages);
+        memoryWriteService.persistCandidates(memoryExtractionService.extractCompactionCandidates(context, extractionMessages));
     }
 
     public void onTurnCompleted(SuperAgentContext context) {
@@ -75,11 +77,12 @@ public class MemoryLifecycleManager {
             if (context.getTurnNo() != null && turnNo != null && context.getTurnNo() < turnNo) {
                 return;
             }
-            List<Message> rawMessages = sessionContextStore.loadAllRawDialogueMessages(sessionId);
+            List<Message> rawDialogueMessages = sessionContextStore.loadAllRawDialogueMessages(sessionId);
+            List<Message> extractionMessages = assembleExtractionMessages(context.getFixedMessages(), rawDialogueMessages);
             memoryWriteService.persistCandidates(memoryExtractionService.extractExecutionHistoryCandidates(context,
-                    rawMessages));
+                    extractionMessages));
             memoryWriteService.persistCandidates(memoryExtractionService.extractExperienceCandidates(context,
-                    rawMessages));
+                    extractionMessages));
         });
     }
 
@@ -90,10 +93,22 @@ public class MemoryLifecycleManager {
                     && context.getLastActiveTime().isAfter(expectedLastActiveTime)) {
                 return;
             }
-            List<Message> rawMessages = sessionContextStore.loadAllRawDialogueMessages(sessionId);
-            memoryWriteService.persistCandidates(memoryExtractionService.extractProfileCandidates(context, rawMessages));
+            List<Message> rawDialogueMessages = sessionContextStore.loadAllRawDialogueMessages(sessionId);
+            List<Message> extractionMessages = assembleExtractionMessages(context.getFixedMessages(), rawDialogueMessages);
+            memoryWriteService.persistCandidates(memoryExtractionService.extractProfileCandidates(context, extractionMessages));
             longTermTasks.remove(sessionId);
             log.info("会话 [{}] 已触发长期记忆抽取", sessionId);
         });
+    }
+
+    private List<Message> assembleExtractionMessages(List<Message> fixedMessages, List<Message> dialogueMessages) {
+        List<Message> messages = new ArrayList<>();
+        if (fixedMessages != null) {
+            messages.addAll(fixedMessages);
+        }
+        if (dialogueMessages != null) {
+            messages.addAll(dialogueMessages);
+        }
+        return messages;
     }
 }

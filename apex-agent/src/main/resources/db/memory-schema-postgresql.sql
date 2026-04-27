@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS agent_session (
     execution_mode VARCHAR(32),
     last_active_time TIMESTAMP,
     runtime_snapshot TEXT,
+    fixed_messages TEXT,
     create_time TIMESTAMP NOT NULL,
     update_time TIMESTAMP NOT NULL
 );

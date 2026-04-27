@@ -29,7 +29,9 @@ public class MessageDeserializer extends JsonDeserializer<Message> {
         String messageTypeValue = node.has(MessageFields.MESSAGE_TYPE)
                 ? node.get(MessageFields.MESSAGE_TYPE).asText()
                 : "";
-        String content = node.has("content") ? node.get("content").asText() : "";
+        String content = node.has("text")
+                ? node.get("text").asText()
+                : (node.has("content") ? node.get("content").asText() : "");
 
         Map<String, Object> properties = Collections.emptyMap();
         if (node.has("properties")) {

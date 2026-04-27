@@ -54,6 +54,7 @@ class InMemorySessionContextStoreTest {
 
         AgentSessionEntity storedSessionEntity = getSessionEntityMap().get("session-1");
         assertNotNull(storedSessionEntity.getRuntimeSnapshot());
+        assertNotNull(storedSessionEntity.getFixedMessages());
         Map<String, Object> runtimeSnapshot = JacksonUtils.fromJson(storedSessionEntity.getRuntimeSnapshot(), Map.class);
         assertEquals("stage-runtime-1", runtimeSnapshot.get("currentStageId"));
         assertTrue(runtimeSnapshot.containsKey("plan"));
@@ -106,7 +107,9 @@ class InMemorySessionContextStoreTest {
         assertInstanceOf(UserMessage.class, loaded.getDialogueMessages().get(0));
         assertEquals("assistant-2", getDialogueMessageMap().get("session-1").get(1).getContent());
         assertInstanceOf(AssistantMessage.class, loaded.getDialogueMessages().get(1));
-        assertTrue(loaded.getFixedMessages().isEmpty());
+        assertEquals(1, loaded.getFixedMessages().size());
+        assertInstanceOf(SystemMessage.class, loaded.getFixedMessages().getFirst());
+        assertEquals("fixed-1", loaded.getFixedMessages().getFirst().getText());
         assertTrue(loaded.getAvailableTools().isEmpty());
         assertNull(loaded.getSkills());
         assertTrue(loaded.getMemoryRecallPackage().getProfileItems().isEmpty());

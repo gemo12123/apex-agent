@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 
@@ -103,5 +104,22 @@ public class DefaultConversationMemoryManagerTest {
         assertEquals("stage-system-prompt", context.getFixedMessages().get(0).getText());
         assertInstanceOf(UserMessage.class, context.getFixedMessages().get(1));
         assertTrue(context.getFixedMessages().get(1).getText().contains("user-123"));
+    }
+
+    @Test
+    void buildModelMessagesShouldKeepFixedSummaryDialogueOrder() {
+        SuperAgentContext context = new SuperAgentContext();
+        context.setFixedMessages(new ArrayList<>(List.of(
+                new SystemMessage("fixed-1"),
+                new UserMessage("recall-1"))));
+        context.setLatestCompressedMessage(new SystemMessage("summary-1"));
+        context.setDialogueMessages(new ArrayList<>(List.of(
+                new UserMessage("user-1"),
+                new AssistantMessage("assistant-1"))));
+
+        List<Message> messages = conversationMemoryManager.buildModelMessages(context);
+
+        assertEquals(List.of("fixed-1", "recall-1", "summary-1", "user-1", "assistant-1"),
+                messages.stream().map(Message::getText).toList());
     }
 }
