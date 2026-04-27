@@ -50,6 +50,9 @@ mvn spring-boot:run
 
 ## 配置提醒
 
-- 默认记忆存储是 `in-memory`，切换到 `jdbc` 后需先执行 `apex-agent/src/main/resources/db/memory-schema-postgresql.sql`
+- 默认记忆存储是 `in-memory`
+- 当 `apex.memory.store.type=jdbc` 且需要使用 `session_search` 时，官方支持的数据库实现固定为 `PostgreSQL`
+- 切换到 `jdbc` 前需先执行 `apex-agent/src/main/resources/db/memory-schema-postgresql.sql`
+- PostgreSQL 侧需启用 `pgvector` 扩展，schema 中会执行 `CREATE EXTENSION IF NOT EXISTS vector`
 - `application.yml` 与 `application-dev.yml` 中的 MCP 和 Skills 路径是示例绝对路径，落地时需要替换为你自己的本地路径
 - 默认模型来自 DashScope，当前配置为 `qwen-plus`

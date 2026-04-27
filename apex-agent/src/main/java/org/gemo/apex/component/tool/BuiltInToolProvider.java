@@ -2,6 +2,7 @@ package org.gemo.apex.component.tool;
 
 import lombok.extern.slf4j.Slf4j;
 import org.gemo.apex.tool.AskHumanTool;
+import org.gemo.apex.tool.SessionSearchTool;
 import org.gemo.apex.tool.UpdatePlanTool;
 import org.gemo.apex.tool.WritePlanTool;
 import org.springframework.ai.tool.ToolCallback;
@@ -22,7 +23,12 @@ import java.util.List;
 @Component
 public class BuiltInToolProvider {
 
+    private final SessionSearchTool sessionSearchTool;
     private List<ToolCallback> builtInTools;
+
+    public BuiltInToolProvider(SessionSearchTool sessionSearchTool) {
+        this.sessionSearchTool = sessionSearchTool;
+    }
 
     @PostConstruct
     public void init() {
@@ -30,7 +36,8 @@ public class BuiltInToolProvider {
                 .toolObjects(
                         new AskHumanTool(),
                         new WritePlanTool(),
-                        new UpdatePlanTool())
+                        new UpdatePlanTool(),
+                        sessionSearchTool)
                 .build();
 
         this.builtInTools = Collections.unmodifiableList(
