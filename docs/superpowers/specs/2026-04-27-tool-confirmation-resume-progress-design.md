@@ -171,13 +171,15 @@ Add or update tests to verify:
 - `PendingToolExecution.executedPreHookBeans` survives `SuperAgentContext -> SessionRuntimeSnapshot -> SuperAgentContext`
 - no restore logic depends on `hookSource`
 
-## 9. Compatibility and Migration
+## 9. Compatibility Boundary
 
 This change intentionally removes `hookSource` as a restore input.
 
 Code paths that currently read or write `hookSource` must be updated in the same change set so there is only one restore rule in the codebase.
 
-Because this is an internal session runtime structure rather than a public API contract, an in-repo coordinated refactor is acceptable.
+Historical suspended session data does not need compatibility handling in this change.
+
+The implementation may assume a coordinated in-repo refactor where the new restore model is the only supported model after rollout.
 
 ## 10. Risks and Mitigations
 
