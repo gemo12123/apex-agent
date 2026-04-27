@@ -1,13 +1,10 @@
 package org.gemo.apex.memory.config;
 
 import org.gemo.apex.memory.persistence.repository.InMemoryMemoryManageRepository;
-import org.gemo.apex.memory.persistence.repository.InMemoryMemoryReadRepository;
 import org.gemo.apex.memory.persistence.repository.InMemoryMemoryWriteRepository;
 import org.gemo.apex.memory.persistence.repository.JdbcMemoryManageRepository;
-import org.gemo.apex.memory.persistence.repository.JdbcMemoryReadRepository;
 import org.gemo.apex.memory.persistence.repository.JdbcMemoryWriteRepository;
 import org.gemo.apex.memory.persistence.repository.MemoryManageRepository;
-import org.gemo.apex.memory.persistence.repository.MemoryReadRepository;
 import org.gemo.apex.memory.persistence.repository.MemoryWriteRepository;
 import org.gemo.apex.memory.session.InMemorySessionContextStore;
 import org.gemo.apex.memory.session.JdbcSessionContextStore;
@@ -44,17 +41,6 @@ public class MemoryConfiguration {
             return jdbcSessionContextStoreProvider.getIfAvailable();
         }
         return inMemorySessionContextStore;
-    }
-
-    @Bean
-    @Primary
-    public MemoryReadRepository memoryReadRepository(MemoryProperties properties,
-            InMemoryMemoryReadRepository inMemoryMemoryReadRepository,
-            ObjectProvider<JdbcMemoryReadRepository> jdbcMemoryReadRepositoryProvider) {
-        if ("jdbc".equalsIgnoreCase(properties.getStore().getType())) {
-            return jdbcMemoryReadRepositoryProvider.getIfAvailable();
-        }
-        return inMemoryMemoryReadRepository;
     }
 
     @Bean

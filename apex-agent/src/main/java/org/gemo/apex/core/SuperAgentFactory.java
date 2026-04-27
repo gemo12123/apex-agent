@@ -7,7 +7,6 @@ import org.gemo.apex.constant.ExecutionStatus;
 import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.context.SuperAgentContext;
 import org.gemo.apex.memory.context.UserContextHolder;
-import org.gemo.apex.memory.recall.MemoryRecallService;
 import org.gemo.apex.memory.session.SessionContextStore;
 import org.gemo.apex.service.AgentWorkspaceService;
 import org.gemo.apex.skills.Skills;
@@ -46,9 +45,6 @@ public class SuperAgentFactory {
 
     @Autowired
     private SessionContextStore sessionContextStore;
-
-    @Autowired
-    private MemoryRecallService memoryRecallService;
 
     @Transactional
     public SuperAgentContext createContext(String sessionId, String agentKey, String userQuery) {
@@ -114,7 +110,6 @@ public class SuperAgentFactory {
 
         UserMessage userMessage = new UserMessage(userQuery);
         context.addMessage(userMessage);
-        context.setMemoryRecallPackage(memoryRecallService.recall(context));
         persistNewTurn(context, userMessage);
         return context;
     }
@@ -138,7 +133,6 @@ public class SuperAgentFactory {
         context.setUserId(UserContextHolder.getUserId());
         context.setPendingToolResult(humanResponse != null && !humanResponse.isEmpty() ? humanResponse : new HashMap<>());
         context.setNextMessageSortNo(context.getTurnStartSortNo() + context.getPersistedDialogueMessageIndex() + 1L);
-        context.setMemoryRecallPackage(memoryRecallService.recall(context));
         return context;
     }
 

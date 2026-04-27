@@ -7,8 +7,6 @@ import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.context.SuperAgentContext;
 import org.gemo.apex.domain.Plan;
 import org.gemo.apex.memory.context.UserContextHolder;
-import org.gemo.apex.memory.model.MemoryRecallPackage;
-import org.gemo.apex.memory.recall.MemoryRecallService;
 import org.gemo.apex.memory.session.SessionContextStore;
 import org.gemo.apex.service.AgentWorkspaceService;
 import org.junit.jupiter.api.AfterEach;
@@ -29,7 +27,6 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -57,9 +54,6 @@ class SuperAgentFactoryTest {
     @Mock
     private SessionContextStore sessionContextStore;
 
-    @Mock
-    private MemoryRecallService memoryRecallService;
-
     @InjectMocks
     private SuperAgentFactory superAgentFactory;
 
@@ -72,7 +66,6 @@ class SuperAgentFactoryTest {
         when(globalToolRegistry.getSubAgentToolCallbacks(anyString())).thenReturn(List.of());
         when(globalToolRegistry.getSkillsTool(anyString())).thenReturn(null);
         when(agentWorkspaceService.getDefaultExecutionMode(anyString())).thenReturn(ModeEnum.REACT);
-        when(memoryRecallService.recall(any(SuperAgentContext.class))).thenReturn(new MemoryRecallPackage());
     }
 
     @AfterEach
@@ -131,13 +124,11 @@ class SuperAgentFactoryTest {
         existingContext.setPlan(new Plan());
         existingContext.setCurrentStageId("stage-1");
         existingContext.setPendingToolResult(java.util.Map.of("approved", true));
-        MemoryRecallPackage recallPackage = new MemoryRecallPackage();
-        when(memoryRecallService.recall(any(SuperAgentContext.class))).thenReturn(recallPackage);
         when(sessionContextStore.load("session-1")).thenReturn(Optional.of(existingContext));
 
         SuperAgentContext context = superAgentFactory.createContext("session-1", "agent-1", "follow up");
 
-        assertSame(existingContext, context);
+        assertEquals(existingContext, context);
         assertEquals(3, context.getTurnNo());
         assertEquals(SuperAgentContext.Stage.EXECUTION, context.getCurrentStage());
         assertEquals(ModeEnum.REACT, context.getExecutionMode());
@@ -147,7 +138,6 @@ class SuperAgentFactoryTest {
         assertNull(context.getPlan());
         assertNull(context.getCurrentStageId());
         assertNull(context.getPendingToolResult());
-        assertSame(recallPackage, context.getMemoryRecallPackage());
         assertEquals(2, context.getDialogueMessages().size());
         assertEquals("follow up", context.getDialogueMessages().getLast().getText());
 

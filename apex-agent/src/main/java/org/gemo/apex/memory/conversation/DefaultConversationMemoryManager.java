@@ -3,8 +3,6 @@ package org.gemo.apex.memory.conversation;
 import lombok.extern.slf4j.Slf4j;
 import org.gemo.apex.context.SuperAgentContext;
 import org.gemo.apex.memory.config.MemoryConfigService;
-import org.gemo.apex.memory.model.MemoryItem;
-import org.gemo.apex.memory.model.MemoryRecallPackage;
 import org.gemo.apex.memory.session.SessionContextStore;
 import org.gemo.apex.memory.write.MemoryLifecycleManager;
 import org.springframework.ai.chat.messages.Message;
@@ -48,10 +46,6 @@ public class DefaultConversationMemoryManager implements ConversationMemoryManag
             fixedMessages.add(new UserMessage("Current user id: " + context.getUserId()));
         }
 
-        String recallText = renderRecallText(context.getMemoryRecallPackage());
-        if (!recallText.isBlank()) {
-            fixedMessages.add(new UserMessage(recallText));
-        }
         context.setFixedMessages(fixedMessages);
     }
 
@@ -134,30 +128,4 @@ public class DefaultConversationMemoryManager implements ConversationMemoryManag
         context.setNextMessageSortNo(context.getTurnStartSortNo() + context.getPersistedDialogueMessageIndex() + 1L);
     }
 
-    private String renderRecallText(MemoryRecallPackage recallPackage) {
-        if (recallPackage == null) {
-            return "";
-        }
-        StringBuilder builder = new StringBuilder();
-        appendSection(builder, "用户画像记忆", recallPackage.getProfileItems());
-        appendSection(builder, "用户执行历史记忆", recallPackage.getExecutionHistoryItems());
-        appendSection(builder, "智能体经验记忆", recallPackage.getExperienceItems());
-        return builder.toString();
-    }
-
-    private void appendSection(StringBuilder builder, String title, List<MemoryItem> items) {
-        if (items == null || items.isEmpty()) {
-            return;
-        }
-        if (builder.length() > 0) {
-            builder.append("\n\n");
-        }
-        builder.append(title).append(":\n");
-        for (MemoryItem item : items) {
-            builder.append("- ").append(item.getTitle() != null ? item.getTitle() : "未命名记忆")
-                    .append(": ")
-                    .append(item.getContent())
-                    .append("\n");
-        }
-    }
 }

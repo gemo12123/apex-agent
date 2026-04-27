@@ -8,8 +8,6 @@ import org.gemo.apex.domain.Stage;
 import org.gemo.apex.domain.interaction.InteractionType;
 import org.gemo.apex.domain.interaction.PendingHumanInteraction;
 import org.gemo.apex.domain.interaction.PendingToolExecution;
-import org.gemo.apex.memory.model.MemoryItem;
-import org.gemo.apex.memory.model.MemoryRecallPackage;
 import org.gemo.apex.memory.persistence.convert.SessionContextEntityConverter;
 import org.gemo.apex.memory.persistence.entity.AgentSessionDialogueMessageEntity;
 import org.gemo.apex.memory.persistence.entity.AgentSessionDialogueSummaryEntity;
@@ -78,7 +76,6 @@ class InMemorySessionContextStoreTest {
         context.setFixedMessages(new ArrayList<>(List.of(new SystemMessage("fixed-mutated"))));
         context.setAvailableTools(new ArrayList<>());
         context.setSkills(null);
-        context.setMemoryRecallPackage(new MemoryRecallPackage());
         context.setSseEmitter(null);
 
         SuperAgentContext loaded = store.load("session-1").orElseThrow();
@@ -112,7 +109,6 @@ class InMemorySessionContextStoreTest {
         assertEquals("fixed-1", loaded.getFixedMessages().getFirst().getText());
         assertTrue(loaded.getAvailableTools().isEmpty());
         assertNull(loaded.getSkills());
-        assertTrue(loaded.getMemoryRecallPackage().getProfileItems().isEmpty());
         assertNull(loaded.getSseEmitter());
 
         loaded.setAgentKey("agent-after-load");
@@ -265,7 +261,6 @@ class InMemorySessionContextStoreTest {
                 .description("demo description")
                 .content("demo instructions")
                 .build()));
-        context.setMemoryRecallPackage(buildRecallPackage());
         context.setSseEmitter(new SseEmitter());
         return context;
     }
@@ -278,16 +273,6 @@ class InMemorySessionContextStoreTest {
         Plan plan = new Plan();
         plan.setStages(new ArrayList<>(List.of(stage)));
         return plan;
-    }
-
-    private MemoryRecallPackage buildRecallPackage() {
-        MemoryItem item = new MemoryItem();
-        item.setId("memory-1");
-        item.setContent("profile-memory");
-
-        MemoryRecallPackage memoryRecallPackage = new MemoryRecallPackage();
-        memoryRecallPackage.setProfileItems(new ArrayList<>(List.of(item)));
-        return memoryRecallPackage;
     }
 
     @SuppressWarnings("unchecked")
