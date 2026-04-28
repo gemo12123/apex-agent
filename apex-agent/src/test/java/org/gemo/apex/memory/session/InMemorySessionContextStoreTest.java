@@ -8,6 +8,7 @@ import org.gemo.apex.domain.Stage;
 import org.gemo.apex.domain.interaction.InteractionType;
 import org.gemo.apex.domain.interaction.PendingHumanInteraction;
 import org.gemo.apex.domain.interaction.PendingToolExecution;
+import org.gemo.apex.memory.model.MemoryRecallPackage;
 import org.gemo.apex.memory.persistence.convert.SessionContextEntityConverter;
 import org.gemo.apex.memory.persistence.entity.AgentSessionDialogueMessageEntity;
 import org.gemo.apex.memory.persistence.entity.AgentSessionDialogueSummaryEntity;
@@ -45,6 +46,7 @@ class InMemorySessionContextStoreTest {
     @Test
     void saveAndLoadShouldMatchJdbcSemanticsAndIsolateReferences() {
         SuperAgentContext context = buildContext();
+        context.setMemoryRecallPackage(recallPackage());
         store.save(context);
         store.compactDialogue("session-1", new SystemMessage("summary-1"), 2L, 2);
         store.appendDialogueMessages("session-1", 2, 2L, List.of(new UserMessage("user-2"),
@@ -107,6 +109,9 @@ class InMemorySessionContextStoreTest {
         assertEquals(1, loaded.getFixedMessages().size());
         assertInstanceOf(SystemMessage.class, loaded.getFixedMessages().getFirst());
         assertEquals("fixed-1", loaded.getFixedMessages().getFirst().getText());
+        assertNotNull(loaded.getMemoryRecallPackage());
+        assertTrue(loaded.getMemoryRecallPackage().getProfileItems().isEmpty());
+        assertTrue(loaded.getMemoryRecallPackage().getExperienceItems().isEmpty());
         assertTrue(loaded.getAvailableTools().isEmpty());
         assertNull(loaded.getSkills());
         assertNull(loaded.getSseEmitter());
@@ -273,6 +278,13 @@ class InMemorySessionContextStoreTest {
         Plan plan = new Plan();
         plan.setStages(new ArrayList<>(List.of(stage)));
         return plan;
+    }
+
+    private MemoryRecallPackage recallPackage() {
+        MemoryRecallPackage recallPackage = new MemoryRecallPackage();
+        recallPackage.setProfileItems(List.of(new org.gemo.apex.memory.model.MemoryItem()));
+        recallPackage.setExperienceItems(List.of(new org.gemo.apex.memory.model.MemoryItem()));
+        return recallPackage;
     }
 
     @SuppressWarnings("unchecked")

@@ -3,6 +3,8 @@ package org.gemo.apex.memory.conversation;
 import org.gemo.apex.context.SuperAgentContext;
 import org.gemo.apex.memory.config.MemoryConfigService;
 import org.gemo.apex.memory.config.MemoryProperties;
+import org.gemo.apex.memory.model.MemoryItem;
+import org.gemo.apex.memory.model.MemoryRecallPackage;
 import org.gemo.apex.memory.session.SessionContextStore;
 import org.gemo.apex.memory.write.MemoryLifecycleManager;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,6 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -93,17 +96,22 @@ public class DefaultConversationMemoryManagerTest {
     }
 
     @Test
-    void refreshFixedMessages_ShouldIncludeUserIdAsFixedSystemMessage() {
+    void refreshFixedMessagesShouldRenderProfileAndExperienceOnly() {
         SuperAgentContext context = new SuperAgentContext();
         context.setUserId("user-123");
+        context.setMemoryRecallPackage(recallPackage());
 
         conversationMemoryManager.refreshFixedMessages(context, "stage-system-prompt");
 
-        assertEquals(2, context.getFixedMessages().size());
+        assertEquals(3, context.getFixedMessages().size());
         assertInstanceOf(SystemMessage.class, context.getFixedMessages().get(0));
         assertEquals("stage-system-prompt", context.getFixedMessages().get(0).getText());
         assertInstanceOf(UserMessage.class, context.getFixedMessages().get(1));
         assertTrue(context.getFixedMessages().get(1).getText().contains("user-123"));
+        assertInstanceOf(UserMessage.class, context.getFixedMessages().get(2));
+        assertTrue(context.getFixedMessages().get(2).getText().contains("用户画像记忆"));
+        assertTrue(context.getFixedMessages().get(2).getText().contains("智能体经验记忆"));
+        assertFalse(context.getFixedMessages().get(2).getText().contains("用户执行历史记忆"));
     }
 
     @Test
@@ -121,5 +129,19 @@ public class DefaultConversationMemoryManagerTest {
 
         assertEquals(List.of("fixed-1", "recall-1", "summary-1", "user-1", "assistant-1"),
                 messages.stream().map(Message::getText).toList());
+    }
+
+    private MemoryRecallPackage recallPackage() {
+        MemoryRecallPackage recallPackage = new MemoryRecallPackage();
+        recallPackage.setProfileItems(List.of(memoryItem("画像", "偏好咖啡")));
+        recallPackage.setExperienceItems(List.of(memoryItem("经验", "优先展示澄清选项")));
+        return recallPackage;
+    }
+
+    private MemoryItem memoryItem(String title, String content) {
+        MemoryItem item = new MemoryItem();
+        item.setTitle(title);
+        item.setContent(content);
+        return item;
     }
 }

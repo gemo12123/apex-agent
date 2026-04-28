@@ -7,6 +7,9 @@ import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.context.SuperAgentContext;
 import org.gemo.apex.domain.Plan;
 import org.gemo.apex.memory.context.UserContextHolder;
+import org.gemo.apex.memory.model.MemoryItem;
+import org.gemo.apex.memory.model.MemoryRecallPackage;
+import org.gemo.apex.memory.recall.MemoryRecallService;
 import org.gemo.apex.memory.session.SessionContextStore;
 import org.gemo.apex.service.AgentWorkspaceService;
 import org.junit.jupiter.api.AfterEach;
@@ -27,6 +30,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -54,6 +58,9 @@ class SuperAgentFactoryTest {
     @Mock
     private SessionContextStore sessionContextStore;
 
+    @Mock
+    private MemoryRecallService memoryRecallService;
+
     @InjectMocks
     private SuperAgentFactory superAgentFactory;
 
@@ -76,6 +83,8 @@ class SuperAgentFactoryTest {
     @Test
     void createContextShouldCreateNewSessionWhenSessionDoesNotExist() {
         when(sessionContextStore.load("session-1")).thenReturn(Optional.empty());
+        MemoryRecallPackage recallPackage = recallPackage();
+        when(memoryRecallService.recall(any(SuperAgentContext.class))).thenReturn(recallPackage);
 
         SuperAgentContext context = superAgentFactory.createContext("session-1", "agent-1", "hello");
 
@@ -90,11 +99,13 @@ class SuperAgentFactoryTest {
         assertEquals(1, context.getDialogueMessages().size());
         assertInstanceOf(UserMessage.class, context.getDialogueMessages().getFirst());
         assertEquals("hello", context.getDialogueMessages().getFirst().getText());
+        assertSame(recallPackage, context.getMemoryRecallPackage());
 
         ArgumentCaptor<List<Message>> messagesCaptor = ArgumentCaptor.forClass(List.class);
         verify(sessionContextStore).appendDialogueMessages(eq("session-1"), eq(1), eq(0L), messagesCaptor.capture());
         assertEquals(1, messagesCaptor.getValue().size());
         assertEquals("hello", messagesCaptor.getValue().getFirst().getText());
+        verify(memoryRecallService).recall(context);
         verify(sessionContextStore).save(context);
     }
 
@@ -125,6 +136,8 @@ class SuperAgentFactoryTest {
         existingContext.setCurrentStageId("stage-1");
         existingContext.setPendingToolResult(java.util.Map.of("approved", true));
         when(sessionContextStore.load("session-1")).thenReturn(Optional.of(existingContext));
+        MemoryRecallPackage recallPackage = recallPackage();
+        when(memoryRecallService.recall(existingContext)).thenReturn(recallPackage);
 
         SuperAgentContext context = superAgentFactory.createContext("session-1", "agent-1", "follow up");
 
@@ -138,6 +151,7 @@ class SuperAgentFactoryTest {
         assertNull(context.getPlan());
         assertNull(context.getCurrentStageId());
         assertNull(context.getPendingToolResult());
+        assertSame(recallPackage, context.getMemoryRecallPackage());
         assertEquals(2, context.getDialogueMessages().size());
         assertEquals("follow up", context.getDialogueMessages().getLast().getText());
 
@@ -145,7 +159,22 @@ class SuperAgentFactoryTest {
         verify(sessionContextStore).appendDialogueMessages(eq("session-1"), eq(3), eq(5L), messagesCaptor.capture());
         assertEquals(1, messagesCaptor.getValue().size());
         assertEquals("follow up", messagesCaptor.getValue().getFirst().getText());
+        verify(memoryRecallService).recall(existingContext);
         verify(sessionContextStore).save(context);
+    }
+
+    private MemoryRecallPackage recallPackage() {
+        MemoryRecallPackage recallPackage = new MemoryRecallPackage();
+        recallPackage.setProfileItems(List.of(memoryItem("画像", "偏好咖啡")));
+        recallPackage.setExperienceItems(List.of(memoryItem("经验", "优先展示澄清选项")));
+        return recallPackage;
+    }
+
+    private MemoryItem memoryItem(String title, String content) {
+        MemoryItem item = new MemoryItem();
+        item.setTitle(title);
+        item.setContent(content);
+        return item;
     }
 
     @Test

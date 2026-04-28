@@ -7,6 +7,7 @@ import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.domain.Plan;
 import org.gemo.apex.domain.interaction.PendingHumanInteraction;
 import org.gemo.apex.domain.interaction.PendingToolExecution;
+import org.gemo.apex.memory.model.MemoryRecallPackage;
 import org.gemo.apex.skills.Skills;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.tool.ToolCallback;
@@ -130,6 +131,9 @@ public class SuperAgentContext {
     /**
      * 当前轮次召回到的记忆集合。
      */
+    @JsonIgnore
+    private MemoryRecallPackage memoryRecallPackage = new MemoryRecallPackage();
+
     /**
      * 当前会话轮次号。
      */

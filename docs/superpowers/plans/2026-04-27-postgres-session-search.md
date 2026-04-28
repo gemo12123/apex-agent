@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace automatic recent-memory prompt injection with PostgreSQL-backed durable search metadata and a single explicit `session_search` tool over persisted dialogue messages and summaries.
+**Goal:** Keep narrowed automatic recall for profile and experience memories while adding PostgreSQL-backed durable search metadata and a single explicit `session_search` tool over persisted dialogue messages and summaries.
 
-**Architecture:** Remove the old `MemoryRecallService` path from normal prompt assembly, keep JDBC as the durable storage toggle, and make PostgreSQL the supported search-capable implementation. Store `search_text` plus `pgvector` embeddings for dialogue messages, summaries, and execution-history memories; let PostgreSQL generate `tsvector`; expose historical retrieval only through a new built-in `session_search` tool backed by a dedicated hybrid search service.
+**Architecture:** Restore the deleted `MemoryRecallService` path from recent git history, but narrow it so automatic prompt recall contains only profile and experience memories and never execution-history memories. Keep JDBC as the durable storage toggle, make PostgreSQL the supported search-capable implementation, and persist `search_text` plus `pgvector` embeddings for dialogue messages, summaries, and execution-history memories. Historical dialogue retrieval remains explicit through a built-in `session_search` tool backed by a dedicated hybrid search service.
 
 **Tech Stack:** Spring Boot 3.4, Spring AI tool annotations, Spring AI `EmbeddingModel`, MyBatis Plus, `NamedParameterJdbcTemplate`, PostgreSQL `tsvector`, PostgreSQL `pgvector`, JUnit 5, Mockito
 
@@ -23,17 +23,17 @@
 - `apex-agent/src/main/java/org/gemo/apex/constant/ToolNames.java`
   - Add the `SESSION_SEARCH` tool name constant.
 - `apex-agent/src/main/java/org/gemo/apex/context/SuperAgentContext.java`
-  - Remove the `MemoryRecallPackage` field and any related imports/comments.
+  - Restore the `MemoryRecallPackage` field so runtime recall data can be attached to the session context again.
 - `apex-agent/src/main/java/org/gemo/apex/core/SuperAgentFactory.java`
-  - Stop wiring `MemoryRecallService` into new-turn and resume flows.
+  - Wire `MemoryRecallService` back into new-turn and resume flows.
 - `apex-agent/src/main/java/org/gemo/apex/component/tool/BuiltInToolProvider.java`
   - Register the new `SessionSearchTool`.
 - `apex-agent/src/main/java/org/gemo/apex/memory/config/MemoryProperties.java`
   - Add nested search properties for text search config, embedding dimension, and tool result limits.
 - `apex-agent/src/main/java/org/gemo/apex/memory/config/MemoryConfiguration.java`
-  - Remove `MemoryReadRepository` bean wiring and add beans for search/embedding components.
+  - Restore `MemoryReadRepository` bean wiring and add beans for search/embedding components.
 - `apex-agent/src/main/java/org/gemo/apex/memory/conversation/DefaultConversationMemoryManager.java`
-  - Stop rendering/injecting recall text; keep only stage prompt and current user id fixed messages.
+  - Render narrowed recall text that includes only profile and experience sections.
 - `apex-agent/src/main/java/org/gemo/apex/memory/persistence/entity/AgentSessionDialogueMessageEntity.java`
   - Add `searchText` and fields needed by the search-index refresh flow.
 - `apex-agent/src/main/java/org/gemo/apex/memory/persistence/entity/AgentSessionDialogueSummaryEntity.java`
@@ -49,20 +49,22 @@
 - `apex-agent/src/main/java/org/gemo/apex/memory/persistence/repository/JdbcMemoryWriteRepository.java`
   - Refresh execution-history search metadata after upserts.
 - `README.md`
-  - Explain the Postgres-first JDBC requirement and schema prerequisites.
+  - Explain the Postgres-first JDBC requirement, schema prerequisites, and the narrowed automatic recall boundary.
 - `docs/快速开始.md`
-  - Document the required PostgreSQL extension and JDBC search properties.
-
-### Existing files to delete
-
-- `apex-agent/src/main/java/org/gemo/apex/memory/model/MemoryRecallPackage.java`
-- `apex-agent/src/main/java/org/gemo/apex/memory/recall/MemoryRecallService.java`
-- `apex-agent/src/main/java/org/gemo/apex/memory/persistence/repository/MemoryReadRepository.java`
-- `apex-agent/src/main/java/org/gemo/apex/memory/persistence/repository/JdbcMemoryReadRepository.java`
-- `apex-agent/src/main/java/org/gemo/apex/memory/persistence/repository/InMemoryMemoryReadRepository.java`
+  - Document the required PostgreSQL extension, JDBC search properties, and the narrowed automatic recall boundary.
 
 ### New files to create
 
+- `apex-agent/src/main/java/org/gemo/apex/memory/model/MemoryRecallPackage.java`
+  - Restore the runtime recall carrier with only `profileItems` and `experienceItems`.
+- `apex-agent/src/main/java/org/gemo/apex/memory/recall/MemoryRecallService.java`
+  - Restore the recall entrypoint and limit it to profile and experience memories.
+- `apex-agent/src/main/java/org/gemo/apex/memory/persistence/repository/MemoryReadRepository.java`
+  - Restore the recent-item recall contract with only profile and experience read methods.
+- `apex-agent/src/main/java/org/gemo/apex/memory/persistence/repository/JdbcMemoryReadRepository.java`
+  - PostgreSQL/JDBC recent-item recall implementation for profile and experience memories.
+- `apex-agent/src/main/java/org/gemo/apex/memory/persistence/repository/InMemoryMemoryReadRepository.java`
+  - In-memory recent-item recall implementation for profile and experience memories.
 - `apex-agent/src/main/java/org/gemo/apex/memory/search/SearchIndexTextBuilder.java`
   - Build normalized `search_text` for messages, summaries, and execution-history rows.
 - `apex-agent/src/main/java/org/gemo/apex/memory/search/MemoryEmbeddingService.java`
@@ -99,6 +101,7 @@
 
 ### New tests to create
 
+- `apex-agent/src/test/java/org/gemo/apex/memory/recall/MemoryRecallServiceTest.java`
 - `apex-agent/src/test/java/org/gemo/apex/memory/search/SearchIndexTextBuilderTest.java`
 - `apex-agent/src/test/java/org/gemo/apex/memory/search/PgVectorLiteralFormatterTest.java`
 - `apex-agent/src/test/java/org/gemo/apex/memory/search/SpringAiMemoryEmbeddingServiceTest.java`
@@ -106,82 +109,113 @@
 - `apex-agent/src/test/java/org/gemo/apex/memory/search/SessionSearchServiceTest.java`
 - `apex-agent/src/test/java/org/gemo/apex/tool/SessionSearchToolTest.java`
 
-## Task 1: Remove Automatic Recall From Runtime Prompt Assembly
+## Task 1: Restore Narrow Automatic Recall In Runtime Prompt Assembly
 
 **Files:**
-- Delete: `apex-agent/src/main/java/org/gemo/apex/memory/model/MemoryRecallPackage.java`
-- Delete: `apex-agent/src/main/java/org/gemo/apex/memory/recall/MemoryRecallService.java`
-- Delete: `apex-agent/src/main/java/org/gemo/apex/memory/persistence/repository/MemoryReadRepository.java`
-- Delete: `apex-agent/src/main/java/org/gemo/apex/memory/persistence/repository/JdbcMemoryReadRepository.java`
-- Delete: `apex-agent/src/main/java/org/gemo/apex/memory/persistence/repository/InMemoryMemoryReadRepository.java`
+- Create: `apex-agent/src/main/java/org/gemo/apex/memory/model/MemoryRecallPackage.java`
+- Create: `apex-agent/src/main/java/org/gemo/apex/memory/recall/MemoryRecallService.java`
+- Create: `apex-agent/src/main/java/org/gemo/apex/memory/persistence/repository/MemoryReadRepository.java`
+- Create: `apex-agent/src/main/java/org/gemo/apex/memory/persistence/repository/JdbcMemoryReadRepository.java`
+- Create: `apex-agent/src/main/java/org/gemo/apex/memory/persistence/repository/InMemoryMemoryReadRepository.java`
 - Modify: `apex-agent/src/main/java/org/gemo/apex/context/SuperAgentContext.java`
 - Modify: `apex-agent/src/main/java/org/gemo/apex/core/SuperAgentFactory.java`
 - Modify: `apex-agent/src/main/java/org/gemo/apex/memory/config/MemoryConfiguration.java`
 - Modify: `apex-agent/src/main/java/org/gemo/apex/memory/conversation/DefaultConversationMemoryManager.java`
 - Test: `apex-agent/src/test/java/org/gemo/apex/core/SuperAgentFactoryTest.java`
+- Test: `apex-agent/src/test/java/org/gemo/apex/memory/recall/MemoryRecallServiceTest.java`
 - Test: `apex-agent/src/test/java/org/gemo/apex/memory/conversation/DefaultConversationMemoryManagerTest.java`
 - Test: `apex-agent/src/test/java/org/gemo/apex/memory/session/InMemorySessionContextStoreTest.java`
 
-- [ ] **Step 1: Write the failing tests for the new no-recall behavior**
+- [ ] **Step 1: Write the failing tests for narrowed recall behavior**
 
 ```java
 // apex-agent/src/test/java/org/gemo/apex/core/SuperAgentFactoryTest.java
 @Test
-void createContextShouldNotPopulateLegacyRecallState() {
+void createContextShouldPopulateRecallPackageForNewSession() {
     when(sessionContextStore.load("session-1")).thenReturn(Optional.empty());
+    when(memoryRecallService.recall(any(SuperAgentContext.class))).thenReturn(recallPackage());
 
     SuperAgentContext context = superAgentFactory.createContext("session-1", "agent-1", "hello");
 
-    assertEquals("hello", context.getDialogueMessages().getFirst().getText());
-    assertEquals(1, context.getDialogueMessages().size());
+    assertSame(recallPackage(), context.getMemoryRecallPackage());
+    verify(memoryRecallService).recall(context);
+}
+
+// apex-agent/src/test/java/org/gemo/apex/memory/recall/MemoryRecallServiceTest.java
+@Test
+void recallShouldLoadOnlyProfileAndExperienceItems() {
+    SuperAgentContext context = new SuperAgentContext();
+    context.setUserId("user-1");
+    context.setAgentKey("agent-1");
+    context.setSessionId("session-1");
+    when(memoryReadRepository.findProfileItems("user-1", "agent-1", 5))
+            .thenReturn(List.of(memoryItem("画像", "偏好咖啡")));
+    when(memoryReadRepository.findExperienceItems("agent-1", 5))
+            .thenReturn(List.of(memoryItem("经验", "优先展示澄清选项")));
+
+    MemoryRecallPackage recallPackage = memoryRecallService.recall(context);
+
+    assertEquals(1, recallPackage.getProfileItems().size());
+    assertEquals(1, recallPackage.getExperienceItems().size());
+    verify(memoryReadRepository).findProfileItems("user-1", "agent-1", 5);
+    verify(memoryReadRepository).findExperienceItems("agent-1", 5);
+    verifyNoMoreInteractions(memoryReadRepository);
 }
 
 // apex-agent/src/test/java/org/gemo/apex/memory/conversation/DefaultConversationMemoryManagerTest.java
 @Test
-void refreshFixedMessagesShouldOnlyContainStagePromptAndUserId() {
+void refreshFixedMessagesShouldRenderProfileAndExperienceOnly() {
     SuperAgentContext context = new SuperAgentContext();
     context.setUserId("user-123");
+    context.setMemoryRecallPackage(recallPackage());
 
     conversationMemoryManager.refreshFixedMessages(context, "stage-system-prompt");
 
-    assertEquals(List.of("stage-system-prompt", "Current user id: user-123"),
-            context.getFixedMessages().stream().map(Message::getText).toList());
+    assertEquals(3, context.getFixedMessages().size());
+    assertTrue(context.getFixedMessages().get(2).getText().contains("用户画像记忆"));
+    assertTrue(context.getFixedMessages().get(2).getText().contains("智能体经验记忆"));
+    assertFalse(context.getFixedMessages().get(2).getText().contains("用户执行历史记忆"));
 }
 
 // apex-agent/src/test/java/org/gemo/apex/memory/session/InMemorySessionContextStoreTest.java
 @Test
-void saveAndLoadShouldNotDependOnRemovedRecallPackage() {
+void saveAndLoadShouldPreserveRestoredRecallPackage() {
     SuperAgentContext context = buildContext();
+    context.setMemoryRecallPackage(recallPackage());
     store.save(context);
 
     SuperAgentContext loaded = store.load("session-1").orElseThrow();
 
-    assertEquals("fixed-1", loaded.getFixedMessages().getFirst().getText());
+    assertEquals(1, loaded.getMemoryRecallPackage().getProfileItems().size());
+    assertEquals(1, loaded.getMemoryRecallPackage().getExperienceItems().size());
 }
 ```
 
-- [ ] **Step 2: Run the focused tests to verify they fail on the old recall wiring**
+- [ ] **Step 2: Run the focused tests to verify they fail before the recall files are restored**
 
 Run:
 
 ```bash
-mvn -q "-Dtest=SuperAgentFactoryTest,DefaultConversationMemoryManagerTest,InMemorySessionContextStoreTest" test
+mvn -q "-Dtest=SuperAgentFactoryTest,MemoryRecallServiceTest,DefaultConversationMemoryManagerTest,InMemorySessionContextStoreTest" test
 ```
 
 Expected:
 
-- compilation or assertion failures mentioning `MemoryRecallPackage`, `MemoryRecallService`, or extra fixed messages
+- compilation failures for missing `MemoryRecallPackage`, `MemoryRecallService`, or `MemoryReadRepository`
 
-- [ ] **Step 3: Remove the recall field/service/repository path and simplify prompt assembly**
+- [ ] **Step 3: Restore the recall field/service/repository path and narrow it to profile plus experience**
 
 ```java
 // apex-agent/src/main/java/org/gemo/apex/context/SuperAgentContext.java
 @JsonIgnore
 private List<Message> fixedMessages = new ArrayList<>();
 
-// remove the MemoryRecallPackage field and its import entirely
+@JsonIgnore
+private MemoryRecallPackage memoryRecallPackage;
 
 // apex-agent/src/main/java/org/gemo/apex/core/SuperAgentFactory.java
+private final MemoryRecallService memoryRecallService;
+
 private SuperAgentContext initializeNewTurn(SuperAgentContext context, String sessionId, String agentKey,
         String userId, String userQuery) {
     context.setSessionId(sessionId);
@@ -195,6 +229,7 @@ private SuperAgentContext initializeNewTurn(SuperAgentContext context, String se
     context.setTurnNo(context.getTurnNo() != null ? context.getTurnNo() + 1 : 1);
     context.setTurnStartSortNo(context.getLatestCompressedSortNo());
     context.setPersistedDialogueMessageIndex(context.getDialogueMessages().size());
+    context.setMemoryRecallPackage(memoryRecallService.recall(context));
 
     prepareRuntimeContext(context, agentKey);
     applyDefaultStageConfig(context, agentKey);
@@ -212,14 +247,59 @@ public SuperAgentContext resumeContext(String sessionId, Map<String, Object> hum
     }
     prepareRuntimeContext(context, context.getAgentKey());
     context.setUserId(UserContextHolder.getUserId());
+    context.setMemoryRecallPackage(memoryRecallService.recall(context));
     context.setPendingToolResult(humanResponse != null && !humanResponse.isEmpty() ? humanResponse : new HashMap<>());
     context.setNextMessageSortNo(context.getTurnStartSortNo() + context.getPersistedDialogueMessageIndex() + 1L);
     return context;
 }
 
+// apex-agent/src/main/java/org/gemo/apex/memory/model/MemoryRecallPackage.java
+@Data
+public class MemoryRecallPackage {
+    private List<MemoryItem> profileItems = new ArrayList<>();
+    private List<MemoryItem> experienceItems = new ArrayList<>();
+}
+
+// apex-agent/src/main/java/org/gemo/apex/memory/persistence/repository/MemoryReadRepository.java
+public interface MemoryReadRepository {
+    List<MemoryItem> findProfileItems(String userId, String agentKey, int limit);
+    List<MemoryItem> findExperienceItems(String agentKey, int limit);
+}
+
+// apex-agent/src/main/java/org/gemo/apex/memory/recall/MemoryRecallService.java
+@Service
+public class MemoryRecallService {
+
+    private static final int DEFAULT_RECALL_LIMIT = 5;
+
+    public MemoryRecallPackage recall(SuperAgentContext context) {
+        MemoryRecallPackage recallPackage = new MemoryRecallPackage();
+        if (!memoryConfigService.isMemoryEnabled()) {
+            return recallPackage;
+        }
+        if (memoryConfigService.isProfileEnabled()) {
+            recallPackage.setProfileItems(memoryReadRepository.findProfileItems(
+                    context.getUserId(), context.getAgentKey(), DEFAULT_RECALL_LIMIT));
+        }
+        if (memoryConfigService.isExperienceEnabled()) {
+            recallPackage.setExperienceItems(memoryReadRepository.findExperienceItems(
+                    context.getAgentKey(), DEFAULT_RECALL_LIMIT));
+        }
+        return recallPackage;
+    }
+}
+
 // apex-agent/src/main/java/org/gemo/apex/memory/config/MemoryConfiguration.java
-// delete the entire MemoryReadRepository @Bean method so this configuration class
-// only wires SessionContextStore, MemoryWriteRepository, and MemoryManageRepository
+@Bean
+@Primary
+public MemoryReadRepository memoryReadRepository(MemoryProperties properties,
+        InMemoryMemoryReadRepository inMemoryMemoryReadRepository,
+        ObjectProvider<JdbcMemoryReadRepository> jdbcMemoryReadRepositoryProvider) {
+    if ("jdbc".equalsIgnoreCase(properties.getStore().getType())) {
+        return jdbcMemoryReadRepositoryProvider.getIfAvailable();
+    }
+    return inMemoryMemoryReadRepository;
+}
 
 // apex-agent/src/main/java/org/gemo/apex/memory/conversation/DefaultConversationMemoryManager.java
 @Override
@@ -229,29 +309,42 @@ public void refreshFixedMessages(SuperAgentContext context, String stageSystemPr
     if (context.getUserId() != null && !context.getUserId().isBlank()) {
         fixedMessages.add(new UserMessage("Current user id: " + context.getUserId()));
     }
+    String recallText = renderRecallText(context.getMemoryRecallPackage());
+    if (!recallText.isBlank()) {
+        fixedMessages.add(new UserMessage(recallText));
+    }
     context.setFixedMessages(fixedMessages);
+}
+
+private String renderRecallText(MemoryRecallPackage recallPackage) {
+    if (recallPackage == null) {
+        return "";
+    }
+    StringBuilder builder = new StringBuilder();
+    appendSection(builder, "用户画像记忆", recallPackage.getProfileItems());
+    appendSection(builder, "智能体经验记忆", recallPackage.getExperienceItems());
+    return builder.toString();
 }
 ```
 
-- [ ] **Step 4: Run the focused tests to verify the new prompt boundary passes**
+- [ ] **Step 4: Run the focused tests to verify narrowed automatic recall passes**
 
 Run:
 
 ```bash
-mvn -q "-Dtest=SuperAgentFactoryTest,DefaultConversationMemoryManagerTest,InMemorySessionContextStoreTest" test
+mvn -q "-Dtest=SuperAgentFactoryTest,MemoryRecallServiceTest,DefaultConversationMemoryManagerTest,InMemorySessionContextStoreTest" test
 ```
 
 Expected:
 
 - PASS
-- no references to `MemoryRecallPackage` remain in compile output
+- no assertion mentions `用户执行历史记忆`
 
-- [ ] **Step 5: Commit the recall removal slice**
+- [ ] **Step 5: Commit the narrowed recall restoration slice**
 
 ```bash
-git add apex-agent/src/main/java/org/gemo/apex/context/SuperAgentContext.java apex-agent/src/main/java/org/gemo/apex/core/SuperAgentFactory.java apex-agent/src/main/java/org/gemo/apex/memory/config/MemoryConfiguration.java apex-agent/src/main/java/org/gemo/apex/memory/conversation/DefaultConversationMemoryManager.java apex-agent/src/test/java/org/gemo/apex/core/SuperAgentFactoryTest.java apex-agent/src/test/java/org/gemo/apex/memory/conversation/DefaultConversationMemoryManagerTest.java apex-agent/src/test/java/org/gemo/apex/memory/session/InMemorySessionContextStoreTest.java
-git rm apex-agent/src/main/java/org/gemo/apex/memory/model/MemoryRecallPackage.java apex-agent/src/main/java/org/gemo/apex/memory/recall/MemoryRecallService.java apex-agent/src/main/java/org/gemo/apex/memory/persistence/repository/MemoryReadRepository.java apex-agent/src/main/java/org/gemo/apex/memory/persistence/repository/JdbcMemoryReadRepository.java apex-agent/src/main/java/org/gemo/apex/memory/persistence/repository/InMemoryMemoryReadRepository.java
-git commit -m "refactor: remove automatic memory recall injection"
+git add apex-agent/src/main/java/org/gemo/apex/context/SuperAgentContext.java apex-agent/src/main/java/org/gemo/apex/core/SuperAgentFactory.java apex-agent/src/main/java/org/gemo/apex/memory/config/MemoryConfiguration.java apex-agent/src/main/java/org/gemo/apex/memory/conversation/DefaultConversationMemoryManager.java apex-agent/src/main/java/org/gemo/apex/memory/model/MemoryRecallPackage.java apex-agent/src/main/java/org/gemo/apex/memory/recall/MemoryRecallService.java apex-agent/src/main/java/org/gemo/apex/memory/persistence/repository/MemoryReadRepository.java apex-agent/src/main/java/org/gemo/apex/memory/persistence/repository/JdbcMemoryReadRepository.java apex-agent/src/main/java/org/gemo/apex/memory/persistence/repository/InMemoryMemoryReadRepository.java apex-agent/src/test/java/org/gemo/apex/core/SuperAgentFactoryTest.java apex-agent/src/test/java/org/gemo/apex/memory/recall/MemoryRecallServiceTest.java apex-agent/src/test/java/org/gemo/apex/memory/conversation/DefaultConversationMemoryManagerTest.java apex-agent/src/test/java/org/gemo/apex/memory/session/InMemorySessionContextStoreTest.java
+git commit -m "feat: restore narrowed automatic memory recall"
 ```
 
 ## Task 2: Add PostgreSQL Search Schema And Search Configuration
@@ -799,8 +892,10 @@ git commit -m "feat: add hybrid session search tool"
 ```text
 - README must say JDBC durable search support is PostgreSQL-first
 - README must mention `CREATE EXTENSION IF NOT EXISTS vector`
+- README must explain automatic recall only covers profile and experience memories
 - 快速开始 must show `memory-schema-postgresql.sql` as mandatory before JDBC startup
 - 快速开始 must list the new `apex.memory.search.*` properties
+- 快速开始 must say execution-history memory is not auto-injected into prompts
 ```
 
 - [ ] **Step 2: Run the targeted regression suite before editing docs**
@@ -808,7 +903,7 @@ git commit -m "feat: add hybrid session search tool"
 Run:
 
 ```bash
-mvn -q "-Dtest=SuperAgentFactoryTest,DefaultConversationMemoryManagerTest,InMemorySessionContextStoreTest,SessionContextEntityConverterTest,BuiltInToolProviderTest,SearchIndexTextBuilderTest,PgVectorLiteralFormatterTest,SpringAiMemoryEmbeddingServiceTest,PostgresSearchIndexUpdaterTest,SessionSearchServiceTest,SessionSearchToolTest" test
+mvn -q "-Dtest=SuperAgentFactoryTest,MemoryRecallServiceTest,DefaultConversationMemoryManagerTest,InMemorySessionContextStoreTest,SessionContextEntityConverterTest,BuiltInToolProviderTest,SearchIndexTextBuilderTest,PgVectorLiteralFormatterTest,SpringAiMemoryEmbeddingServiceTest,PostgresSearchIndexUpdaterTest,SessionSearchServiceTest,SessionSearchToolTest" test
 ```
 
 Expected:
@@ -820,6 +915,8 @@ Expected:
 ```md
 <!-- README.md -->
 - 默认记忆存储仍可为 `in-memory`
+- 自动 recall 仅注入用户画像记忆和智能体经验记忆
+- 用户执行历史记忆不再自动注入 prompt
 - 当 `apex.memory.store.type=jdbc` 且需要 `session_search` 时，官方支持数据库为 PostgreSQL
 - 启动前需执行 `apex-agent/src/main/resources/db/memory-schema-postgresql.sql`
 - 数据库需启用 `pgvector` 扩展
@@ -839,6 +936,11 @@ Expected:
 - `apex.memory.search.default-session-search-limit`
 - `apex.memory.search.max-session-search-limit`
 - `apex.memory.search.min-embedding-text-length`
+
+补充运行时边界：
+
+- 自动 recall 只覆盖用户画像记忆和智能体经验记忆
+- 用户执行历史记忆仅持久化、建索引，并通过 `session_search` 显式检索
 ```
 
 - [ ] **Step 4: Run the full targeted regression suite one more time after docs changes**
@@ -846,7 +948,7 @@ Expected:
 Run:
 
 ```bash
-mvn -q "-Dtest=SuperAgentFactoryTest,DefaultConversationMemoryManagerTest,InMemorySessionContextStoreTest,SessionContextEntityConverterTest,BuiltInToolProviderTest,SearchIndexTextBuilderTest,PgVectorLiteralFormatterTest,SpringAiMemoryEmbeddingServiceTest,PostgresSearchIndexUpdaterTest,SessionSearchServiceTest,SessionSearchToolTest" test
+mvn -q "-Dtest=SuperAgentFactoryTest,MemoryRecallServiceTest,DefaultConversationMemoryManagerTest,InMemorySessionContextStoreTest,SessionContextEntityConverterTest,BuiltInToolProviderTest,SearchIndexTextBuilderTest,PgVectorLiteralFormatterTest,SpringAiMemoryEmbeddingServiceTest,PostgresSearchIndexUpdaterTest,SessionSearchServiceTest,SessionSearchToolTest" test
 ```
 
 Expected:
@@ -864,8 +966,10 @@ git commit -m "docs: document postgres session search setup"
 
 ### Spec coverage
 
-- Remove automatic recent-N recall:
+- Narrow automatic recall to profile and experience only:
   - Task 1
+- Exclude execution-history memories from automatic recall:
+  - Task 1 and Task 5
 - PostgreSQL search columns and indexes for the three required tables:
   - Task 2
 - Synchronous embedding generation inside `apex-agent`:
@@ -874,7 +978,7 @@ git commit -m "docs: document postgres session search setup"
   - Task 4
 - No `memory_search` tool:
   - enforced by Task 4 scope
-- Prompt regression so history is no longer auto-injected:
+- Prompt regression so only profile/experience history is auto-injected:
   - Task 1 and Task 5 verification
 - No historical migration/backfill:
   - intentionally absent from all tasks

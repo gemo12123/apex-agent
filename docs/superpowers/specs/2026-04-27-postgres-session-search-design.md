@@ -33,6 +33,7 @@ When `apex.memory.store.type=jdbc`, the durable memory/session storage model sho
 - `tsvector` full-text search
 - `pgvector` semantic vector search
 - a single explicit `session_search` tool for historical session lookup
+- a narrowed automatic recall path that keeps only profile and experience memories in the round prompt
 
 The minimum required tables are:
 
@@ -46,7 +47,8 @@ The third gains the same durable search fields so the storage model is consisten
 
 ## 3. Non-Goals
 
-- keeping the old "read the most recent N memory items" recall strategy alive
+- removing automatic recall entirely from the runtime
+- automatically recalling execution-history memories into the round prompt
 - adding a `memory_search` tool in this version
 - automatically injecting searched historical content into every prompt
 - building MMR, recall trace, consolidation jobs, or background re-index pipelines
@@ -56,18 +58,20 @@ The third gains the same durable search fields so the storage model is consisten
 
 ## 4. Chosen Approach
 
-The design replaces automatic recency-based recall with a smaller and clearer model:
+The design keeps PostgreSQL-backed search, but adjusts the runtime boundary instead of removing recall completely:
 
 - keep durable storage and indexing in PostgreSQL
-- stop auto-injecting recalled memory text into the round prompt
+- keep `MemoryRecallService` as the automatic recall entrypoint
+- keep automatic prompt injection only for user profile memories and agent experience memories
+- remove execution-history memories from the automatic recall path
 - expose a single explicit `session_search` tool for historical retrieval
 - generate embeddings synchronously inside `apex-agent` during writes
 
-This intentionally moves Apex closer to the Hermes-style pattern of:
+This gives Apex a hybrid model:
 
-- durable conversation persistence
-- explicit historical search
-- selective use of history only when the model chooses to search
+- lightweight always-on recall for high-signal durable profile/experience context
+- explicit historical search for persisted dialogue history when the model chooses to search
+- durable PostgreSQL indexing for messages, summaries, and execution-history rows
 
 The JDBC abstraction remains in place, but the official search-capable implementation is PostgreSQL-specific. Non-PostgreSQL JDBC deployments are not part of the supported behavior for this design.
 
@@ -88,21 +92,25 @@ No `memory_search` tool is added in this version.
 
 ### 5.2 Automatic recall boundary
 
-The current automatic memory recall path should be removed from the main agent execution flow.
+The automatic memory recall path should remain in the main agent execution flow, but with a smaller scope.
 
 Specifically:
 
-- `MemoryRecallService` should no longer drive prompt construction
-- `MemoryReadRepository` should no longer define the main retrieval abstraction around recent-item reads
-- `DefaultConversationMemoryManager.refreshFixedMessages()` should stop rendering and injecting recall text
-- `MemoryRecallPackage` should be removed if it no longer has a real caller
+- `MemoryRecallService` should continue to populate a runtime recall package
+- `MemoryReadRepository` should remain available for recent-item recall reads
+- `DefaultConversationMemoryManager.refreshFixedMessages()` should continue rendering recall text
+- `MemoryRecallPackage` should remain as the runtime carrier object
+- execution-history memories must be removed from this automatic recall package and from recall text rendering
 
-After this change, the fixed message list should contain only prompt data that is truly fixed for the round, such as:
+After this change, the fixed message list should contain:
 
 - the stage system prompt
 - the current user id message
+- optional rendered recall text for:
+  - user profile memories
+  - agent experience memories
 
-Historical evidence should appear only when the model explicitly invokes `session_search`.
+Execution-history evidence should appear only when it is persisted/indexed for future use or when the model explicitly invokes `session_search`.
 
 ## 6. PostgreSQL Data Model Changes
 
@@ -317,18 +325,23 @@ This is not a permanent scoring contract. It is only the initial tuning baseline
 
 ## 9. Code Boundary Changes
 
-### 9.1 Remove or downgrade old recall-centric pieces
+### 9.1 Retain and narrow recall-centric pieces
 
-The following areas should be removed or stripped of recall responsibilities:
+The following areas should remain, but with narrower responsibilities:
 
 - `MemoryRecallService`
-- `MemoryReadRepository` recent-item search methods
+- `MemoryReadRepository` recent-item search methods for profile and experience only
 - `JdbcMemoryReadRepository`
 - `InMemoryMemoryReadRepository`
 - `MemoryRecallPackage`
 - recall rendering in `DefaultConversationMemoryManager`
 
-If some classes remain temporarily for compatibility with other code, they must no longer control prompt recall behavior.
+The automatic recall path should be updated so that:
+
+- `MemoryRecallService` recalls only profile and experience memories
+- `MemoryReadRepository` no longer exposes execution-history recall reads
+- `DefaultConversationMemoryManager` no longer renders a `用户执行历史记忆` section
+- `SuperAgentFactory` continues to attach the recall package during new-turn and resume flows
 
 ### 9.2 New search-focused components
 
@@ -438,9 +451,10 @@ Add or update tests to verify:
 
 Add or update tests to verify:
 
-- `DefaultConversationMemoryManager.refreshFixedMessages()` no longer injects recall text
+- `DefaultConversationMemoryManager.refreshFixedMessages()` still injects recall text when profile/experience items exist
 - round prompt construction still includes stage prompt and user id message
-- no automatic "recent memory" text is added back into the prompt
+- automatic recall text never includes a `用户执行历史记忆` section
+- `MemoryRecallService` never reads execution-history items for automatic recall
 
 ## 13. Risks and Mitigations
 
@@ -465,12 +479,12 @@ Mitigation:
 - keep FTS configuration replaceable
 - rely on hybrid retrieval rather than full-text search alone
 
-Risk: future contributors may reintroduce automatic prompt recall through old abstractions.
+Risk: automatic recall can still expand prompt size or drift back toward low-signal recency injection.
 
 Mitigation:
 
-- remove recall-centric classes when possible
-- make the new boundary explicit in documentation and tests
+- keep recall scope explicitly limited to profile and experience memories
+- make the execution-history exclusion explicit in documentation and tests
 
 ## 14. Acceptance Criteria
 
@@ -479,7 +493,8 @@ This design is complete when:
 - JDBC durable search support is defined around PostgreSQL
 - `agent_session_dialogue_message`, `agent_session_dialogue_summary`, and `user_execution_history_memory` all store explicit full-text and vector search fields
 - embeddings are generated synchronously by `apex-agent` during writes
-- automatic recent-N memory recall is removed from prompt construction
+- automatic prompt recall remains available only for profile and experience memories
+- execution-history memories are excluded from automatic recall
 - only `session_search` is exposed as the explicit historical search tool
 - `session_search` searches persisted messages and summaries through hybrid FTS plus vector retrieval
 - no historical migration or backfill behavior is introduced in this version
