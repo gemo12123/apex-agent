@@ -92,9 +92,14 @@ public class PostgresSessionSearchRepository implements SessionSearchRepository 
     private String baseSql(String tableName, String messageIdExpr, String turnNoExpr, String sortNoExpr, String roleExpr,
             String snippetExpr, String createTimeExpr, String searchMode) {
         String normalized = searchMode == null ? "hybrid" : searchMode.toLowerCase(Locale.ROOT);
+        String ftsMatch = switch (normalized) {
+            case "vector" -> "FALSE";
+            default -> "m.search_vector @@ websearch_to_tsquery(:ftsConfig, :query)";
+        };
         String ftsScore = switch (normalized) {
             case "vector" -> "0";
-            default -> "ts_rank_cd(m.search_vector, websearch_to_tsquery(:ftsConfig, :query))";
+            default -> "CASE WHEN " + ftsMatch
+                    + " THEN ts_rank_cd(m.search_vector, websearch_to_tsquery(:ftsConfig, :query)) ELSE 0 END";
         };
         String vectorScore = switch (normalized) {
             case "fts" -> "0";
@@ -106,24 +111,45 @@ public class PostgresSessionSearchRepository implements SessionSearchRepository 
             case "vector" -> vectorScore;
             default -> "(0.45 * (" + ftsScore + ") + 0.55 * (" + vectorScore + "))";
         };
+        String hitFilter = switch (normalized) {
+            case "fts" -> "fts_match";
+            case "vector" -> "vector_score > 0";
+            default -> "fts_match OR vector_score > 0";
+        };
 
         return """
-                SELECT '%s' AS source_type,
-                       s.session_id,
-                       %s AS message_id,
-                       %s AS turn_no,
-                       %s AS sort_no,
-                       %s AS role,
-                       %s AS snippet,
-                       %s AS fts_score,
-                       %s AS vector_score,
-                       %s AS hybrid_score,
-                       %s AS create_time
-                  FROM %s m
-                  JOIN agent_session s ON s.session_id = m.session_id
-                 WHERE s.user_id = :userId
-                   AND s.agent_key = :agentKey
-                   AND (:sessionId IS NULL OR s.session_id = :sessionId)
+                WITH scored_hits AS (
+                    SELECT '%s' AS source_type,
+                           s.session_id,
+                           %s AS message_id,
+                           %s AS turn_no,
+                           %s AS sort_no,
+                           %s AS role,
+                           %s AS snippet,
+                           %s AS fts_match,
+                           %s AS fts_score,
+                           %s AS vector_score,
+                           %s AS hybrid_score,
+                           %s AS create_time
+                      FROM %s m
+                      JOIN agent_session s ON s.session_id = m.session_id
+                     WHERE s.user_id = :userId
+                       AND s.agent_key = :agentKey
+                       AND (:sessionId IS NULL OR s.session_id = :sessionId)
+                )
+                SELECT source_type,
+                       session_id,
+                       message_id,
+                       turn_no,
+                       sort_no,
+                       role,
+                       snippet,
+                       fts_score,
+                       vector_score,
+                       hybrid_score,
+                       create_time
+                  FROM scored_hits
+                 WHERE %s
                  ORDER BY hybrid_score DESC
                  LIMIT :limit
                 """.formatted(
@@ -133,10 +159,12 @@ public class PostgresSessionSearchRepository implements SessionSearchRepository 
                 sortNoExpr,
                 roleExpr,
                 snippetExpr,
+                ftsMatch,
                 ftsScore,
                 vectorScore,
                 hybridScore,
                 createTimeExpr,
-                tableName);
+                tableName,
+                hitFilter);
     }
 }
