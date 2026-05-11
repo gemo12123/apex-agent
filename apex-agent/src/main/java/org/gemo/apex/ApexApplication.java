@@ -3,11 +3,13 @@ package org.gemo.apex;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * Apex Agent Application
  */
-@MapperScan("org.gemo.apex.memory.persistence.mapper")
+@MapperScan({"org.gemo.apex.memory.persistence.mapper", "org.gemo.apex.skills.learning.persistence.mapper"})
+@EnableScheduling
 @SpringBootApplication(scanBasePackages = "org.gemo.apex")
 public class ApexApplication {
 
