@@ -18,6 +18,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class SkillUsageBatchServiceTest {
 
@@ -83,6 +84,25 @@ class SkillUsageBatchServiceTest {
 
         verify(experienceRepository).upsert("default_agent", "writing-plans", "new");
         verify(usageRepository).deleteByIds(List.of("u1", "u2"));
+    }
+
+    @Test
+    void failedExtractionShouldKeepValidUsageRowsForRetry() {
+        SkillUsageRecord first = record("u1", 10L);
+        SkillUsageRecord second = record("u2", 20L);
+        List<SkillConversationSlice> slices = List.of(slice("session-1", 10L), slice("session-2", 20L));
+
+        when(usageRepository.findByAgentAndSkill("default_agent", "writing-plans")).thenReturn(List.of(first, second));
+        when(messageCollector.validate(any())).thenAnswer(invocation -> SkillUsageValidationResult.valid(invocation.getArgument(0)));
+        when(messageCollector.collectValidSlices(List.of(first, second))).thenReturn(slices);
+        when(experienceRepository.find("default_agent", "writing-plans")).thenReturn(Optional.empty());
+        when(extractor.regenerate("default_agent", "writing-plans", "", slices))
+                .thenThrow(new IllegalStateException("llm down"));
+
+        assertThrows(IllegalStateException.class,
+                () -> service.processGroup("default_agent", "writing-plans", 2));
+
+        verify(usageRepository, never()).deleteByIds(List.of("u1", "u2"));
     }
 
     private SkillUsageRecord record(String id, long sortNo) {
