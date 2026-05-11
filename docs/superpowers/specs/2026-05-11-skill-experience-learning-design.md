@@ -120,7 +120,8 @@ Behavior:
 
 - insert one row for every successful `activate_skill`
 - do not deduplicate rows
-- rows are deleted only after a successful extraction batch handling
+- valid rows are deleted only after a successful extraction batch handling
+- invalid rows discovered during validation are deleted by validation cleanup, even if the remaining valid rows do not meet the threshold
 
 ## 5.2 `skill_experience_memory`
 
@@ -179,6 +180,13 @@ Reason:
 
 - the returned Skill body should be augmented first
 - usage persistence should not risk interfering with result replacement
+
+Hook isolation contract:
+
+- both hooks must catch their own exceptions and return `KEEP`
+- hook failures must be logged with `agentKey`, `sessionId`, `toolCallId`, `invocationId`, and `skillName` when available
+- hook failures must not escape to `DefaultAgentHookRuntime`, because the current hook runtime propagates post-hook exceptions to tool execution
+- implementation tests must prove repository failures and malformed hook arguments do not block the original `activate_skill` result
 
 ## 7.2 `skillExperienceAugmentHook`
 
@@ -260,14 +268,16 @@ For one eligible `agentKey + skillName` group:
 3. separate rows into:
    - valid rows
    - invalid rows
-4. if valid rows are fewer than threshold after validation, do nothing and keep valid rows
-5. if valid rows still meet threshold:
+4. delete invalid rows found during validation, regardless of whether extraction will run
+5. if valid rows are fewer than threshold after validation, keep valid rows and stop processing this group
+6. if valid rows still meet threshold:
    - collect message slices
    - load existing Skill experience
    - invoke experience extraction
    - upsert latest experience
    - delete valid rows that actually participated
-   - delete invalid rows found in this run
+
+This avoids a poisoned batch where invalid rows keep the raw grouped count above threshold and cause the scheduler to reprocess the same bad records forever.
 
 ## 9. Usage Validation
 
@@ -281,6 +291,7 @@ If validation fails:
 
 - mark that usage row as invalid for this batch
 - exclude it from extraction input
+- delete the invalid row during validation cleanup so it no longer contributes to future threshold counts
 - log a warning with enough identifiers for tracing
 
 The purpose is to protect against:
@@ -378,11 +389,18 @@ This ensures the experience can evolve instead of only growing by concatenation.
 If extraction fails for a group:
 
 - do not delete valid usage rows
-- do not delete invalid usage rows in that failed group
+- invalid rows already removed during validation cleanup may stay removed
 - log warning or error
 - retry on the next scheduled run
 
-Only after experience upsert succeeds should the batch delete rows.
+Only after experience upsert succeeds should the batch delete valid rows that participated in extraction.
+
+If validation cleanup itself fails:
+
+- do not invoke extraction for that group in the same run
+- keep all rows unchanged where possible
+- log the cleanup failure
+- retry on the next scheduled run
 
 ## 13. Idempotency And Consistency
 
@@ -392,10 +410,10 @@ Only after experience upsert succeeds should the batch delete rows.
 - increment `version_no` on each successful overwrite
 - delete rows only by the exact usage id sets determined during the successful run
 
-Deletion after a successful batch includes:
+Deletion during a processed group includes:
 
-- all valid usage ids that were actually used for extraction
-- all invalid usage ids discovered in that run
+- invalid usage ids discovered during validation cleanup
+- all valid usage ids that were actually used for extraction, but only after successful experience upsert
 
 ## 14. Configuration
 
@@ -420,8 +438,11 @@ Add tests for:
 
 - `post-tool-call` augmentation replaces the `activate_skill` result correctly
 - augmentation keeps the original result when no experience exists
+- augmentation repository failures return `KEEP` and do not block `activate_skill`
 - usage hook inserts rows only for successful `activate_skill`
+- usage hook repository failures return `KEEP` and do not block `activate_skill`
 - scheduler skips groups below threshold
+- scheduler deletes invalid rows even when remaining valid rows fall below threshold
 - usage validation rejects mismatched activation points
 - short sessions use full message lists
 - long sessions use fixed windows around activation
@@ -435,7 +456,9 @@ This design is complete when:
 
 - Skill usage is recorded for successful `activate_skill` calls
 - existing Skill experience is appended to activated Skill bodies via `post-tool-call` hook
+- hook failures are self-isolated and never block normal `activate_skill` usage
 - daily scheduled processing checks threshold by accumulated usage count only
+- invalid usage rows are removed from future threshold counts even when no extraction is run
 - short sessions use full message history and long sessions use activation-centered windows
 - extraction prompt is loaded through the same mechanism style used by memory extraction
 - existing Skill experience is included in the extraction prompt
