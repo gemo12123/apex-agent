@@ -15,6 +15,7 @@ import org.gemo.apex.memory.persistence.entity.AgentSessionDialogueSummaryEntity
 import org.gemo.apex.memory.persistence.entity.AgentSessionEntity;
 import org.gemo.apex.skills.definition.skill.Skill;
 import org.gemo.apex.skills.Skills;
+import org.gemo.apex.skills.learning.model.SkillSessionMessage;
 import org.gemo.apex.util.JacksonUtils;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -236,6 +237,25 @@ class InMemorySessionContextStoreTest {
         assertEquals(8L, loaded.getTurnStartSortNo());
         assertEquals(0, loaded.getPersistedDialogueMessageIndex());
         assertEquals(9L, loaded.getNextMessageSortNo());
+    }
+
+    @Test
+    void loadSkillSessionMessagesShouldReturnSortOrderedProjection() {
+        store.appendDialogueMessages("session-1", 2, 0L, List.of(
+                new UserMessage("user-1"),
+                AssistantMessage.builder()
+                        .toolCalls(List.of(new AssistantMessage.ToolCall("call-1", "function", "activate_skill",
+                                "{\"command\":\"writing-plans\"}")))
+                        .build()));
+
+        List<SkillSessionMessage> messages = store.loadSkillSessionMessages("session-1");
+
+        assertEquals(2, messages.size());
+        assertEquals(1L, messages.get(0).getSortNo());
+        assertEquals("user", messages.get(0).getRole());
+        assertEquals(2L, messages.get(1).getSortNo());
+        assertEquals("activate_skill", messages.get(1).getToolName());
+        assertNotNull(messages.get(1).getMessagePayload());
     }
 
     private SuperAgentContext buildContext() {

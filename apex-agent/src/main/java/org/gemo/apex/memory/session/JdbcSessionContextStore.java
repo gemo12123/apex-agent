@@ -15,6 +15,7 @@ import org.gemo.apex.memory.persistence.mapper.AgentSessionMapper;
 import org.gemo.apex.memory.search.MemoryEmbeddingService;
 import org.gemo.apex.memory.search.PostgresSearchIndexUpdater;
 import org.gemo.apex.memory.search.SearchIndexTextBuilder;
+import org.gemo.apex.skills.learning.model.SkillSessionMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -113,6 +114,20 @@ public class JdbcSessionContextStore implements SessionContextStore {
                 .eq(AgentSessionDialogueMessageEntity::getSessionId, sessionId)
                 .orderByAsc(AgentSessionDialogueMessageEntity::getSortNo)).stream()
                 .map(entity -> MessageEntityConverter.fromPayload(entity.getMessagePayload(), entity.getRole(),
+                        entity.getContent()))
+                .toList();
+    }
+
+    @Override
+    public List<SkillSessionMessage> loadSkillSessionMessages(String sessionId) {
+        return dialogueMessageMapper.selectList(new LambdaQueryWrapper<AgentSessionDialogueMessageEntity>()
+                .eq(AgentSessionDialogueMessageEntity::getSessionId, sessionId)
+                .orderByAsc(AgentSessionDialogueMessageEntity::getSortNo)).stream()
+                .map(entity -> new SkillSessionMessage(
+                        entity.getSortNo(),
+                        entity.getRole(),
+                        entity.getToolName(),
+                        entity.getMessagePayload(),
                         entity.getContent()))
                 .toList();
     }
