@@ -86,12 +86,28 @@ apex:
 #        skills:
 #          - meeting-skill
         default-execution-mode: react
+        hooks:
+          post-tool-call:
+            - bean: skillExperienceAugmentHook
+              tools: ["activate_skill"]
+              order: 10
+            - bean: skillUsageRecorderHook
+              tools: ["activate_skill"]
+              order: 20
       deer-flow:
         agent-key: deer-flow
         name: 鹿流通用智能体
         description: 鹿流通用智能体，基于鹿流的系统提示词。
         timeout: 300000
         default-execution-mode: react
+        hooks:
+          post-tool-call:
+            - bean: skillExperienceAugmentHook
+              tools: ["activate_skill"]
+              order: 10
+            - bean: skillUsageRecorderHook
+              tools: ["activate_skill"]
+              order: 20
       meeting_tool:
         agent-key: meeting_tool
         name: 会议室助手
@@ -104,6 +120,14 @@ apex:
         skills:
           - meeting-skill
         default-execution-mode: react
+        hooks:
+          post-tool-call:
+            - bean: skillExperienceAugmentHook
+              tools: ["activate_skill"]
+              order: 10
+            - bean: skillUsageRecorderHook
+              tools: ["activate_skill"]
+              order: 20
       contacts_tool:
         agent-key: contacts_tool
         name: 通讯录助手
@@ -116,6 +140,14 @@ apex:
         skills:
           - contacts-skill
         default-execution-mode: react
+        hooks:
+          post-tool-call:
+            - bean: skillExperienceAugmentHook
+              tools: ["activate_skill"]
+              order: 10
+            - bean: skillUsageRecorderHook
+              tools: ["activate_skill"]
+              order: 20
     mcps:
       meeting-server:
         command: node

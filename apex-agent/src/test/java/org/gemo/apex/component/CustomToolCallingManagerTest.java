@@ -5,6 +5,7 @@ import org.gemo.apex.constant.ToolContextKeys;
 import org.gemo.apex.context.SuperAgentContext;
 import org.gemo.apex.exception.HumanInTheLoopException;
 import org.gemo.apex.hook.AgentHookRuntime;
+import org.gemo.apex.hook.tool.PostToolCallHookResult;
 import org.gemo.apex.hook.tool.PreToolCallHookResult;
 import org.gemo.apex.hook.tool.ToolConfirmationSpec;
 import org.junit.jupiter.api.Test;
@@ -137,6 +138,63 @@ class CustomToolCallingManagerTest {
         assertEquals(List.of("mutateRoomHook", "toolConfirmHook"),
                 sessionContext.getPendingToolExecution().getExecutedPreHookBeans());
         assertTrue(emitter.payloads.stream().anyMatch(payload -> payload.contains("TOOL_CONFIRMATION")));
+    }
+
+    @Test
+    void executeToolCallsShouldApplyPostHookReplacementForActivateSkill() {
+        ToolInvocationNotifier notifier = Mockito.mock(ToolInvocationNotifier.class);
+        AgentHookRuntime hookRuntime = Mockito.mock(AgentHookRuntime.class);
+        CustomToolCallingManager manager = CustomToolCallingManager.builder()
+                .toolInvocationNotifier(notifier)
+                .agentHookRuntime(hookRuntime)
+                .build();
+
+        ToolCallback toolCallback = Mockito.mock(ToolCallback.class);
+        ToolDefinition definition = DefaultToolDefinition.builder()
+                .name("activate_skill")
+                .description("skill")
+                .inputSchema("{}")
+                .build();
+        when(toolCallback.getToolDefinition()).thenReturn(definition);
+        when(toolCallback.getToolMetadata()).thenReturn(ToolMetadata.builder().returnDirect(false).build());
+        when(toolCallback.call(any(String.class), any())).thenReturn("""
+                <activated_skill name="writing-plans">
+                  <instructions>
+                    body
+                  </instructions>
+                </activated_skill>
+                """);
+        when(hookRuntime.runPreHooks(any())).thenReturn(PreToolCallHookResult.proceed());
+        when(hookRuntime.runPostHooks(any())).thenReturn(PostToolCallHookResult.replaceResult("""
+                <activated_skill name="writing-plans">
+                  <instructions>
+                    body
+
+                    # Skill经验
+                    以下经验来自该 Skill 在当前 Agent 下的历史使用总结，仅供参考。
+                  </instructions>
+                </activated_skill>
+                """));
+
+        SuperAgentContext sessionContext = new SuperAgentContext();
+        sessionContext.setAgentKey("default_agent");
+        sessionContext.setSessionId("session-1");
+
+        ToolCallingChatOptions chatOptions = Mockito.mock(ToolCallingChatOptions.class);
+        when(chatOptions.getToolCallbacks()).thenReturn(List.of(toolCallback));
+        when(chatOptions.getToolNames()).thenReturn(Set.of());
+        when(chatOptions.getToolContext()).thenReturn(Map.of(ToolContextKeys.SESSION_CONTEXT, sessionContext));
+
+        Prompt prompt = new Prompt(List.of(new UserMessage("hello")), chatOptions);
+        AssistantMessage assistantMessage = AssistantMessage.builder()
+                .toolCalls(List.of(new AssistantMessage.ToolCall("call-1", "function", "activate_skill",
+                        "{\"command\":\"writing-plans\"}")))
+                .build();
+
+        ToolExecutionResult result = manager.executeToolCalls(prompt, new ChatResponse(List.of(new Generation(assistantMessage))));
+
+        ToolResponseMessage response = (ToolResponseMessage) result.conversationHistory().get(2);
+        assertTrue(response.getResponses().getFirst().responseData().contains("# Skill经验"));
     }
 
     private static class CapturingSseEmitter extends SseEmitter {

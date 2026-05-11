@@ -1,5 +1,6 @@
 package org.gemo.apex.hook;
 
+import lombok.extern.slf4j.Slf4j;
 import org.gemo.apex.config.model.AgentHooksConfig;
 import org.gemo.apex.config.model.HookBindingConfig;
 import org.gemo.apex.hook.tool.PostToolCallHook;
@@ -19,6 +20,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
+@Slf4j
 @Component
 public class DefaultAgentHookRuntime implements AgentHookRuntime {
 
@@ -96,15 +98,26 @@ public class DefaultAgentHookRuntime implements AgentHookRuntime {
         boolean replaced = false;
 
         for (HookBindingConfig binding : matchingBindings(hooks.getPostToolCall(), context.getToolName())) {
-            PostToolCallHook hook = applicationContext.getBean(binding.getBean(), PostToolCallHook.class);
-            PostToolCallHookResult result = hook.apply(context.toBuilder()
-                    .hookOptions(binding.getOptions())
-                    .hookSource(binding.getBean())
-                    .currentResult(currentResult)
-                    .build());
-            if (result.getOutcome() == PostToolCallHookResult.Outcome.REPLACE_RESULT) {
-                currentResult = result.getNextResult();
-                replaced = true;
+            try {
+                PostToolCallHook hook = applicationContext.getBean(binding.getBean(), PostToolCallHook.class);
+                PostToolCallHookResult result = hook.apply(context.toBuilder()
+                        .hookOptions(binding.getOptions())
+                        .hookSource(binding.getBean())
+                        .currentResult(currentResult)
+                        .build());
+                if (result.getOutcome() == PostToolCallHookResult.Outcome.REPLACE_RESULT) {
+                    currentResult = result.getNextResult();
+                    replaced = true;
+                }
+            } catch (Exception ex) {
+                log.warn("Post hook failed, agentKey={}, sessionId={}, toolCallId={}, invocationId={}, skillName={}, hookBean={}",
+                        context.getAgentKey(),
+                        context.getSessionId(),
+                        context.getToolCallId(),
+                        context.getInvocationId(),
+                        context.getArguments() != null ? context.getArguments().get("command") : null,
+                        binding.getBean(),
+                        ex);
             }
         }
 

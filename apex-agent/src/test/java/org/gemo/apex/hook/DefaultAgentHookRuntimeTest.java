@@ -123,4 +123,34 @@ class DefaultAgentHookRuntimeTest {
         assertTrue(textResult.getNextResult().contains("[truncated by post-hook"));
         assertEquals(PostToolCallHookResult.Outcome.KEEP, jsonResult.getOutcome());
     }
+
+    @Test
+    void runPostHooksShouldKeepOriginalResultWhenAugmentHookThrows() {
+        AgentHooksConfig config = AgentHooksConfig.builder()
+                .postToolCall(List.of(HookBindingConfig.builder()
+                        .bean("skillExperienceAugmentHook")
+                        .tools(List.of("activate_skill"))
+                        .order(10)
+                        .build()))
+                .build();
+
+        when(agentWorkspaceService.getHooks("default_agent")).thenReturn(config);
+        when(applicationContext.getBean("skillExperienceAugmentHook", PostToolCallHook.class))
+                .thenReturn(context -> {
+                    throw new IllegalStateException("db down");
+                });
+
+        PostToolCallHookResult result = runtime.runPostHooks(PostToolCallHookContext.builder()
+                .agentKey("default_agent")
+                .sessionId("session-1")
+                .toolCallId("call-1")
+                .invocationId("invoke-1")
+                .toolName("activate_skill")
+                .arguments(Map.of("command", "writing-plans"))
+                .currentResult("<activated_skill name=\"writing-plans\"><instructions>body</instructions></activated_skill>")
+                .originalResult("<activated_skill name=\"writing-plans\"><instructions>body</instructions></activated_skill>")
+                .build());
+
+        assertEquals(PostToolCallHookResult.Outcome.KEEP, result.getOutcome());
+    }
 }
