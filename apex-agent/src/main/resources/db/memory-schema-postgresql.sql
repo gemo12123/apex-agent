@@ -144,3 +144,29 @@ CREATE TABLE IF NOT EXISTS agent_experience_memory (
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_agent_experience_memory_key
     ON agent_experience_memory(agent_key, topic_key, memory_key);
+
+CREATE TABLE IF NOT EXISTS skill_usage_record (
+    id VARCHAR(64) PRIMARY KEY,
+    agent_key VARCHAR(64) NOT NULL,
+    skill_name VARCHAR(128) NOT NULL,
+    session_id VARCHAR(64) NOT NULL,
+    turn_no INT,
+    activation_message_sort_no BIGINT NOT NULL,
+    created_time TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_skill_usage_record_agent_skill
+    ON skill_usage_record(agent_key, skill_name);
+
+CREATE TABLE IF NOT EXISTS skill_experience_memory (
+    id VARCHAR(64) PRIMARY KEY,
+    agent_key VARCHAR(64) NOT NULL,
+    skill_name VARCHAR(128) NOT NULL,
+    content TEXT,
+    version_no BIGINT NOT NULL,
+    create_time TIMESTAMP NOT NULL,
+    update_time TIMESTAMP NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_skill_experience_memory_agent_skill
+    ON skill_experience_memory(agent_key, skill_name);

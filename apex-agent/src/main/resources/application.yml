@@ -32,6 +32,16 @@ mybatis-plus:
     call-setters-on-nulls: true
 
 apex:
+  skills:
+    learning:
+      enabled: true
+      usage-threshold: 5
+      daily-cron: "0 0 4 * * *"
+      long-session-message-threshold: 40
+      activation-window-before: 8
+      activation-window-after: 12
+      experience-prompt: classpath:prompts/skills/skill-experience-learning.st
+      experience-section-title: Skill经验
   memory:
     enabled: true
     store:
