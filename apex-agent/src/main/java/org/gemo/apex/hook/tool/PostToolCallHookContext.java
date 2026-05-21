@@ -20,6 +20,7 @@ public class PostToolCallHookContext {
     private Map<String, Object> hookOptions;
     private String originalResult;
     private String currentResult;
+    private boolean toolExecutionSucceeded;
     private String hookSource;
     private SuperAgentContext superAgentContext;
 }

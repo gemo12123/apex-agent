@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -103,6 +104,23 @@ class SkillUsageBatchServiceTest {
                 () -> service.processGroup("default_agent", "writing-plans", 2));
 
         verify(usageRepository, never()).deleteByIds(List.of("u1", "u2"));
+    }
+
+    @Test
+    void failedInvalidCleanupShouldSkipExtractionForThisGroup() {
+        SkillUsageRecord first = record("u1", 10L);
+        SkillUsageRecord second = record("u2", 20L);
+        when(usageRepository.findByAgentAndSkill("default_agent", "writing-plans")).thenReturn(List.of(first, second));
+        when(messageCollector.validate(first)).thenReturn(SkillUsageValidationResult.invalid(first, "bad"));
+        when(messageCollector.validate(second)).thenReturn(SkillUsageValidationResult.valid(second));
+        doThrow(new IllegalStateException("db down")).when(usageRepository).deleteByIds(List.of("u1"));
+
+        assertThrows(IllegalStateException.class,
+                () -> service.processGroup("default_agent", "writing-plans", 2));
+
+        verify(messageCollector, never()).collectValidSlices(any());
+        verifyNoInteractions(experienceRepository);
+        verifyNoInteractions(extractor);
     }
 
     private SkillUsageRecord record(String id, long sortNo) {

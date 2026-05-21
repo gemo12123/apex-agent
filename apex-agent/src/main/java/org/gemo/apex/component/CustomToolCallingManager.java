@@ -482,6 +482,7 @@ public class CustomToolCallingManager implements ToolCallingManager {
 
             ToolContext finalToolContext = toolContext;
             String resolvedToolInputArguments = JacksonUtils.toJson(resolvedArguments);
+            boolean[] toolExecutionSucceeded = {true};
             String toolCallResult = ToolCallingObservationDocumentation.TOOL_CALL
                     .observation(this.observationConvention, DEFAULT_OBSERVATION_CONVENTION, () -> observationContext,
                             this.observationRegistry)
@@ -490,6 +491,7 @@ public class CustomToolCallingManager implements ToolCallingManager {
                         try {
                             toolResult = toolCallback.call(resolvedToolInputArguments, finalToolContext);
                         } catch (ToolExecutionException ex) {
+                            toolExecutionSucceeded[0] = false;
                             toolResult = this.toolExecutionExceptionProcessor.process(ex);
                         }
                         observationContext.setToolCallResult(toolResult);
@@ -508,6 +510,7 @@ public class CustomToolCallingManager implements ToolCallingManager {
                     .arguments(new LinkedHashMap<>(resolvedArguments))
                     .originalResult(toolCallResult)
                     .currentResult(toolCallResult)
+                    .toolExecutionSucceeded(toolExecutionSucceeded[0])
                     .superAgentContext(sessionContext)
                     .build());
             if (postResult.getOutcome() == PostToolCallHookResult.Outcome.REPLACE_RESULT) {

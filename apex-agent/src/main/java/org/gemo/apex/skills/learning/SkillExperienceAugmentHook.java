@@ -26,7 +26,7 @@ public class SkillExperienceAugmentHook implements PostToolCallHook {
     @Override
     public PostToolCallHookResult apply(PostToolCallHookContext context) {
         try {
-            if (!ToolNames.ACTIVATE_SKILL.equals(context.getToolName())) {
+            if (!properties.isEnabled() || !ToolNames.ACTIVATE_SKILL.equals(context.getToolName())) {
                 return PostToolCallHookResult.keep();
             }
             if (context.getArguments() == null || context.getArguments().get("command") == null
@@ -49,8 +49,9 @@ public class SkillExperienceAugmentHook implements PostToolCallHook {
             String replaced = context.getCurrentResult().replace("</instructions>", "\n\n" + section + "\n</instructions>");
             return PostToolCallHookResult.replaceResult(replaced);
         } catch (Exception ex) {
-            log.warn("Failed to augment skill result, agentKey={}, sessionId={}, toolCallId={}, invocationId={}",
-                    context.getAgentKey(), context.getSessionId(), context.getToolCallId(), context.getInvocationId(), ex);
+            log.warn("Failed to augment skill result, agentKey={}, sessionId={}, toolCallId={}, invocationId={}, skillName={}",
+                    context.getAgentKey(), context.getSessionId(), context.getToolCallId(), context.getInvocationId(),
+                    context.getArguments() != null ? context.getArguments().get("command") : null, ex);
             return PostToolCallHookResult.keep();
         }
     }

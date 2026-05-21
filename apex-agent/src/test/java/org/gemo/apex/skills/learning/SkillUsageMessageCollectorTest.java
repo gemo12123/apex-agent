@@ -75,6 +75,28 @@ class SkillUsageMessageCollectorTest {
         assertTrue(result.reason().contains("skill_name mismatch"));
     }
 
+    @Test
+    void validateShouldRejectPayloadContainingSkillNameOnlyAsSubstring() {
+        AssistantMessage assistantMessage = AssistantMessage.builder()
+                .toolCalls(List.of(new AssistantMessage.ToolCall("call-23", "function", "activate_skill",
+                        "{\"command\":\"writing-plans-extended\",\"note\":\"writing-plans\"}")))
+                .build();
+        when(sessionContextStore.loadSkillSessionMessages("session-3")).thenReturn(List.of(
+                message(20L, "user", null, null, "hi"),
+                new SkillSessionMessage(21L, "assistant", "activate_skill", JacksonUtils.toJson(assistantMessage), "")));
+
+        SkillUsageValidationResult result = collector.validate(SkillUsageRecord.builder()
+                .id("u3")
+                .agentKey("default_agent")
+                .skillName("writing-plans")
+                .sessionId("session-3")
+                .activationMessageSortNo(21L)
+                .build());
+
+        assertFalse(result.isValid());
+        assertTrue(result.reason().contains("skill_name mismatch"));
+    }
+
     private SkillSessionMessage activationMessage(long sortNo, String skillName) {
         AssistantMessage assistantMessage = AssistantMessage.builder()
                 .toolCalls(List.of(new AssistantMessage.ToolCall("call-" + sortNo, "function", "activate_skill",

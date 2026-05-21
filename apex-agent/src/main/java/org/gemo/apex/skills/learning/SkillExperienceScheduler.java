@@ -34,7 +34,12 @@ public class SkillExperienceScheduler {
                 log.warn("Skipping malformed skill learning group key: {}", groupKey);
                 return;
             }
-            batchService.processGroup(parts[0], parts[1], count);
+            try {
+                batchService.processGroup(parts[0], parts[1], count);
+            } catch (Exception ex) {
+                log.warn("Failed to process skill learning group, agentKey={}, skillName={}, count={}",
+                        parts[0], parts[1], count, ex);
+            }
         });
     }
 }

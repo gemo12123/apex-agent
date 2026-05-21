@@ -8,6 +8,7 @@ import org.mockito.MockitoAnnotations;
 import java.util.Map;
 
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -39,5 +40,19 @@ class SkillExperienceSchedulerTest {
 
         verify(batchService).processGroup("default_agent", "writing-plans", 5);
         verify(batchService, never()).processGroup("default_agent", "brainstorming", 2);
+    }
+
+    @Test
+    void schedulerShouldContinueWhenOneGroupProcessingFails() {
+        when(usageRepository.countByAgentAndSkill()).thenReturn(Map.of(
+                "default_agent::writing-plans", 5,
+                "default_agent::brainstorming", 6));
+        doThrow(new IllegalStateException("llm down"))
+                .when(batchService).processGroup("default_agent", "writing-plans", 5);
+
+        scheduler.runDailyScan();
+
+        verify(batchService).processGroup("default_agent", "writing-plans", 5);
+        verify(batchService).processGroup("default_agent", "brainstorming", 6);
     }
 }

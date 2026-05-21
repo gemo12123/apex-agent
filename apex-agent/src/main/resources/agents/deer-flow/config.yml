@@ -32,3 +32,9 @@ hooks:
       tools: ["*"]
       options:
         max-length: 4000
+    - bean: skillExperienceAugmentHook
+      tools: [ "activate_skill" ]
+      order: 10
+    - bean: skillUsageRecorderHook
+      tools: [ "activate_skill" ]
+      order: 20
