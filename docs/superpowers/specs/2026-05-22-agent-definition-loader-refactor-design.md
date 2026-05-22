@@ -59,9 +59,9 @@ public class AgentDefinitionClasspathYmlLoader implements IAgentDefinitionLoader
 Responsibility:
 
 - read base agent configuration from `ApexGlobalProperties.agents`
-- resolve workspace path from `AgentConfig.workspace` or fallback `classpath:agents/<agentKey>/`
-- read and parse `classpath:agents/<agentKey>/config.yml`
-- read prompt and rules resources from workspace
+- resolve a workspace root from `AgentConfig.workspace` or fallback `classpath:agents/<agentKey>/`
+- read and parse `config.yml` relative to the resolved workspace root
+- read prompt and rules resources relative to the resolved workspace root
 - apply fallback prompt chain
 - merge global and workspace values
 - return the final `AgentDefinition`
@@ -147,6 +147,18 @@ public class AgentWorkspaceConfig {
 
 This model is intentionally not exposed outside the agent definition domain.
 
+### Workspace Root Rule
+
+`AgentDefinitionClasspathYmlLoader` must resolve the workspace root once and then read all workspace-scoped artifacts relative to that resolved root:
+
+- `config.yml`
+- `REACT_PROMPT.md`
+- `PLAN_EXECUTOR_WRITE_PLAN_PROMPT.md`
+- `PLAN_EXECUTOR_RUN_PROMPT.md`
+- `AGENT.md`
+
+This preserves current behavior where `AgentConfig.workspace` can redirect all workspace reads together, rather than only prompt and rules files.
+
 ## Merge Rules
 
 `AgentDefinitionClasspathYmlLoader` must preserve current merge behavior.
@@ -182,22 +194,22 @@ This model is intentionally not exposed outside the agent definition domain.
 ### Prompt and Rules Files
 
 - `reactPrompt`
-  - workspace `REACT_PROMPT.md`
+  - `REACT_PROMPT.md` under the resolved workspace root
   - fallback `classpath:agents/defaults/REACT_PROMPT.md`
   - fallback `StageSystemPrompt.getReActPrompt()`
 
 - `planExecutorWritePlanPrompt`
-  - workspace file
+  - file under the resolved workspace root
   - fallback defaults file
   - fallback `StageSystemPrompt.getPlanExecutorWritePlanPrompt()`
 
 - `planExecutorRunPrompt`
-  - workspace file
+  - file under the resolved workspace root
   - fallback defaults file
   - fallback `StageSystemPrompt.getPlanExecutorRunPrompt()`
 
 - `agentRules`
-  - workspace `AGENT.md`
+  - `AGENT.md` under the resolved workspace root
   - fallback empty string
 
 ## Error Handling
