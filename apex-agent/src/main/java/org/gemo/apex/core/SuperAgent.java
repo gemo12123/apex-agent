@@ -32,7 +32,6 @@ public class SuperAgent {
             superAgentLoopRunner.run(context);
         } catch (HumanInTheLoopException ex) {
             log.info("会话挂起等待用户回复, sessionId={}", context.getSessionId());
-            throw ex;
         } catch (RuntimeException ex) {
             if (context.getExecutionStatus() == ExecutionStatus.IN_PROGRESS) {
                 context.setExecutionStatus(ExecutionStatus.FAILED);

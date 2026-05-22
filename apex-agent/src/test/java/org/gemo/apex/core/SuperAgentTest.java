@@ -12,6 +12,7 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -50,7 +51,7 @@ class SuperAgentTest {
     }
 
     @Test
-    void executeShouldFinalizeOnceAndRethrowWhenHumanInLoop() {
+    void executeShouldFinalizeOnceAndSwallowWhenHumanInLoop() {
         SuperAgentContext context = new SuperAgentContext();
         context.setExecutionStatus(ExecutionStatus.IN_PROGRESS);
         doAnswer(invocation -> {
@@ -58,8 +59,9 @@ class SuperAgentTest {
             throw new HumanInTheLoopException("waiting");
         }).when(superAgentLoopRunner).run(context);
 
-        assertThrows(HumanInTheLoopException.class, () -> superAgent.execute(context));
+        assertDoesNotThrow(() -> superAgent.execute(context));
 
+        assertEquals(ExecutionStatus.HUMAN_IN_THE_LOOP, context.getExecutionStatus());
         verify(humanInLoopResumer).resume(context);
         verify(executionFinalizer, times(1)).finalizeTurn(context);
     }

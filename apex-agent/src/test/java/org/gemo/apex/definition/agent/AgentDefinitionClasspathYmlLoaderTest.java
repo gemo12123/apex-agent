@@ -5,6 +5,7 @@ import org.gemo.apex.config.model.AgentConfig;
 import org.gemo.apex.config.model.AgentHooksConfig;
 import org.gemo.apex.config.model.HookBindingConfig;
 import org.gemo.apex.constant.ModeEnum;
+import org.gemo.apex.constant.prompt.StageSystemPrompt;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ByteArrayResource;
@@ -67,6 +68,72 @@ class AgentDefinitionClasspathYmlLoaderTest {
     }
 
     @Test
+    void loadShouldFallBackToGlobalDefinitionWhenWorkspaceConfigMissing() {
+        AgentConfig global = new AgentConfig();
+        global.setAgentKey("agent-global");
+        global.setDefaultExecutionMode(ModeEnum.PLAN_EXECUTOR);
+        global.setMcps(List.of("global-mcp"));
+        global.setSubAgents(List.of("global-sub"));
+        global.setSkills(List.of("global-skill"));
+        global.setHooks(AgentHooksConfig.builder()
+                .preToolCall(List.of(HookBindingConfig.builder().bean("globalHook").build()))
+                .build());
+        apexGlobalProperties.setAgents(Map.of("agent-global", global));
+
+        stubCommonWorkspaceFilesMissing("classpath:agents/agent-global/");
+        when(resourceLoader.getResource("classpath:agents/defaults/REACT_PROMPT.md"))
+                .thenReturn(resource("default react"));
+        when(resourceLoader.getResource("classpath:agents/defaults/PLAN_EXECUTOR_WRITE_PLAN_PROMPT.md"))
+                .thenReturn(missing());
+        when(resourceLoader.getResource("classpath:agents/defaults/PLAN_EXECUTOR_RUN_PROMPT.md"))
+                .thenReturn(missing());
+
+        AgentDefinition definition = loader.load("agent-global");
+
+        assertEquals(ModeEnum.PLAN_EXECUTOR, definition.defaultExecutionMode());
+        assertEquals(List.of("global-mcp"), definition.mcpNames());
+        assertEquals(List.of("global-sub"), definition.subAgentNames());
+        assertEquals(List.of("global-skill"), definition.skillNames());
+        assertEquals("globalHook", definition.hooks().getPreToolCall().getFirst().getBean());
+        assertEquals("default react", definition.reactPrompt());
+        assertEquals("", definition.agentRules());
+    }
+
+    @Test
+    void loadShouldOverrideSubAgentsSkillsHooksAndExecutionModeFromWorkspaceConfig() {
+        AgentConfig global = new AgentConfig();
+        global.setAgentKey("agent-override");
+        global.setDefaultExecutionMode(ModeEnum.REACT);
+        global.setSubAgents(List.of("global-sub"));
+        global.setSkills(List.of("global-skill"));
+        global.setHooks(AgentHooksConfig.builder()
+                .preToolCall(List.of(HookBindingConfig.builder().bean("globalHook").build()))
+                .build());
+        apexGlobalProperties.setAgents(Map.of("agent-override", global));
+
+        when(resourceLoader.getResource("classpath:agents/agent-override/config.yml"))
+                .thenReturn(resource("""
+                        allow-sub-agents: [workspace-sub]
+                        allow-skills: [workspace-skill]
+                        default-execution-mode: PLAN_EXECUTOR
+                        hooks:
+                          pre-tool-call:
+                            - bean: workspaceHook
+                              tools: [meeting_tool]
+                        """));
+        stubCommonPromptAndRulesMissing("classpath:agents/agent-override/");
+        stubCommonDefaultsMissing();
+
+        AgentDefinition definition = loader.load("agent-override");
+
+        assertEquals(ModeEnum.PLAN_EXECUTOR, definition.defaultExecutionMode());
+        assertEquals(List.of("workspace-sub"), definition.subAgentNames());
+        assertEquals(List.of("workspace-skill"), definition.skillNames());
+        assertEquals("workspaceHook", definition.hooks().getPreToolCall().getFirst().getBean());
+        assertEquals(List.of("meeting_tool"), definition.hooks().getPreToolCall().getFirst().getTools());
+    }
+
+    @Test
     void loadShouldDisableHooksWhenWorkspaceConfigDeclaresEmptyHooksArray() {
         AgentConfig global = new AgentConfig();
         global.setAgentKey("agent-2");
@@ -97,6 +164,27 @@ class AgentDefinitionClasspathYmlLoaderTest {
     }
 
     @Test
+    void loadShouldUseGlobalHooksWhenWorkspaceDoesNotDeclareHooks() {
+        AgentConfig global = new AgentConfig();
+        global.setAgentKey("agent-hooks-fallback");
+        global.setDefaultExecutionMode(ModeEnum.REACT);
+        global.setHooks(AgentHooksConfig.builder()
+                .postToolCall(List.of(HookBindingConfig.builder().bean("postHook").build()))
+                .build());
+        apexGlobalProperties.setAgents(Map.of("agent-hooks-fallback", global));
+
+        when(resourceLoader.getResource("classpath:agents/agent-hooks-fallback/config.yml"))
+                .thenReturn(resource("allow-mcps: [workspace-mcp]\n"));
+        stubCommonPromptAndRulesMissing("classpath:agents/agent-hooks-fallback/");
+        stubCommonDefaultsMissing();
+
+        AgentDefinition definition = loader.load("agent-hooks-fallback");
+
+        assertEquals("postHook", definition.hooks().getPostToolCall().getFirst().getBean());
+        assertEquals(List.of("workspace-mcp"), definition.mcpNames());
+    }
+
+    @Test
     void loadShouldFailWhenWorkspaceConfigIsInvalid() {
         AgentConfig global = new AgentConfig();
         global.setAgentKey("agent-3");
@@ -107,6 +195,61 @@ class AgentDefinitionClasspathYmlLoaderTest {
                 .thenReturn(resource("default-execution-mode: [broken"));
 
         assertThrows(IllegalStateException.class, () -> loader.load("agent-3"));
+    }
+
+    @Test
+    void loadShouldFailWhenWorkspaceExecutionModeIsInvalid() {
+        AgentConfig global = new AgentConfig();
+        global.setAgentKey("agent-invalid-mode");
+        global.setDefaultExecutionMode(ModeEnum.REACT);
+        apexGlobalProperties.setAgents(Map.of("agent-invalid-mode", global));
+
+        when(resourceLoader.getResource("classpath:agents/agent-invalid-mode/config.yml"))
+                .thenReturn(resource("default-execution-mode: invalid-mode\n"));
+
+        assertThrows(IllegalStateException.class, () -> loader.load("agent-invalid-mode"));
+    }
+
+    @Test
+    void loadShouldFailWhenAgentIsMissing() {
+        assertThrows(IllegalStateException.class, () -> loader.load("missing-agent"));
+    }
+
+    @Test
+    void loadShouldUsePromptFallbackChainFromDefaultsThenStagePrompt() {
+        AgentConfig global = new AgentConfig();
+        global.setAgentKey("agent-prompt");
+        global.setDefaultExecutionMode(ModeEnum.REACT);
+        apexGlobalProperties.setAgents(Map.of("agent-prompt", global));
+
+        stubCommonWorkspaceFilesMissing("classpath:agents/agent-prompt/");
+        when(resourceLoader.getResource("classpath:agents/defaults/REACT_PROMPT.md"))
+                .thenReturn(resource("default react prompt"));
+        when(resourceLoader.getResource("classpath:agents/defaults/PLAN_EXECUTOR_WRITE_PLAN_PROMPT.md"))
+                .thenReturn(missing());
+        when(resourceLoader.getResource("classpath:agents/defaults/PLAN_EXECUTOR_RUN_PROMPT.md"))
+                .thenReturn(missing());
+
+        AgentDefinition definition = loader.load("agent-prompt");
+
+        assertEquals("default react prompt", definition.reactPrompt());
+        assertEquals(StageSystemPrompt.getPlanExecutorWritePlanPrompt(), definition.planExecutorWritePlanPrompt());
+        assertEquals(StageSystemPrompt.getPlanExecutorRunPrompt(), definition.planExecutorRunPrompt());
+    }
+
+    @Test
+    void loadShouldReturnEmptyRulesWhenAgentRulesFileMissing() {
+        AgentConfig global = new AgentConfig();
+        global.setAgentKey("agent-rules");
+        global.setDefaultExecutionMode(ModeEnum.REACT);
+        apexGlobalProperties.setAgents(Map.of("agent-rules", global));
+
+        stubCommonWorkspaceFilesMissing("classpath:agents/agent-rules/");
+        stubCommonDefaultsMissing();
+
+        AgentDefinition definition = loader.load("agent-rules");
+
+        assertEquals("", definition.agentRules());
     }
 
     @Test
@@ -137,6 +280,26 @@ class AgentDefinitionClasspathYmlLoaderTest {
 
     private Resource resource(String content) {
         return new ByteArrayResource(content.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void stubCommonWorkspaceFilesMissing(String workspaceRoot) {
+        when(resourceLoader.getResource(workspaceRoot + "config.yml")).thenReturn(missing());
+        stubCommonPromptAndRulesMissing(workspaceRoot);
+    }
+
+    private void stubCommonPromptAndRulesMissing(String workspaceRoot) {
+        when(resourceLoader.getResource(workspaceRoot + "REACT_PROMPT.md")).thenReturn(missing());
+        when(resourceLoader.getResource(workspaceRoot + "PLAN_EXECUTOR_WRITE_PLAN_PROMPT.md")).thenReturn(missing());
+        when(resourceLoader.getResource(workspaceRoot + "PLAN_EXECUTOR_RUN_PROMPT.md")).thenReturn(missing());
+        when(resourceLoader.getResource(workspaceRoot + "AGENT.md")).thenReturn(missing());
+    }
+
+    private void stubCommonDefaultsMissing() {
+        when(resourceLoader.getResource("classpath:agents/defaults/REACT_PROMPT.md")).thenReturn(missing());
+        when(resourceLoader.getResource("classpath:agents/defaults/PLAN_EXECUTOR_WRITE_PLAN_PROMPT.md"))
+                .thenReturn(missing());
+        when(resourceLoader.getResource("classpath:agents/defaults/PLAN_EXECUTOR_RUN_PROMPT.md"))
+                .thenReturn(missing());
     }
 
     private Resource missing() {
