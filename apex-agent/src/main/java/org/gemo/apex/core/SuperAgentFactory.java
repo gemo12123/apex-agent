@@ -4,12 +4,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.gemo.apex.component.tool.BuiltInToolProvider;
 import org.gemo.apex.component.tool.GlobalToolRegistry;
 import org.gemo.apex.constant.ExecutionStatus;
-import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.context.SuperAgentContext;
+import org.gemo.apex.definition.agent.AgentDefinition;
+import org.gemo.apex.definition.agent.IAgentDefinitionLoader;
 import org.gemo.apex.memory.context.UserContextHolder;
 import org.gemo.apex.memory.recall.MemoryRecallService;
 import org.gemo.apex.memory.session.SessionContextStore;
-import org.gemo.apex.service.AgentWorkspaceService;
 import org.gemo.apex.skills.Skills;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.tool.ToolCallback;
@@ -39,7 +39,7 @@ public class SuperAgentFactory {
     private BuiltInToolProvider builtInToolProvider;
 
     @Autowired
-    private AgentWorkspaceService agentWorkspaceService;
+    private IAgentDefinitionLoader agentDefinitionLoader;
 
     @Autowired
     private ApplicationContext applicationContext;
@@ -110,7 +110,6 @@ public class SuperAgentFactory {
         context.setPersistedDialogueMessageIndex(context.getDialogueMessages().size());
 
         prepareRuntimeContext(context, agentKey);
-        applyDefaultStageConfig(context, agentKey);
 
         UserMessage userMessage = new UserMessage(userQuery);
         context.addMessage(userMessage);
@@ -148,6 +147,7 @@ public class SuperAgentFactory {
     }
 
     private void prepareRuntimeContext(SuperAgentContext context, String agentKey) {
+        AgentDefinition definition = agentDefinitionLoader.load(agentKey);
         context.setAvailableTools(new java.util.ArrayList<>());
         context.setSkills(null);
 
@@ -165,17 +165,13 @@ public class SuperAgentFactory {
             context.getAvailableTools().addAll(Arrays.asList(skills.toolCallbacks()));
             context.setSkills(skills);
         }
-    }
 
-    private void applyDefaultStageConfig(SuperAgentContext context, String agentKey) {
-        ModeEnum executionMode = agentWorkspaceService.getDefaultExecutionMode(agentKey);
-
-        if (executionMode == null) {
+        if (definition.defaultExecutionMode() == null) {
             throw new IllegalStateException(
                     "Agent " + agentKey + " is missing required default execution mode");
         }
 
         context.setCurrentStage(SuperAgentContext.Stage.EXECUTION);
-        context.setExecutionMode(executionMode);
+        context.setExecutionMode(definition.defaultExecutionMode());
     }
 }

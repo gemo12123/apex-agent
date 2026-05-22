@@ -8,13 +8,15 @@ import io.modelcontextprotocol.client.transport.StdioClientTransport;
 import io.modelcontextprotocol.spec.McpSchema;
 import lombok.extern.slf4j.Slf4j;
 import org.gemo.apex.config.model.McpServerConfig;
-import org.gemo.apex.config.provider.SkillConfigProvider;
 import org.gemo.apex.constant.CacheKeys;
 import org.gemo.apex.constant.ToolContextKeys;
-import org.gemo.apex.service.AgentWorkspaceService;
+import org.gemo.apex.definition.agent.AgentDefinition;
+import org.gemo.apex.definition.agent.IAgentDefinitionLoader;
+import org.gemo.apex.definition.mcp.IMcpDefinitionLoader;
+import org.gemo.apex.definition.skill.ISkillDefinitionLoader;
+import org.gemo.apex.skills.Skills;
 import org.gemo.apex.skills.definition.skill.FileSystemSkill;
 import org.gemo.apex.skills.loader.FileSystemSkillLoader;
-import org.gemo.apex.skills.Skills;
 import org.springframework.ai.mcp.SyncMcpToolCallbackProvider;
 import org.springframework.ai.mcp.ToolContextToMcpMetaConverter;
 import org.springframework.ai.tool.ToolCallback;
@@ -39,10 +41,13 @@ import java.nio.file.Path;
 public class GlobalToolRegistry implements DisposableBean {
 
     @Autowired
-    private AgentWorkspaceService agentWorkspaceService;
+    private IAgentDefinitionLoader agentDefinitionLoader;
 
     @Autowired
-    private SkillConfigProvider skillConfigProvider;
+    private IMcpDefinitionLoader mcpDefinitionLoader;
+
+    @Autowired
+    private ISkillDefinitionLoader skillDefinitionLoader;
 
     @Lazy
     @Autowired
@@ -53,7 +58,8 @@ public class GlobalToolRegistry implements DisposableBean {
     private final List<McpSyncClient> createdClients = new CopyOnWriteArrayList<>();
 
     public List<ToolCallback> getMcpToolCallbacks(String agentKey) {
-        List<String> mcpNames = agentWorkspaceService.getMcpNames(agentKey);
+        AgentDefinition definition = agentDefinitionLoader.load(agentKey);
+        List<String> mcpNames = definition.mcpNames();
         if (mcpNames == null || mcpNames.isEmpty()) {
             return Collections.emptyList();
         }
@@ -68,7 +74,7 @@ public class GlobalToolRegistry implements DisposableBean {
                 continue;
             }
 
-            McpServerConfig config = agentWorkspaceService.getMcpServerConfig(mcpName);
+            McpServerConfig config = mcpDefinitionLoader.load(mcpName);
             if (config == null) {
                 log.warn("Agent {} missing MCP server config: {}", agentKey, mcpName);
                 continue;
@@ -87,7 +93,8 @@ public class GlobalToolRegistry implements DisposableBean {
             return cached;
         }
 
-        List<String> skillNames = agentWorkspaceService.getSkills(agentKey);
+        AgentDefinition definition = agentDefinitionLoader.load(agentKey);
+        List<String> skillNames = definition.skillNames();
         if (skillNames == null || skillNames.isEmpty()) {
             log.debug("Agent {} has no configured skills", agentKey);
             return null;
@@ -97,7 +104,7 @@ public class GlobalToolRegistry implements DisposableBean {
             List<FileSystemSkill> loadedSkills = new ArrayList<>();
 
             for (String skillName : skillNames) {
-                var skillConfig = skillConfigProvider.getSkillConfig(skillName);
+                var skillConfig = skillDefinitionLoader.load(skillName);
                 if (skillConfig != null && skillConfig.getDir() != null) {
                     loadedSkills.add(FileSystemSkillLoader.loadSkill(Path.of(skillConfig.getDir())));
                 } else {
@@ -121,8 +128,8 @@ public class GlobalToolRegistry implements DisposableBean {
     }
 
     public List<ToolCallback> getSubAgentToolCallbacks(String agentKey) {
-        List<String> allowedSubAgents = agentWorkspaceService.getSubAgents(agentKey);
-        return subAgentToolCallbackProvider.buildToolCallbacks(allowedSubAgents);
+        AgentDefinition definition = agentDefinitionLoader.load(agentKey);
+        return subAgentToolCallbackProvider.buildToolCallbacks(definition.subAgentNames());
     }
 
     public void clearCache() {

@@ -5,13 +5,15 @@ import org.gemo.apex.component.tool.GlobalToolRegistry;
 import org.gemo.apex.constant.ExecutionStatus;
 import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.context.SuperAgentContext;
+import org.gemo.apex.definition.agent.AgentDefinition;
+import org.gemo.apex.definition.agent.IAgentDefinitionLoader;
 import org.gemo.apex.domain.Plan;
 import org.gemo.apex.memory.context.UserContextHolder;
 import org.gemo.apex.memory.model.MemoryItem;
 import org.gemo.apex.memory.model.MemoryRecallPackage;
 import org.gemo.apex.memory.recall.MemoryRecallService;
 import org.gemo.apex.memory.session.SessionContextStore;
-import org.gemo.apex.service.AgentWorkspaceService;
+import org.gemo.apex.config.model.AgentHooksConfig;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,7 +52,7 @@ class SuperAgentFactoryTest {
     private BuiltInToolProvider builtInToolProvider;
 
     @Mock
-    private AgentWorkspaceService agentWorkspaceService;
+    private IAgentDefinitionLoader agentDefinitionLoader;
 
     @Mock
     private ApplicationContext applicationContext;
@@ -72,7 +74,7 @@ class SuperAgentFactoryTest {
         when(globalToolRegistry.getMcpToolCallbacks(anyString())).thenReturn(List.of());
         when(globalToolRegistry.getSubAgentToolCallbacks(anyString())).thenReturn(List.of());
         when(globalToolRegistry.getSkillsTool(anyString())).thenReturn(null);
-        when(agentWorkspaceService.getDefaultExecutionMode(anyString())).thenReturn(ModeEnum.REACT);
+        when(agentDefinitionLoader.load(anyString())).thenReturn(definition(ModeEnum.REACT));
     }
 
     @AfterEach
@@ -112,7 +114,7 @@ class SuperAgentFactoryTest {
     @Test
     void createContextShouldFailFastWhenDefaultExecutionModeMissing() {
         when(sessionContextStore.load("session-2")).thenReturn(Optional.empty());
-        when(agentWorkspaceService.getDefaultExecutionMode("agent-1")).thenReturn(null);
+        when(agentDefinitionLoader.load("agent-1")).thenReturn(definition(null));
 
         IllegalStateException exception = assertThrows(IllegalStateException.class,
                 () -> superAgentFactory.createContext("session-2", "agent-1", "hello"));
@@ -224,5 +226,19 @@ class SuperAgentFactoryTest {
 
         verify(sessionContextStore, never()).appendDialogueMessages(anyString(), any(), anyLong(), any());
         verify(sessionContextStore, never()).save(any(SuperAgentContext.class));
+    }
+
+    private AgentDefinition definition(ModeEnum mode) {
+        return new AgentDefinition(
+                "agent-1",
+                mode,
+                List.of(),
+                List.of(),
+                List.of(),
+                AgentHooksConfig.empty(),
+                "",
+                "",
+                "",
+                "");
     }
 }

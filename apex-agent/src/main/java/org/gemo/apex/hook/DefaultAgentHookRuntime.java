@@ -3,13 +3,13 @@ package org.gemo.apex.hook;
 import lombok.extern.slf4j.Slf4j;
 import org.gemo.apex.config.model.AgentHooksConfig;
 import org.gemo.apex.config.model.HookBindingConfig;
+import org.gemo.apex.definition.agent.IAgentDefinitionLoader;
 import org.gemo.apex.hook.tool.PostToolCallHook;
 import org.gemo.apex.hook.tool.PostToolCallHookContext;
 import org.gemo.apex.hook.tool.PostToolCallHookResult;
 import org.gemo.apex.hook.tool.PreToolCallHook;
 import org.gemo.apex.hook.tool.PreToolCallHookContext;
 import org.gemo.apex.hook.tool.PreToolCallHookResult;
-import org.gemo.apex.service.AgentWorkspaceService;
 import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Component;
 
@@ -24,21 +24,21 @@ import java.util.Set;
 @Component
 public class DefaultAgentHookRuntime implements AgentHookRuntime {
 
-    private final AgentWorkspaceService agentWorkspaceService;
+    private final IAgentDefinitionLoader agentDefinitionLoader;
     private final ApplicationContext applicationContext;
     private final ToolMatcher toolMatcher;
 
-    public DefaultAgentHookRuntime(AgentWorkspaceService agentWorkspaceService,
+    public DefaultAgentHookRuntime(IAgentDefinitionLoader agentDefinitionLoader,
             ApplicationContext applicationContext,
             ToolMatcher toolMatcher) {
-        this.agentWorkspaceService = agentWorkspaceService;
+        this.agentDefinitionLoader = agentDefinitionLoader;
         this.applicationContext = applicationContext;
         this.toolMatcher = toolMatcher;
     }
 
     @Override
     public PreToolCallHookResult runPreHooks(PreToolCallHookContext context) {
-        AgentHooksConfig hooks = agentWorkspaceService.getHooks(context.getAgentKey());
+        AgentHooksConfig hooks = agentDefinitionLoader.load(context.getAgentKey()).hooks();
         if (hooks == null || hooks.isDisabled()) {
             return PreToolCallHookResult.proceedWithUpdatedArgs(copyArguments(context));
         }
@@ -89,7 +89,7 @@ public class DefaultAgentHookRuntime implements AgentHookRuntime {
 
     @Override
     public PostToolCallHookResult runPostHooks(PostToolCallHookContext context) {
-        AgentHooksConfig hooks = agentWorkspaceService.getHooks(context.getAgentKey());
+        AgentHooksConfig hooks = agentDefinitionLoader.load(context.getAgentKey()).hooks();
         if (hooks == null || hooks.isDisabled()) {
             return PostToolCallHookResult.keep();
         }

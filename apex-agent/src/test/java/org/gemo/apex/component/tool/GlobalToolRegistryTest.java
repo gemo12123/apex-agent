@@ -1,10 +1,15 @@
 package org.gemo.apex.component.tool;
 
+import org.gemo.apex.config.model.AgentHooksConfig;
+import org.gemo.apex.config.model.McpServerConfig;
 import org.gemo.apex.config.model.SkillConfig;
-import org.gemo.apex.config.provider.SkillConfigProvider;
+import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.constant.ToolContextKeys;
 import org.gemo.apex.context.SuperAgentContext;
-import org.gemo.apex.service.AgentWorkspaceService;
+import org.gemo.apex.definition.agent.AgentDefinition;
+import org.gemo.apex.definition.agent.IAgentDefinitionLoader;
+import org.gemo.apex.definition.mcp.IMcpDefinitionLoader;
+import org.gemo.apex.definition.skill.ISkillDefinitionLoader;
 import org.gemo.apex.skills.Skills;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,10 +39,13 @@ import static org.mockito.Mockito.when;
 public class GlobalToolRegistryTest {
 
     @Mock
-    private AgentWorkspaceService agentWorkspaceService;
+    private IAgentDefinitionLoader agentDefinitionLoader;
 
     @Mock
-    private SkillConfigProvider skillConfigProvider;
+    private IMcpDefinitionLoader mcpDefinitionLoader;
+
+    @Mock
+    private ISkillDefinitionLoader skillDefinitionLoader;
 
     @InjectMocks
     private GlobalToolRegistry globalToolRegistry;
@@ -52,7 +60,7 @@ public class GlobalToolRegistryTest {
 
     @Test
     public void testGetMcpToolCallbacks_NoMcps() {
-        when(agentWorkspaceService.getMcpNames(anyString())).thenReturn(Collections.emptyList());
+        when(agentDefinitionLoader.load(anyString())).thenReturn(definition(List.of(), List.of(), List.of()));
 
         List<ToolCallback> tools = globalToolRegistry.getMcpToolCallbacks("test_agent");
         assertTrue(tools.isEmpty());
@@ -60,8 +68,9 @@ public class GlobalToolRegistryTest {
 
     @Test
     public void testGetMcpToolCallbacks_WithMissingConfig() {
-        when(agentWorkspaceService.getMcpNames(anyString())).thenReturn(List.of("missing_mcp"));
-        when(agentWorkspaceService.getMcpServerConfig(anyString())).thenReturn(null);
+        when(agentDefinitionLoader.load("test_agent"))
+                .thenReturn(definition(List.of("missing_mcp"), List.of(), List.of()));
+        when(mcpDefinitionLoader.load(anyString())).thenReturn(null);
 
         List<ToolCallback> tools = globalToolRegistry.getMcpToolCallbacks("test_agent");
         assertTrue(tools.isEmpty());
@@ -69,11 +78,6 @@ public class GlobalToolRegistryTest {
 
     @Test
     public void testGetSkillsTool_ShouldLoadDirectChildSkills() throws IOException {
-        when(agentWorkspaceService.getSkills("test_agent")).thenReturn(List.of("meeting-skill"));
-        SkillConfig config = new SkillConfig();
-        config.setDir(tempDir.toString());
-        when(skillConfigProvider.getSkillConfig("meeting-skill")).thenReturn(config);
-
         Path skillDir = tempDir.resolve("meeting");
         Files.createDirectories(skillDir);
         Files.writeString(skillDir.resolve("SKILL.md"), """
@@ -84,6 +88,12 @@ public class GlobalToolRegistryTest {
 
                 Follow the meeting workflow
                 """);
+
+        when(agentDefinitionLoader.load("test_agent"))
+                .thenReturn(definition(List.of(), List.of(), List.of("meeting-skill")));
+        SkillConfig config = new SkillConfig();
+        config.setDir(skillDir.toString());
+        when(skillDefinitionLoader.load("meeting-skill")).thenReturn(config);
 
         Skills skills = globalToolRegistry.getSkillsTool("test_agent");
 
@@ -117,5 +127,19 @@ public class GlobalToolRegistryTest {
         assertFalse(meta.containsKey("MCP_SESSION_CONTEXT"));
         assertFalse(meta.containsKey(ToolContext.TOOL_CALL_HISTORY));
         assertFalse(meta.containsKey("otherKey"));
+    }
+
+    private AgentDefinition definition(List<String> mcpNames, List<String> subAgentNames, List<String> skillNames) {
+        return new AgentDefinition(
+                "test_agent",
+                ModeEnum.REACT,
+                mcpNames,
+                subAgentNames,
+                skillNames,
+                AgentHooksConfig.empty(),
+                "",
+                "",
+                "",
+                "");
     }
 }

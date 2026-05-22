@@ -2,7 +2,9 @@ package org.gemo.apex.core.engine;
 
 import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.context.SuperAgentContext;
-import org.gemo.apex.service.AgentWorkspaceService;
+import org.gemo.apex.config.model.AgentHooksConfig;
+import org.gemo.apex.definition.agent.AgentDefinition;
+import org.gemo.apex.definition.agent.IAgentDefinitionLoader;
 import org.gemo.apex.skills.definition.skill.Skill;
 import org.gemo.apex.skills.Skills;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,15 +22,15 @@ import static org.mockito.Mockito.when;
 
 class StagePromptBuilderTest {
 
-    private AgentWorkspaceService agentWorkspaceService;
+    private IAgentDefinitionLoader agentDefinitionLoader;
 
     private StagePromptBuilder stagePromptBuilder;
 
     @BeforeEach
     void setUp() {
-        agentWorkspaceService = org.mockito.Mockito.mock(AgentWorkspaceService.class);
+        agentDefinitionLoader = org.mockito.Mockito.mock(IAgentDefinitionLoader.class);
         MockitoAnnotations.openMocks(this);
-        stagePromptBuilder = new StagePromptBuilder(agentWorkspaceService);
+        stagePromptBuilder = new StagePromptBuilder(agentDefinitionLoader);
     }
 
     @Test
@@ -42,9 +44,17 @@ class StagePromptBuilderTest {
                 .description("demo description")
                 .content("demo instructions")
                 .build()));
-        when(agentWorkspaceService.getReActPrompt("agent-1"))
-                .thenReturn("skills={skills}\ntools={available_tools_desc}\ndate={date}");
-        when(agentWorkspaceService.getAgentRules("agent-1")).thenReturn("NO_DELETE");
+        when(agentDefinitionLoader.load("agent-1")).thenReturn(new AgentDefinition(
+                "agent-1",
+                ModeEnum.REACT,
+                List.of(),
+                List.of(),
+                List.of(),
+                AgentHooksConfig.empty(),
+                "skills={skills}\ntools={available_tools_desc}\ndate={date}",
+                "write plan",
+                "run plan",
+                "NO_DELETE"));
 
         String prompt = stagePromptBuilder.build(context, List.of(tool("meeting_tool", "meeting desc")));
 

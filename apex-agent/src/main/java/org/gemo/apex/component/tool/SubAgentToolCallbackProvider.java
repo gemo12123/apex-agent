@@ -1,8 +1,8 @@
 package org.gemo.apex.component.tool;
 
 import lombok.extern.slf4j.Slf4j;
+import org.gemo.apex.config.ApexGlobalProperties;
 import org.gemo.apex.config.model.AgentConfig;
-import org.gemo.apex.config.provider.AgentConfigProvider;
 import org.gemo.apex.tool.SubAgentToolCallback;
 import org.gemo.apex.tool.handler.MessageProcessor;
 import org.springframework.ai.tool.ToolCallback;
@@ -25,13 +25,13 @@ import java.util.List;
 @Component
 public class SubAgentToolCallbackProvider {
 
-    private final AgentConfigProvider agentConfigProvider;
+    private final ApexGlobalProperties apexGlobalProperties;
     private final MessageProcessor messageProcessor;
 
     public SubAgentToolCallbackProvider(
-            AgentConfigProvider agentConfigProvider,
+            ApexGlobalProperties apexGlobalProperties,
             MessageProcessor messageProcessor) {
-        this.agentConfigProvider = agentConfigProvider;
+        this.apexGlobalProperties = apexGlobalProperties;
         this.messageProcessor = messageProcessor;
     }
 
@@ -52,8 +52,10 @@ public class SubAgentToolCallbackProvider {
         }
         List<ToolCallback> toolCallbacks = new ArrayList<>();
 
-        List<AgentConfig> allAgents = agentConfigProvider.getAllAgents();
-        if (allAgents != null) {
+        List<AgentConfig> allAgents = apexGlobalProperties.getAgents() == null
+                ? List.of()
+                : new ArrayList<>(apexGlobalProperties.getAgents().values());
+        if (!allAgents.isEmpty()) {
             for (AgentConfig config : allAgents) {
                 String agentKey = config.getAgentKey();
 

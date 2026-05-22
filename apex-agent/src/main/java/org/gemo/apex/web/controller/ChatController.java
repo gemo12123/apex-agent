@@ -1,6 +1,8 @@
 package org.gemo.apex.web.controller;
 
 import lombok.extern.slf4j.Slf4j;
+import org.gemo.apex.config.ApexGlobalProperties;
+import org.gemo.apex.config.model.AgentConfig;
 import org.gemo.apex.constant.ContextKeyEnum;
 import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.constant.RequestType;
@@ -8,11 +10,9 @@ import org.gemo.apex.context.SuperAgentContext;
 import org.gemo.apex.core.SessionExecutionGuard;
 import org.gemo.apex.core.SuperAgentFactory;
 import org.gemo.apex.domain.dto.ChatRequest;
-import org.gemo.apex.exception.HumanInTheLoopException;
 import org.gemo.apex.memory.context.UserContextHolder;
 import org.gemo.apex.message.EndMessage;
 import org.gemo.apex.util.MessageUtils;
-import org.gemo.apex.config.provider.AgentConfigProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,6 +25,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.http.HttpStatus;
 import org.springframework.util.StringUtils;
 
+import java.util.List;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -42,7 +43,7 @@ public class ChatController {
     private SuperAgentFactory superAgentFactory;
 
     @Autowired
-    private AgentConfigProvider agentConfigProvider;
+    private ApexGlobalProperties apexGlobalProperties;
 
     @Autowired
     private SessionExecutionGuard sessionExecutionGuard;
@@ -51,7 +52,9 @@ public class ChatController {
 
     @GetMapping(value = "/agents", produces = MediaType.APPLICATION_JSON_VALUE)
     public Map<String, Object> getAgents() {
-        java.util.List<Map<String, String>> data = agentConfigProvider.getAllAgents().stream()
+        List<Map<String, String>> data = (apexGlobalProperties.getAgents() == null
+                ? List.<AgentConfig>of()
+                : apexGlobalProperties.getAgents().values().stream().toList()).stream()
                 .map(agent -> {
                     Map<String, String> map = new HashMap<>();
                     map.put("agentKey", agent.getAgentKey());

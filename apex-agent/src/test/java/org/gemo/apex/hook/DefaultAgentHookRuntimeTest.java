@@ -2,6 +2,9 @@ package org.gemo.apex.hook;
 
 import org.gemo.apex.config.model.AgentHooksConfig;
 import org.gemo.apex.config.model.HookBindingConfig;
+import org.gemo.apex.constant.ModeEnum;
+import org.gemo.apex.definition.agent.AgentDefinition;
+import org.gemo.apex.definition.agent.IAgentDefinitionLoader;
 import org.gemo.apex.hook.tool.PostToolCallHook;
 import org.gemo.apex.hook.tool.PostToolCallHookContext;
 import org.gemo.apex.hook.tool.PostToolCallHookResult;
@@ -10,7 +13,6 @@ import org.gemo.apex.hook.tool.PreToolCallHookContext;
 import org.gemo.apex.hook.tool.PreToolCallHookResult;
 import org.gemo.apex.hook.tool.ToolConfirmationSpec;
 import org.gemo.apex.hook.tool.builtin.PlainTextTruncateHook;
-import org.gemo.apex.service.AgentWorkspaceService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
@@ -28,7 +30,7 @@ import static org.mockito.Mockito.when;
 class DefaultAgentHookRuntimeTest {
 
     @Mock
-    private AgentWorkspaceService agentWorkspaceService;
+    private IAgentDefinitionLoader agentDefinitionLoader;
 
     @Mock
     private ApplicationContext applicationContext;
@@ -38,7 +40,7 @@ class DefaultAgentHookRuntimeTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        runtime = new DefaultAgentHookRuntime(agentWorkspaceService, applicationContext, new ToolMatcher());
+        runtime = new DefaultAgentHookRuntime(agentDefinitionLoader, applicationContext, new ToolMatcher());
     }
 
     @Test
@@ -62,7 +64,7 @@ class DefaultAgentHookRuntimeTest {
                                  .build()))
                  .build();
 
-        when(agentWorkspaceService.getHooks("default_agent")).thenReturn(config);
+        when(agentDefinitionLoader.load("default_agent")).thenReturn(definition(config));
         when(applicationContext.getBean("mutateRoomHook", PreToolCallHook.class))
                 .thenReturn(context -> PreToolCallHookResult.proceedWithUpdatedArgs(Map.of(
                         "room", "B2001",
@@ -101,7 +103,7 @@ class DefaultAgentHookRuntimeTest {
                         .build()))
                 .build();
 
-        when(agentWorkspaceService.getHooks("default_agent")).thenReturn(config);
+        when(agentDefinitionLoader.load("default_agent")).thenReturn(definition(config));
         when(applicationContext.getBean("plainTextTruncateHook", PostToolCallHook.class))
                 .thenReturn(new PlainTextTruncateHook());
 
@@ -134,7 +136,7 @@ class DefaultAgentHookRuntimeTest {
                         .build()))
                 .build();
 
-        when(agentWorkspaceService.getHooks("default_agent")).thenReturn(config);
+        when(agentDefinitionLoader.load("default_agent")).thenReturn(definition(config));
         when(applicationContext.getBean("skillExperienceAugmentHook", PostToolCallHook.class))
                 .thenReturn(context -> {
                     throw new IllegalStateException("db down");
@@ -152,5 +154,19 @@ class DefaultAgentHookRuntimeTest {
                 .build());
 
         assertEquals(PostToolCallHookResult.Outcome.KEEP, result.getOutcome());
+    }
+
+    private AgentDefinition definition(AgentHooksConfig hooks) {
+        return new AgentDefinition(
+                "default_agent",
+                ModeEnum.REACT,
+                List.of(),
+                List.of(),
+                List.of(),
+                hooks,
+                "",
+                "",
+                "",
+                "");
     }
 }

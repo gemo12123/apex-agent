@@ -1,5 +1,7 @@
 package org.gemo.apex.web.controller;
 
+import org.gemo.apex.config.ApexGlobalProperties;
+import org.gemo.apex.config.model.AgentConfig;
 import org.gemo.apex.context.SuperAgentContext;
 import org.gemo.apex.core.SessionExecutionGuard;
 import org.gemo.apex.core.SuperAgentFactory;
@@ -19,6 +21,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -27,8 +30,10 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -39,12 +44,19 @@ public class ChatControllerTest {
     @Mock
     private SuperAgentFactory superAgentFactory;
 
+    @Mock
+    private ApexGlobalProperties apexGlobalProperties;
+
     @InjectMocks
     private ChatController chatController;
 
     @BeforeEach
     public void setup() {
         MockitoAnnotations.openMocks(this);
+        AgentConfig defaultAgent = new AgentConfig();
+        defaultAgent.setAgentKey("default_agent");
+        defaultAgent.setName("Default Agent");
+        when(apexGlobalProperties.getAgents()).thenReturn(Map.of("default_agent", defaultAgent));
         ReflectionTestUtils.setField(chatController, "sessionExecutionGuard", new SessionExecutionGuard());
         UserContextHolder.clear();
         mockMvc = MockMvcBuilders.standaloneSetup(chatController).build();
@@ -57,6 +69,14 @@ public class ChatControllerTest {
         if (executor instanceof ExecutorService executorService) {
             executorService.shutdownNow();
         }
+    }
+
+    @Test
+    public void testGetAgents_ReturnsConfiguredAgents() throws Exception {
+        mockMvc.perform(get("/api/sse/agents"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].agentKey").value("default_agent"))
+                .andExpect(jsonPath("$.data[0].name").value("Default Agent"));
     }
 
     @Test
