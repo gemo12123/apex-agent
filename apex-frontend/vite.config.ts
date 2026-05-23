@@ -7,10 +7,16 @@ const currentDir = dirname(fileURLToPath(import.meta.url))
 
 // https://vite.dev/config/
 export default defineConfig({
+  root: currentDir,
   plugins: [vue()],
   resolve: {
     alias: {
       '@': resolve(currentDir, 'src'),
+    },
+  },
+  build: {
+    rollupOptions: {
+      input: 'index.html',
     },
   },
   server: {

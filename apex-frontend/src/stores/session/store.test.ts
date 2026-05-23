@@ -76,7 +76,7 @@ describe('useSessionStore', () => {
           },
           {
             event_type: 'END',
-            context: { mode: 'plan-executor', stage_id: 'stage-1' },
+            context: { mode: 'plan-executor', stage_id: 'stage-1', execution_status: 'COMPLETED' },
             messages: [],
           },
         ]
@@ -120,7 +120,7 @@ describe('useSessionStore', () => {
           })
           onEnvelope({
             event_type: 'END',
-            context: { mode: 'react' },
+            context: { mode: 'react', execution_status: 'HUMAN_IN_THE_LOOP' },
             messages: [],
           })
           return
@@ -134,7 +134,7 @@ describe('useSessionStore', () => {
         })
         onEnvelope({
           event_type: 'END',
-          context: { mode: 'react' },
+          context: { mode: 'react', execution_status: 'COMPLETED' },
           messages: [],
         })
       },
@@ -204,7 +204,7 @@ describe('useSessionStore', () => {
           })
           onEnvelope({
             event_type: 'END',
-            context: { mode: 'react' },
+            context: { mode: 'react', execution_status: 'HUMAN_IN_THE_LOOP' },
             messages: [],
           })
           return
@@ -218,7 +218,7 @@ describe('useSessionStore', () => {
         })
         onEnvelope({
           event_type: 'END',
-          context: { mode: 'react' },
+          context: { mode: 'react', execution_status: 'COMPLETED' },
           messages: [],
         })
       },
@@ -250,5 +250,43 @@ describe('useSessionStore', () => {
     })
     expect(store.session.status).toBe('completed')
     expect(store.session.messages.at(-1)?.role).toBe('assistant')
+  })
+
+  it('marks the active session as error when the stream terminates with FAILED status', async () => {
+    const mockClient: ApexApiClient = {
+      async fetchAgents() {
+        return [{ agentKey: 'default_agent', name: 'Default Agent' }]
+      },
+      async streamChat(_request, _userId, _signal, onEnvelope) {
+        const envelopes: SseEnvelope[] = [
+          {
+            event_type: 'STREAM_CONTENT',
+            context: { mode: 'react', content_id: 'content-9' },
+            messages: [{ content: 'hello' }],
+          },
+          {
+            event_type: 'END',
+            context: {
+              mode: 'react',
+              execution_status: 'FAILED',
+              error_code: 'STREAM_EXECUTION_FAILED',
+              error_message: 'boom',
+            },
+            messages: [],
+          },
+        ]
+
+        envelopes.forEach((envelope) => onEnvelope(envelope))
+      },
+    }
+
+    setActivePinia(createPinia())
+    setApexApiClientForTesting(mockClient)
+
+    const store = useSessionStore()
+    await store.initialize()
+    await store.sendPrompt('Trigger failure')
+
+    expect(store.session.status).toBe('error')
   })
 })

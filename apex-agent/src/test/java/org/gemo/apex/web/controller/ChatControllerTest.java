@@ -2,77 +2,59 @@ package org.gemo.apex.web.controller;
 
 import org.gemo.apex.config.ApexGlobalProperties;
 import org.gemo.apex.config.model.AgentConfig;
-import org.gemo.apex.context.SuperAgentContext;
 import org.gemo.apex.core.SessionExecutionGuard;
-import org.gemo.apex.core.SuperAgentFactory;
-import org.gemo.apex.memory.context.UserContextHolder;
-import org.junit.jupiter.api.AfterEach;
+import org.gemo.apex.web.service.ChatStreamingApplicationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-public class ChatControllerTest {
+class ChatControllerTest {
 
     private MockMvc mockMvc;
 
     @Mock
-    private SuperAgentFactory superAgentFactory;
+    private ApexGlobalProperties apexGlobalProperties;
 
     @Mock
-    private ApexGlobalProperties apexGlobalProperties;
+    private ChatStreamingApplicationService chatStreamingApplicationService;
 
     @InjectMocks
     private ChatController chatController;
 
     @BeforeEach
-    public void setup() {
+    void setup() {
         MockitoAnnotations.openMocks(this);
         AgentConfig defaultAgent = new AgentConfig();
         defaultAgent.setAgentKey("default_agent");
         defaultAgent.setName("Default Agent");
         when(apexGlobalProperties.getAgents()).thenReturn(Map.of("default_agent", defaultAgent));
         ReflectionTestUtils.setField(chatController, "sessionExecutionGuard", new SessionExecutionGuard());
-        UserContextHolder.clear();
         mockMvc = MockMvcBuilders.standaloneSetup(chatController).build();
     }
 
-    @AfterEach
-    public void tearDown() {
-        UserContextHolder.clear();
-        Object executor = ReflectionTestUtils.getField(chatController, "executorService");
-        if (executor instanceof ExecutorService executorService) {
-            executorService.shutdownNow();
-        }
-    }
-
     @Test
-    public void testGetAgents_ReturnsConfiguredAgents() throws Exception {
+    void testGetAgentsReturnsConfiguredAgents() throws Exception {
         mockMvc.perform(get("/api/sse/agents"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].agentKey").value("default_agent"))
@@ -80,11 +62,7 @@ public class ChatControllerTest {
     }
 
     @Test
-    public void testExecuteWithSse_ReturnsSseEmitter() throws Exception {
-        SuperAgentContext mockContext = new SuperAgentContext();
-        when(superAgentFactory.createContext(anyString(), anyString(), anyString())).thenReturn(mockContext);
-        doNothing().when(superAgentFactory).executeContext(any(SuperAgentContext.class));
-
+    void testExecuteWithSseDelegatesToStreamingService() throws Exception {
         String jsonRequest = """
                 {
                   "sessionId":"session-123",
@@ -94,73 +72,19 @@ public class ChatControllerTest {
                 }
                 """;
 
-        MvcResult mvcResult = mockMvc.perform(post("/api/sse/chat")
+        mockMvc.perform(post("/api/sse/chat")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(jsonRequest))
                 .andExpect(request().asyncStarted())
-                .andReturn();
-
-        mockMvc.perform(asyncDispatch(mvcResult))
                 .andExpect(status().isOk());
+
+        ArgumentCaptor<SseEmitter> emitterCaptor = ArgumentCaptor.forClass(SseEmitter.class);
+        verify(chatStreamingApplicationService).stream(any(), emitterCaptor.capture());
+        assertNotNull(emitterCaptor.getValue());
     }
 
     @Test
-    public void testExecuteWithSse_NewRequestRejectedForSuspendedSession() throws Exception {
-        when(superAgentFactory.createContext(anyString(), anyString(), anyString()))
-                .thenThrow(new IllegalStateException(
-                        "Session session-123 is waiting for HUMAN_RESPONSE; RequestType.NEW is not allowed"));
-
-        String jsonRequest = """
-                {
-                  "sessionId":"session-123",
-                  "agentKey":"default_agent",
-                  "query":"Hello Super Agent",
-                  "type":"NEW"
-                }
-                """;
-
-        MvcResult mvcResult = mockMvc.perform(post("/api/sse/chat")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(jsonRequest))
-                .andExpect(request().asyncStarted())
-                .andReturn();
-
-        mockMvc.perform(asyncDispatch(mvcResult))
-                .andExpect(status().isOk());
-
-        verify(superAgentFactory, never()).resumeContext(anyString(), any());
-    }
-
-    @Test
-    public void testExecuteWithSse_HumanResponseUsesResumeContext() throws Exception {
-        SuperAgentContext mockContext = new SuperAgentContext();
-        when(superAgentFactory.resumeContext(anyString(), any())).thenReturn(mockContext);
-        doNothing().when(superAgentFactory).executeContext(any(SuperAgentContext.class));
-
-        String jsonRequest = """
-                {
-                  "sessionId":"session-123",
-                  "agentKey":"default_agent",
-                  "type":"HUMAN_RESPONSE",
-                  "humanResponse":{"tool-call-1":"approved"}
-                }
-                """;
-
-        MvcResult mvcResult = mockMvc.perform(post("/api/sse/chat")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(jsonRequest))
-                .andExpect(request().asyncStarted())
-                .andReturn();
-
-        mockMvc.perform(asyncDispatch(mvcResult))
-                .andExpect(status().isOk());
-
-        verify(superAgentFactory).resumeContext(anyString(), any());
-        verify(superAgentFactory, never()).createContext(anyString(), anyString(), anyString());
-    }
-
-    @Test
-    public void testExecuteWithSse_ShouldRejectBlankSessionId() throws Exception {
+    void testExecuteWithSseShouldRejectBlankSessionId() throws Exception {
         String jsonRequest = """
                 {
                   "agentKey":"default_agent",
@@ -174,22 +98,11 @@ public class ChatControllerTest {
                 .content(jsonRequest))
                 .andExpect(status().isBadRequest());
 
-        verify(superAgentFactory, never()).createContext(anyString(), anyString(), anyString());
-        verify(superAgentFactory, never()).executeContext(any(SuperAgentContext.class));
+        verify(chatStreamingApplicationService, never()).stream(any(), any(SseEmitter.class));
     }
 
     @Test
-    public void testExecuteWithSse_ShouldRejectConcurrentRequestsForSameSession() throws Exception {
-        SuperAgentContext mockContext = new SuperAgentContext();
-        CountDownLatch firstExecutionStarted = new CountDownLatch(1);
-        CountDownLatch releaseExecution = new CountDownLatch(1);
-        when(superAgentFactory.createContext(anyString(), anyString(), anyString())).thenReturn(mockContext);
-        org.mockito.Mockito.doAnswer(invocation -> {
-            firstExecutionStarted.countDown();
-            releaseExecution.await(2, TimeUnit.SECONDS);
-            return null;
-        }).when(superAgentFactory).executeContext(any(SuperAgentContext.class));
-
+    void testExecuteWithSseShouldRejectConcurrentRequestsForSameSession() throws Exception {
         String jsonRequest = """
                 {
                   "sessionId":"session-123",
@@ -199,25 +112,15 @@ public class ChatControllerTest {
                 }
                 """;
 
-        MvcResult firstResult = mockMvc.perform(post("/api/sse/chat")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(jsonRequest))
-                .andExpect(request().asyncStarted())
-                .andReturn();
-
-        org.junit.jupiter.api.Assertions.assertTrue(firstExecutionStarted.await(2, TimeUnit.SECONDS));
+        SessionExecutionGuard guard = new SessionExecutionGuard();
+        guard.tryAcquire("session-123");
+        ReflectionTestUtils.setField(chatController, "sessionExecutionGuard", guard);
 
         mockMvc.perform(post("/api/sse/chat")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(jsonRequest))
                 .andExpect(status().isConflict());
 
-        releaseExecution.countDown();
-
-        mockMvc.perform(asyncDispatch(firstResult))
-                .andExpect(status().isOk());
-
-        verify(superAgentFactory, times(1)).createContext(anyString(), anyString(), anyString());
-        verify(superAgentFactory, times(1)).executeContext(any(SuperAgentContext.class));
+        verify(chatStreamingApplicationService, never()).stream(any(), any(SseEmitter.class));
     }
 }

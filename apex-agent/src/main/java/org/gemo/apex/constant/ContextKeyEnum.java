@@ -11,7 +11,10 @@ public enum ContextKeyEnum {
     INVOCATION_ID("invocation_id"),
     ARTIFACT_ID("artifact_id"),
     EXECUTOR("executor"),
-    CONTENT_ID("content_id");
+    CONTENT_ID("content_id"),
+    EXECUTION_STATUS("execution_status"),
+    ERROR_CODE("error_code"),
+    ERROR_MESSAGE("error_message");
 
     private final String key;
 

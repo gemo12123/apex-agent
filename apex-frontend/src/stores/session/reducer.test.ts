@@ -376,4 +376,77 @@ describe('session reducer', () => {
     expect(waitingState.status).toBe('waiting-human')
     expect(completedState.status).toBe('completed')
   })
+
+  it('marks the session as error when END carries FAILED execution status', () => {
+    let state = createSessionViewModel()
+    state = startAssistantMessage(state)
+
+    state = applyEnvelope(state, {
+      event_type: 'END',
+      context: {
+        mode: 'react',
+        execution_status: 'FAILED',
+        error_code: 'STREAM_EXECUTION_FAILED',
+        error_message: 'Model returned neither content nor tool calls',
+      },
+      messages: [],
+    } satisfies SseEnvelope)
+
+    expect(state.status).toBe('error')
+  })
+
+  it('keeps waiting-confirmation when END carries HUMAN_IN_THE_LOOP execution status', () => {
+    let state = createSessionViewModel()
+    state = applyEnvelope(state, {
+      event_type: 'TOOL_CONFIRMATION',
+      context: { mode: 'react' },
+      messages: [
+        {
+          confirmation_id: 'confirm-1',
+          tool_call_id: 'tool-call-1',
+          invocation_id: 'invoke-1',
+          tool_name: 'deploy_tool',
+          tool_display_name: 'Deploy Tool',
+          title: 'Continue?',
+          risk_level: 'MEDIUM',
+          editable: false,
+          confirm_label: 'Approve',
+          deny_label: 'Deny',
+          display_fields: [],
+          editable_fields: [],
+        },
+      ],
+    } satisfies SseEnvelope)
+
+    state = applyEnvelope(state, {
+      event_type: 'END',
+      context: { mode: 'react', execution_status: 'HUMAN_IN_THE_LOOP' },
+      messages: [],
+    } satisfies SseEnvelope)
+
+    expect(state.status).toBe('waiting-confirmation')
+  })
+
+  it('preserves legacy waiting behavior when END has no execution_status', () => {
+    let state = createSessionViewModel()
+    state = applyEnvelope(state, {
+      event_type: 'ASK_HUMAN',
+      context: { mode: 'react' },
+      messages: [
+        {
+          input_type: 'TEXT_INPUT',
+          question: 'Need more input',
+          tool_call_id: 'ask-1',
+        },
+      ],
+    } satisfies SseEnvelope)
+
+    state = applyEnvelope(state, {
+      event_type: 'END',
+      context: { mode: 'react' },
+      messages: [],
+    } satisfies SseEnvelope)
+
+    expect(state.status).toBe('waiting-human')
+  })
 })

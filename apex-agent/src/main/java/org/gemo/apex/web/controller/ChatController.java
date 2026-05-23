@@ -3,18 +3,14 @@ package org.gemo.apex.web.controller;
 import lombok.extern.slf4j.Slf4j;
 import org.gemo.apex.config.ApexGlobalProperties;
 import org.gemo.apex.config.model.AgentConfig;
-import org.gemo.apex.constant.ContextKeyEnum;
-import org.gemo.apex.constant.ModeEnum;
-import org.gemo.apex.constant.RequestType;
-import org.gemo.apex.context.SuperAgentContext;
 import org.gemo.apex.core.SessionExecutionGuard;
-import org.gemo.apex.core.SuperAgentFactory;
 import org.gemo.apex.domain.dto.ChatRequest;
 import org.gemo.apex.memory.context.UserContextHolder;
-import org.gemo.apex.message.EndMessage;
-import org.gemo.apex.util.MessageUtils;
+import org.gemo.apex.web.service.ChatStreamingApplicationService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -22,14 +18,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-import org.springframework.http.HttpStatus;
-import org.springframework.util.StringUtils;
 
-import java.util.List;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 /**
  * SSE 控制器。
@@ -40,15 +32,13 @@ import java.util.concurrent.Executors;
 public class ChatController {
 
     @Autowired
-    private SuperAgentFactory superAgentFactory;
-
-    @Autowired
     private ApexGlobalProperties apexGlobalProperties;
 
     @Autowired
     private SessionExecutionGuard sessionExecutionGuard;
 
-    private final ExecutorService executorService = Executors.newFixedThreadPool(10);
+    @Autowired
+    private ChatStreamingApplicationService chatStreamingApplicationService;
 
     @GetMapping(value = "/agents", produces = MediaType.APPLICATION_JSON_VALUE)
     public Map<String, Object> getAgents() {
@@ -75,63 +65,19 @@ public class ChatController {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Session " + sessionId + " already has an active execution");
         }
-        boolean isResume = request.getType() == RequestType.HUMAN_RESPONSE;
-        String userId = UserContextHolder.getUserId();
+
+        boolean isResume = request.getType() == org.gemo.apex.constant.RequestType.HUMAN_RESPONSE;
         log.info("{} SSE 请求，sessionId={}, type={}, agentKey={}, userId={}",
-                isResume ? "恢复" : "新建", sessionId, request.getType(), request.getAgentKey(), userId);
+                isResume ? "恢复" : "新建", sessionId, request.getType(), request.getAgentKey(),
+                UserContextHolder.getUserId());
 
         SseEmitter emitter = new SseEmitter(600000L);
         try {
-            executorService.submit(() -> {
-                UserContextHolder.setUserId(userId);
-                SuperAgentContext sessionContext = null;
-                try {
-                    if (isResume) {
-                        sessionContext = superAgentFactory.resumeContext(sessionId, request.getHumanResponse());
-                        if (sessionContext == null) {
-                            log.warn("未找到可恢复的挂起会话, sessionId={}", sessionId);
-                            emitter.complete();
-                            return;
-                        }
-                    } else {
-                        sessionContext = superAgentFactory.createContext(sessionId, request.getAgentKey(),
-                                request.getQuery());
-                    }
-
-                    sessionContext.setSseEmitter(emitter);
-                    superAgentFactory.executeContext(sessionContext);
-                } catch (Exception e) {
-                    log.error("SSE 执行异常, sessionId={}", sessionId, e);
-                } finally {
-                    try {
-                        if (sessionContext != null) {
-                            MessageUtils.sendMessage(sessionContext, EndMessage.builder()
-                                    .context(buildEndContext(sessionContext))
-                                    .build());
-                        }
-                    } finally {
-                        emitter.complete();
-                        sessionExecutionGuard.release(sessionId);
-                        UserContextHolder.clear();
-                        log.info("SSE 连接关闭, sessionId={}", sessionId);
-                    }
-                }
-            });
+            chatStreamingApplicationService.stream(request, emitter);
         } catch (RuntimeException ex) {
             sessionExecutionGuard.release(sessionId);
             throw ex;
         }
-
         return emitter;
-    }
-
-    private Map<String, Object> buildEndContext(SuperAgentContext context) {
-        Map<String, Object> map = new HashMap<>();
-        map.put(ContextKeyEnum.MODE.getKey(),
-                context.getExecutionMode() != null ? context.getExecutionMode().getMode() : "");
-        if (context.getExecutionMode() == ModeEnum.PLAN_EXECUTOR && context.getCurrentStageId() != null) {
-            map.put(ContextKeyEnum.STAGE_ID.getKey(), context.getCurrentStageId());
-        }
-        return Map.copyOf(map);
     }
 }

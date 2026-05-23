@@ -217,11 +217,28 @@ export function applyEnvelope(state: SessionViewModel, envelope: SseEnvelope): S
       nextState.status = 'waiting-confirmation'
       return nextState
     case 'END':
-      nextState.status = nextState.pendingConfirmations.length > 0
-        ? 'waiting-confirmation'
-        : nextState.pendingPrompts.some((prompt) => !prompt.answered)
-          ? 'waiting-human'
-          : 'completed'
+      if (!context.execution_status) {
+        nextState.status = nextState.pendingConfirmations.length > 0
+          ? 'waiting-confirmation'
+          : nextState.pendingPrompts.some((prompt) => !prompt.answered)
+            ? 'waiting-human'
+            : 'completed'
+        return nextState
+      }
+
+      if (context.execution_status === 'FAILED') {
+        nextState.status = 'error'
+        return nextState
+      }
+
+      if (context.execution_status === 'HUMAN_IN_THE_LOOP') {
+        nextState.status = nextState.pendingConfirmations.length > 0
+          ? 'waiting-confirmation'
+          : 'waiting-human'
+        return nextState
+      }
+
+      nextState.status = 'completed'
       return nextState
     default:
       return nextState

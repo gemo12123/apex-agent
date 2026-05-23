@@ -19,6 +19,9 @@ export interface EnvelopeContext {
   executor?: string
   content_id?: string
   invocation_id?: string
+  execution_status?: 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'HUMAN_IN_THE_LOOP' | string
+  error_code?: string
+  error_message?: string
 }
 
 export interface StreamMessage {

@@ -1,244 +1,56 @@
 package org.gemo.apex.core;
 
-import org.gemo.apex.component.tool.BuiltInToolProvider;
-import org.gemo.apex.component.tool.GlobalToolRegistry;
-import org.gemo.apex.constant.ExecutionStatus;
-import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.context.SuperAgentContext;
-import org.gemo.apex.definition.agent.AgentDefinition;
-import org.gemo.apex.definition.agent.IAgentDefinitionLoader;
-import org.gemo.apex.domain.Plan;
-import org.gemo.apex.memory.context.UserContextHolder;
-import org.gemo.apex.memory.model.MemoryItem;
-import org.gemo.apex.memory.model.MemoryRecallPackage;
-import org.gemo.apex.memory.recall.MemoryRecallService;
-import org.gemo.apex.memory.session.SessionContextStore;
-import org.gemo.apex.config.model.AgentHooksConfig;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.context.ApplicationContext;
+import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
+import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+@ExtendWith(MockitoExtension.class)
 class SuperAgentFactoryTest {
 
     @Mock
-    private GlobalToolRegistry globalToolRegistry;
+    private SuperAgentSessionService sessionService;
 
     @Mock
-    private BuiltInToolProvider builtInToolProvider;
-
-    @Mock
-    private IAgentDefinitionLoader agentDefinitionLoader;
-
-    @Mock
-    private ApplicationContext applicationContext;
-
-    @Mock
-    private SessionContextStore sessionContextStore;
-
-    @Mock
-    private MemoryRecallService memoryRecallService;
+    private SuperAgentExecutor executor;
 
     @InjectMocks
     private SuperAgentFactory superAgentFactory;
 
-    @BeforeEach
-    void setUp() {
-        MockitoAnnotations.openMocks(this);
-        UserContextHolder.setUserId("user-1");
-        when(builtInToolProvider.getBuiltInTools()).thenReturn(List.of());
-        when(globalToolRegistry.getMcpToolCallbacks(anyString())).thenReturn(List.of());
-        when(globalToolRegistry.getSubAgentToolCallbacks(anyString())).thenReturn(List.of());
-        when(globalToolRegistry.getSkillsTool(anyString())).thenReturn(null);
-        when(agentDefinitionLoader.load(anyString())).thenReturn(definition(ModeEnum.REACT));
-    }
+    @Test
+    void createContextShouldDelegateToSessionService() {
+        SuperAgentContext context = new SuperAgentContext();
+        when(sessionService.createContext("session-1", "agent-1", "hello")).thenReturn(context);
 
-    @AfterEach
-    void tearDown() {
-        UserContextHolder.clear();
+        SuperAgentContext actual = superAgentFactory.createContext("session-1", "agent-1", "hello");
+
+        assertSame(context, actual);
     }
 
     @Test
-    void createContextShouldCreateNewSessionWhenSessionDoesNotExist() {
-        when(sessionContextStore.load("session-1")).thenReturn(Optional.empty());
-        MemoryRecallPackage recallPackage = recallPackage();
-        when(memoryRecallService.recall(any(SuperAgentContext.class))).thenReturn(recallPackage);
+    void resumeContextShouldDelegateToSessionService() {
+        SuperAgentContext context = new SuperAgentContext();
+        when(sessionService.resumeContext("session-1", "agent-1", Map.of("k", "v"))).thenReturn(context);
 
-        SuperAgentContext context = superAgentFactory.createContext("session-1", "agent-1", "hello");
+        SuperAgentContext actual = superAgentFactory.resumeContext("session-1", "agent-1", Map.of("k", "v"));
 
-        assertEquals("session-1", context.getSessionId());
-        assertEquals("agent-1", context.getAgentKey());
-        assertEquals("user-1", context.getUserId());
-        assertEquals(1, context.getTurnNo());
-        assertEquals(SuperAgentContext.Stage.EXECUTION, context.getCurrentStage());
-        assertEquals(ModeEnum.REACT, context.getExecutionMode());
-        assertEquals(1, context.getPersistedDialogueMessageIndex());
-        assertEquals(2L, context.getNextMessageSortNo());
-        assertEquals(1, context.getDialogueMessages().size());
-        assertInstanceOf(UserMessage.class, context.getDialogueMessages().getFirst());
-        assertEquals("hello", context.getDialogueMessages().getFirst().getText());
-        assertSame(recallPackage, context.getMemoryRecallPackage());
-
-        ArgumentCaptor<List<Message>> messagesCaptor = ArgumentCaptor.forClass(List.class);
-        verify(sessionContextStore).appendDialogueMessages(eq("session-1"), eq(1), eq(0L), messagesCaptor.capture());
-        assertEquals(1, messagesCaptor.getValue().size());
-        assertEquals("hello", messagesCaptor.getValue().getFirst().getText());
-        verify(memoryRecallService).recall(context);
-        verify(sessionContextStore).save(context);
+        assertSame(context, actual);
     }
 
     @Test
-    void createContextShouldFailFastWhenDefaultExecutionModeMissing() {
-        when(sessionContextStore.load("session-2")).thenReturn(Optional.empty());
-        when(agentDefinitionLoader.load("agent-1")).thenReturn(definition(null));
+    void executeContextShouldDelegateToExecutor() {
+        SuperAgentContext context = new SuperAgentContext();
 
-        IllegalStateException exception = assertThrows(IllegalStateException.class,
-                () -> superAgentFactory.createContext("session-2", "agent-1", "hello"));
+        superAgentFactory.executeContext(context);
 
-        assertTrue(exception.getMessage().contains("default execution mode"));
-        verify(sessionContextStore, never()).save(any(SuperAgentContext.class));
-    }
-
-    @Test
-    void createContextShouldStartNextTurnForExistingSession() {
-        SuperAgentContext existingContext = new SuperAgentContext();
-        existingContext.setSessionId("session-1");
-        existingContext.setUserId("user-1");
-        existingContext.setAgentKey("agent-1");
-        existingContext.setExecutionStatus(ExecutionStatus.COMPLETED);
-        existingContext.setTurnNo(2);
-        existingContext.setLatestCompressedSortNo(4L);
-        existingContext.setDialogueMessages(new ArrayList<>(List.of(new UserMessage("history"))));
-        existingContext.setPersistedDialogueMessageIndex(1);
-        existingContext.setPlan(new Plan());
-        existingContext.setCurrentStageId("stage-1");
-        existingContext.setPendingToolResult(java.util.Map.of("approved", true));
-        when(sessionContextStore.load("session-1")).thenReturn(Optional.of(existingContext));
-        MemoryRecallPackage recallPackage = recallPackage();
-        when(memoryRecallService.recall(existingContext)).thenReturn(recallPackage);
-
-        SuperAgentContext context = superAgentFactory.createContext("session-1", "agent-1", "follow up");
-
-        assertEquals(existingContext, context);
-        assertEquals(3, context.getTurnNo());
-        assertEquals(SuperAgentContext.Stage.EXECUTION, context.getCurrentStage());
-        assertEquals(ModeEnum.REACT, context.getExecutionMode());
-        assertEquals(4L, context.getTurnStartSortNo());
-        assertEquals(2, context.getPersistedDialogueMessageIndex());
-        assertEquals(7L, context.getNextMessageSortNo());
-        assertNull(context.getPlan());
-        assertNull(context.getCurrentStageId());
-        assertNull(context.getPendingToolResult());
-        assertSame(recallPackage, context.getMemoryRecallPackage());
-        assertEquals(2, context.getDialogueMessages().size());
-        assertEquals("follow up", context.getDialogueMessages().getLast().getText());
-
-        ArgumentCaptor<List<Message>> messagesCaptor = ArgumentCaptor.forClass(List.class);
-        verify(sessionContextStore).appendDialogueMessages(eq("session-1"), eq(3), eq(5L), messagesCaptor.capture());
-        assertEquals(1, messagesCaptor.getValue().size());
-        assertEquals("follow up", messagesCaptor.getValue().getFirst().getText());
-        verify(memoryRecallService).recall(existingContext);
-        verify(sessionContextStore).save(context);
-    }
-
-    private MemoryRecallPackage recallPackage() {
-        MemoryRecallPackage recallPackage = new MemoryRecallPackage();
-        recallPackage.setProfileItems(List.of(memoryItem("画像", "偏好咖啡")));
-        recallPackage.setExperienceItems(List.of(memoryItem("经验", "优先展示澄清选项")));
-        return recallPackage;
-    }
-
-    private MemoryItem memoryItem(String title, String content) {
-        MemoryItem item = new MemoryItem();
-        item.setTitle(title);
-        item.setContent(content);
-        return item;
-    }
-
-    @Test
-    void createContextShouldRejectSuspendedSessionForNewRequest() {
-        SuperAgentContext existingContext = new SuperAgentContext();
-        existingContext.setSessionId("session-1");
-        existingContext.setUserId("user-1");
-        existingContext.setAgentKey("agent-1");
-        existingContext.setExecutionStatus(ExecutionStatus.HUMAN_IN_THE_LOOP);
-        when(sessionContextStore.load("session-1")).thenReturn(Optional.of(existingContext));
-
-        IllegalStateException exception = assertThrows(IllegalStateException.class,
-                () -> superAgentFactory.createContext("session-1", "agent-1", "follow up"));
-
-        assertTrue(exception.getMessage().contains("HUMAN_RESPONSE"));
-        verify(sessionContextStore, never()).appendDialogueMessages(anyString(), any(), anyLong(), any());
-        verify(sessionContextStore, never()).save(any(SuperAgentContext.class));
-    }
-
-    @Test
-    void createContextShouldRejectSessionOfAnotherUser() {
-        SuperAgentContext existingContext = new SuperAgentContext();
-        existingContext.setSessionId("session-1");
-        existingContext.setUserId("user-2");
-        existingContext.setAgentKey("agent-1");
-        existingContext.setExecutionStatus(ExecutionStatus.COMPLETED);
-        when(sessionContextStore.load("session-1")).thenReturn(Optional.of(existingContext));
-
-        assertThrows(IllegalStateException.class,
-                () -> superAgentFactory.createContext("session-1", "agent-1", "follow up"));
-
-        verify(sessionContextStore, never()).appendDialogueMessages(anyString(), any(), anyLong(), any());
-        verify(sessionContextStore, never()).save(any(SuperAgentContext.class));
-    }
-
-    @Test
-    void createContextShouldRejectSessionOfAnotherAgent() {
-        SuperAgentContext existingContext = new SuperAgentContext();
-        existingContext.setSessionId("session-1");
-        existingContext.setUserId("user-1");
-        existingContext.setAgentKey("agent-2");
-        existingContext.setExecutionStatus(ExecutionStatus.COMPLETED);
-        when(sessionContextStore.load("session-1")).thenReturn(Optional.of(existingContext));
-
-        assertThrows(IllegalStateException.class,
-                () -> superAgentFactory.createContext("session-1", "agent-1", "follow up"));
-
-        verify(sessionContextStore, never()).appendDialogueMessages(anyString(), any(), anyLong(), any());
-        verify(sessionContextStore, never()).save(any(SuperAgentContext.class));
-    }
-
-    private AgentDefinition definition(ModeEnum mode) {
-        return new AgentDefinition(
-                "agent-1",
-                mode,
-                List.of(),
-                List.of(),
-                List.of(),
-                AgentHooksConfig.empty(),
-                "",
-                "",
-                "",
-                "");
+        verify(executor).execute(context);
     }
 }
