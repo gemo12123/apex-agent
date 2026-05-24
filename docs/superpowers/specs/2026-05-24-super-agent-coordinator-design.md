@@ -98,6 +98,13 @@ Status: Draft for review
 
 这使 `Coordinator` 成为会话执行的唯一运行态所有者。
 
+除此之外，`Coordinator` 还需要维护第二个 map：
+
+- key: `sessionId`
+- value: 该会话对应的锁对象
+
+该锁只用于保护“创建/恢复上下文并注册运行实例”这段临界区，目的不是替代 `runningAgents`，而是避免在上下文创建本身已经带有持久化副作用的情况下发生数据污染。
+
 ### 5.2 `SuperAgent` 改为普通类
 
 `SuperAgent` 不再由 Spring 直接管理，不再是单例组件。
@@ -133,11 +140,27 @@ Status: Draft for review
 
 guard 被 `Coordinator` 的运行表完全替代。
 
-并发校验规则改为：
+并发控制规则改为两级：
 
-- 如果 `runningAgents` 中已存在同一 `sessionId`
-- 认为该会话已有进行中的执行
-- 直接拒绝新的请求
+- 一级：`sessionId -> lock`，保护同一会话的创建/恢复临界区
+- 二级：`runningAgents`，表示真正处于运行态的 `SuperAgent`
+
+原因是当前 `SuperAgentSessionService.createContext()` 在返回前就会：
+
+- 创建新 turn
+- 追加用户消息
+- 立即调用 `appendDialogueMessages(...)`
+- 立即调用 `save(...)`
+
+因此如果先执行 `factory.create(...)`，再判断 `runningAgents`，被拒绝的并发请求也可能已经把新一轮 turn 写入存储，造成会话历史污染。
+
+为避免这个问题，必须保证：
+
+- 同一 `sessionId` 下，`factory.create(...)` 只能在会话锁保护下执行
+- `runningAgents` 的注册也必须在同一临界区内完成
+- 只有注册成功后，临界区才可以释放
+
+这样后到请求即使进入，也只会在锁外等待；等它拿到锁时，前一个请求要么已经注册为运行中实例，要么已经完全失败并清理，不会出现“请求被拒绝但已经写脏会话”的情况。
 
 ### 5.6 删除 `SuperAgentLoopRunner`
 
@@ -228,6 +251,7 @@ EndMessage.builder().build()
 职责：
 
 - 持有 `runningAgents`
+- 持有 `sessionId -> lock` 映射
 - 作为唯一运行入口
 - 负责 session 并发校验
 - 调用 factory 创建 `SuperAgent`
@@ -279,13 +303,18 @@ EndMessage.builder().build()
 
 `SuperAgentCoordinator`:
 
-1. 调用 `superAgentFactory.create(request, emitter)`
-2. 获取 `SuperAgent` 和其内部 `context`
-3. 用 `sessionId` 做并发注册
-4. 提交线程池执行 `agent.run()`
-5. 执行结束后发送空 `END`
-6. `emitter.complete()`
-7. 从 `runningAgents` 中移除实例
+1. 根据 `sessionId` 获取或创建会话锁对象
+2. 进入该会话锁的临界区
+3. 检查 `runningAgents` 中是否已存在该 `sessionId`
+4. 若存在则立即拒绝，不执行 `factory.create(...)`
+5. 若不存在，调用 `superAgentFactory.create(request, emitter)`
+6. 获取 `SuperAgent` 和其内部 `context`
+7. 在同一临界区内将实例注册到 `runningAgents`
+8. 离开临界区
+9. 提交线程池执行 `agent.run()`
+10. 执行结束后发送空 `END`
+11. `emitter.complete()`
+12. 从 `runningAgents` 中移除实例
 
 ### 7.2 恢复请求
 
@@ -365,10 +394,18 @@ EndMessage.builder().build()
 如果同一 `sessionId` 已存在运行中的 `SuperAgent`：
 
 - 拒绝本次请求
+- 不执行 `factory.create(...)`
 - 不提交线程池
 - 不覆盖 map 中的原实例
 
 该错误仍然是同步错误。
+
+这里的关键要求是：
+
+- 冲突检查必须发生在会话锁保护下
+- 冲突检查必须先于上下文创建
+
+否则会再次引入“拒绝了请求，但该请求已经持久化了新 turn”的数据污染问题。
 
 ### 9.2 创建失败
 
@@ -377,6 +414,12 @@ EndMessage.builder().build()
 - 直接对当前 emitter 发送空 `END`
 - `emitter.complete()`
 - 不向 map 中写入任何实例
+
+如果失败发生在持有会话锁期间：
+
+- 必须在释放锁前结束本次创建流程
+- 但不能在失败路径中留下虚假的运行态记录
+- 锁释放后，后续请求可以重新尝试
 
 ### 9.3 线程池提交失败
 
@@ -416,6 +459,8 @@ public SseEmitter chat(ChatRequest request)
 
 ```java
 public void run(ChatRequest request, SseEmitter emitter)
+private Object getSessionLock(String sessionId)
+private SuperAgent createAndRegisterAgent(ChatRequest request, SseEmitter emitter)
 private void executeAsync(String sessionId, SuperAgent agent)
 private void doRun(String sessionId, SuperAgent agent)
 private void sendEnd(SseEmitter emitter)
@@ -479,6 +524,8 @@ private void persistDialogueMessages()
 - `Coordinator` 在新建请求上的成功路径
 - `Coordinator` 在恢复请求上的成功路径
 - `Coordinator` 的并发冲突路径
+- `Coordinator` 在并发冲突下不会调用 `factory.create(...)`
+- `Coordinator` 在两个并发请求使用同一 `sessionId` 时，后到请求不会写入新 turn
 - `Coordinator` 的 factory 创建失败路径
 - `Coordinator` 的线程池提交失败路径
 - `Coordinator` 的运行时失败路径
@@ -518,6 +565,18 @@ runningAgents.remove(sessionId, agent)
 ```
 
 避免在极端竞态下误删后续新实例。
+
+### 13.4 锁对象 map 需要有清理策略
+
+如果使用 `sessionId -> lock` 的永久 map，而不做回收，会导致锁对象数量只增不减。
+
+因此建议：
+
+- 使用 `computeIfAbsent(sessionId, ...)` 获取锁对象
+- 在执行清理阶段尝试移除空闲锁对象
+- 只有当该 `sessionId` 不在 `runningAgents` 中，且当前没有线程仍持有该锁时，才移除对应锁对象
+
+如果实现上不方便安全回收，则保留锁对象 map 也可以接受，但需要在实现阶段明确这是一个受控的内存换简化方案。
 
 ## 14. 决策摘要
 
