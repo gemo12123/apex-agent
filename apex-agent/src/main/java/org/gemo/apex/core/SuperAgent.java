@@ -13,6 +13,8 @@ import org.springframework.stereotype.Component;
 @Component
 public class SuperAgent {
 
+    private SuperAgentContext context;
+
     private final HumanInLoopResumer humanInLoopResumer;
     private final SuperAgentLoopRunner superAgentLoopRunner;
     private final ExecutionFinalizer executionFinalizer;
@@ -23,6 +25,18 @@ public class SuperAgent {
         this.humanInLoopResumer = humanInLoopResumer;
         this.superAgentLoopRunner = superAgentLoopRunner;
         this.executionFinalizer = executionFinalizer;
+    }
+
+    public void bindContext(SuperAgentContext context) {
+        this.context = context;
+    }
+
+    public SuperAgentContext getContext() {
+        return context;
+    }
+
+    public void run() {
+        execute(context);
     }
 
     public void execute(SuperAgentContext context) {

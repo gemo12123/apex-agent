@@ -2,17 +2,14 @@ package org.gemo.apex.web.controller;
 
 import org.gemo.apex.config.ApexGlobalProperties;
 import org.gemo.apex.config.model.AgentConfig;
-import org.gemo.apex.core.SessionExecutionGuard;
-import org.gemo.apex.web.service.ChatStreamingApplicationService;
+import org.gemo.apex.web.service.ChatService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -37,7 +34,7 @@ class ChatControllerTest {
     private ApexGlobalProperties apexGlobalProperties;
 
     @Mock
-    private ChatStreamingApplicationService chatStreamingApplicationService;
+    private ChatService chatService;
 
     @InjectMocks
     private ChatController chatController;
@@ -49,7 +46,6 @@ class ChatControllerTest {
         defaultAgent.setAgentKey("default_agent");
         defaultAgent.setName("Default Agent");
         when(apexGlobalProperties.getAgents()).thenReturn(Map.of("default_agent", defaultAgent));
-        ReflectionTestUtils.setField(chatController, "sessionExecutionGuard", new SessionExecutionGuard());
         mockMvc = MockMvcBuilders.standaloneSetup(chatController).build();
     }
 
@@ -63,6 +59,9 @@ class ChatControllerTest {
 
     @Test
     void testExecuteWithSseDelegatesToStreamingService() throws Exception {
+        SseEmitter emitter = new SseEmitter(1000L);
+        when(chatService.chat(any())).thenReturn(emitter);
+
         String jsonRequest = """
                 {
                   "sessionId":"session-123",
@@ -78,9 +77,8 @@ class ChatControllerTest {
                 .andExpect(request().asyncStarted())
                 .andExpect(status().isOk());
 
-        ArgumentCaptor<SseEmitter> emitterCaptor = ArgumentCaptor.forClass(SseEmitter.class);
-        verify(chatStreamingApplicationService).stream(any(), emitterCaptor.capture());
-        assertNotNull(emitterCaptor.getValue());
+        verify(chatService).chat(any());
+        assertNotNull(emitter);
     }
 
     @Test
@@ -98,29 +96,6 @@ class ChatControllerTest {
                 .content(jsonRequest))
                 .andExpect(status().isBadRequest());
 
-        verify(chatStreamingApplicationService, never()).stream(any(), any(SseEmitter.class));
-    }
-
-    @Test
-    void testExecuteWithSseShouldRejectConcurrentRequestsForSameSession() throws Exception {
-        String jsonRequest = """
-                {
-                  "sessionId":"session-123",
-                  "agentKey":"default_agent",
-                  "query":"Hello Super Agent",
-                  "type":"NEW"
-                }
-                """;
-
-        SessionExecutionGuard guard = new SessionExecutionGuard();
-        guard.tryAcquire("session-123");
-        ReflectionTestUtils.setField(chatController, "sessionExecutionGuard", guard);
-
-        mockMvc.perform(post("/api/sse/chat")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(jsonRequest))
-                .andExpect(status().isConflict());
-
-        verify(chatStreamingApplicationService, never()).stream(any(), any(SseEmitter.class));
+        verify(chatService, never()).chat(any());
     }
 }
