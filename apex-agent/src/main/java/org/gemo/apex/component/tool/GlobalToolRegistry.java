@@ -56,6 +56,7 @@ public class GlobalToolRegistry implements DisposableBean {
     private final Map<String, List<ToolCallback>> mcpToolCache = new ConcurrentHashMap<>();
     private final Map<String, Skills> skillsCache = new ConcurrentHashMap<>();
     private final List<McpSyncClient> createdClients = new CopyOnWriteArrayList<>();
+    private final Object clientLifecycleMonitor = new Object();
 
     public List<ToolCallback> getMcpToolCallbacks(String agentKey) {
         AgentDefinition definition = agentDefinitionLoader.load(agentKey);
@@ -135,20 +136,32 @@ public class GlobalToolRegistry implements DisposableBean {
     public void clearCache() {
         mcpToolCache.clear();
         skillsCache.clear();
-        log.info("GlobalToolRegistry cache cleared");
+        int closedClients = closeCreatedClients();
+        log.info("GlobalToolRegistry cache cleared and {} MCP clients closed", closedClients);
     }
 
     @Override
     public void destroy() {
-        log.info("Closing {} MCP clients", createdClients.size());
-        for (McpSyncClient client : createdClients) {
+        int closedClients = closeCreatedClients();
+        log.info("All MCP clients closed: {}", closedClients);
+    }
+
+    private int closeCreatedClients() {
+        List<McpSyncClient> clientsToClose;
+        synchronized (clientLifecycleMonitor) {
+            clientsToClose = new ArrayList<>(createdClients);
+            createdClients.clear();
+        }
+
+        log.info("Closing {} MCP clients", clientsToClose.size());
+        for (McpSyncClient client : clientsToClose) {
             try {
                 client.close();
             } catch (Exception e) {
                 log.warn("Failed to close MCP client: {}", e.getMessage());
             }
         }
-        log.info("All MCP clients closed");
+        return clientsToClose.size();
     }
 
     private List<ToolCallback> createMcpTools(String agentKey, String mcpName, McpServerConfig config) {
@@ -177,7 +190,9 @@ public class GlobalToolRegistry implements DisposableBean {
                     .build();
 
             client.initialize();
-            createdClients.add(client);
+            synchronized (clientLifecycleMonitor) {
+                createdClients.add(client);
+            }
 
             List<ToolCallback> tools = Arrays.stream(SyncMcpToolCallbackProvider.builder()
                     .mcpClients(client)

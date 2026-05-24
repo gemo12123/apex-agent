@@ -11,6 +11,7 @@ import org.gemo.apex.definition.agent.IAgentDefinitionLoader;
 import org.gemo.apex.definition.mcp.IMcpDefinitionLoader;
 import org.gemo.apex.definition.skill.ISkillDefinitionLoader;
 import org.gemo.apex.skills.Skills;
+import io.modelcontextprotocol.client.McpSyncClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -22,6 +23,7 @@ import org.springframework.ai.mcp.ToolContextToMcpMetaConverter;
 import org.springframework.ai.tool.ToolCallback;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -33,6 +35,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
@@ -127,6 +131,21 @@ public class GlobalToolRegistryTest {
         assertFalse(meta.containsKey("MCP_SESSION_CONTEXT"));
         assertFalse(meta.containsKey(ToolContext.TOOL_CALL_HISTORY));
         assertFalse(meta.containsKey("otherKey"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void clearCacheShouldCloseAndRemoveCreatedMcpClients() throws Exception {
+        Field createdClientsField = GlobalToolRegistry.class.getDeclaredField("createdClients");
+        createdClientsField.setAccessible(true);
+        List<McpSyncClient> createdClients = (List<McpSyncClient>) createdClientsField.get(globalToolRegistry);
+        McpSyncClient client = mock(McpSyncClient.class);
+        createdClients.add(client);
+
+        globalToolRegistry.clearCache();
+
+        verify(client).close();
+        assertTrue(createdClients.isEmpty());
     }
 
     private AgentDefinition definition(List<String> mcpNames, List<String> subAgentNames, List<String> skillNames) {
