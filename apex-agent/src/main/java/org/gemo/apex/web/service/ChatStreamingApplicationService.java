@@ -8,14 +8,13 @@ import org.gemo.apex.core.SessionExecutionGuard;
 import org.gemo.apex.domain.dto.ChatRequest;
 import org.gemo.apex.message.EndMessage;
 import org.gemo.apex.util.JacksonUtils;
+import org.gemo.apex.util.MessageUtils;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.core.task.TaskRejectedException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-
-import java.io.IOException;
 
 @Slf4j
 @Service
@@ -87,10 +86,6 @@ public class ChatStreamingApplicationService {
     }
 
     private void sendTerminalEvent(SseEmitter emitter, EndMessage endMessage) {
-        try {
-            emitter.send(JacksonUtils.toJson(endMessage));
-        } catch (IOException sendFailure) {
-            log.error("Failed to send terminal SSE event", sendFailure);
-        }
+        MessageUtils.sendMessage(emitter, JacksonUtils.toJson(endMessage));
     }
 }
