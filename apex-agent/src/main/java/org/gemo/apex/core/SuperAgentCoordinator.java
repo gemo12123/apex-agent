@@ -29,6 +29,9 @@ public class SuperAgentCoordinator {
 
     public void run(ChatRequest request, SseEmitter emitter) {
         SuperAgent agent = createAndRegisterAgent(request, emitter);
+        if (agent == null) {
+            return;
+        }
         executeAsync(request.getSessionId(), agent);
     }
 
@@ -44,9 +47,15 @@ public class SuperAgentCoordinator {
                 throw new ResponseStatusException(HttpStatus.CONFLICT,
                         "Session " + sessionId + " already has an active execution");
             }
-            SuperAgent agent = factory.create(request, emitter);
-            runningAgents.put(sessionId, agent);
-            return agent;
+            try {
+                SuperAgent agent = factory.create(request, emitter);
+                runningAgents.put(sessionId, agent);
+                return agent;
+            } catch (RuntimeException ex) {
+                sendEnd(emitter);
+                completeEmitter(emitter);
+                return null;
+            }
         }
     }
 
@@ -78,10 +87,13 @@ public class SuperAgentCoordinator {
 
     private void cleanup(String sessionId, SuperAgent agent, SseEmitter emitter) {
         try {
-            emitter.complete();
+            completeEmitter(emitter);
         } finally {
             runningAgents.remove(sessionId, agent);
-            sessionLocks.computeIfPresent(sessionId, (key, lock) -> runningAgents.containsKey(key) ? lock : null);
         }
+    }
+
+    private void completeEmitter(SseEmitter emitter) {
+        emitter.complete();
     }
 }

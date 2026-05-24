@@ -20,7 +20,9 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -135,9 +137,65 @@ class SuperAgentCoordinatorTest {
         assertTrue(currentRunningAgents().isEmpty());
     }
 
+    @Test
+    void runShouldKeepSessionLockStableAcrossCleanupAndNextRun() throws Exception {
+        ChatRequest request = new ChatRequest();
+        request.setSessionId("session-1");
+        request.setAgentKey("agent-1");
+        request.setQuery("hello");
+
+        RecordingSseEmitter firstEmitter = new RecordingSseEmitter();
+        RecordingSseEmitter secondEmitter = new RecordingSseEmitter();
+        SuperAgent firstAgent = mock(SuperAgent.class);
+        SuperAgent secondAgent = mock(SuperAgent.class);
+        SuperAgentContext firstContext = new SuperAgentContext();
+        firstContext.setSessionId("session-1");
+        firstContext.setSseEmitter(firstEmitter);
+        SuperAgentContext secondContext = new SuperAgentContext();
+        secondContext.setSessionId("session-1");
+        secondContext.setSseEmitter(secondEmitter);
+        when(firstAgent.getContext()).thenReturn(firstContext);
+        when(secondAgent.getContext()).thenReturn(secondContext);
+        when(factory.create(eq(request), same(firstEmitter))).thenReturn(firstAgent);
+        when(factory.create(eq(request), same(secondEmitter))).thenReturn(secondAgent);
+
+        coordinator.run(request, firstEmitter);
+
+        assertTrue(firstEmitter.awaitCompletion());
+        Object firstLock = currentSessionLocks().get("session-1");
+        assertTrue(firstLock != null);
+
+        coordinator.run(request, secondEmitter);
+
+        assertTrue(secondEmitter.awaitCompletion());
+        assertSame(firstLock, currentSessionLocks().get("session-1"));
+    }
+
+    @Test
+    void runShouldSendEmptyEndAndCompleteWhenFactoryCreateThrows() throws Exception {
+        ChatRequest request = new ChatRequest();
+        request.setSessionId("session-1");
+        request.setAgentKey("agent-1");
+        request.setQuery("hello");
+
+        RecordingSseEmitter emitter = new RecordingSseEmitter();
+        when(factory.create(eq(request), same(emitter))).thenThrow(new IllegalStateException("boom"));
+
+        assertDoesNotThrow(() -> coordinator.run(request, emitter));
+
+        assertTrue(emitter.awaitCompletion());
+        assertTrue(emitter.joinedPayload().contains(JacksonUtils.toJson(EndMessage.builder().build())));
+        assertTrue(currentRunningAgents().isEmpty());
+    }
+
     @SuppressWarnings("unchecked")
     private Map<String, SuperAgent> currentRunningAgents() {
         return (Map<String, SuperAgent>) ReflectionTestUtils.getField(coordinator, "runningAgents");
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> currentSessionLocks() {
+        return (Map<String, Object>) ReflectionTestUtils.getField(coordinator, "sessionLocks");
     }
 
     private static class RecordingSseEmitter extends SseEmitter {
