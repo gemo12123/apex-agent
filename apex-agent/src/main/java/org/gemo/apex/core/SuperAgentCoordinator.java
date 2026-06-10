@@ -4,6 +4,7 @@ import org.gemo.apex.domain.dto.ChatRequest;
 import org.gemo.apex.message.EndMessage;
 import org.gemo.apex.util.JacksonUtils;
 import org.gemo.apex.util.MessageUtils;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.core.task.TaskRejectedException;
 import org.springframework.http.HttpStatus;
@@ -22,7 +23,7 @@ public class SuperAgentCoordinator {
     private final Map<String, SuperAgent> runningAgents = new ConcurrentHashMap<>();
     private final Map<String, Object> sessionLocks = new ConcurrentHashMap<>();
 
-    public SuperAgentCoordinator(SuperAgentFactory factory, TaskExecutor chatStreamExecutor) {
+    public SuperAgentCoordinator(SuperAgentFactory factory, @Qualifier("chatStreamExecutor") TaskExecutor chatStreamExecutor) {
         this.factory = factory;
         this.chatStreamExecutor = chatStreamExecutor;
     }
