@@ -1,27 +1,20 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import type { AgentSummary } from '@/types/apex'
 
-defineProps<{
-  agents: AgentSummary[]
-  selectedAgentKey: string
-  userId: string
-  loading: boolean
-  errorMessage: string
-}>()
+defineOptions({
+  inheritAttrs: false,
+})
 
 const emit = defineEmits<{
   (event: 'submit', value: string): void
-  (event: 'update:selectedAgentKey', value: string): void
-  (event: 'update:userId', value: string): void
 }>()
 
 const prompt = ref('')
 
 const suggestions = [
-  '概括 docs 中 Apex 的执行流程，并指出关键 SSE 事件。',
-  '说明 plan-executor 和 react 两种模式的差异。',
-  '根据当前工程结构给出一个前端改造建议。',
+  '总结当前仓库里的前端结构，并指出最适合先改的入口文件。',
+  '阅读 session store 和 SSE reducer，解释消息流是如何驱动界面的。',
+  '给这个工作台补一版更接近 ChatGPT 的交互和视觉方案。',
 ]
 
 function submitPrompt(): void {
@@ -41,79 +34,46 @@ function useSuggestion(value: string): void {
 
 <template>
   <section class="welcome-screen">
-    <div class="welcome-screen__frame">
-      <div class="welcome-screen__intro">
-        <div class="welcome-screen__eyebrow">Apex 工作台</div>
-        <h1 class="welcome-screen__title">把任务、执行过程和产物放到同一个页面里</h1>
-        <p class="welcome-screen__subtitle">
-          在一个页面里发起任务、跟踪计划、查看产物，并处理需要人工确认的步骤。
-        </p>
+    <div class="welcome-screen__copy">
+      <p class="welcome-screen__eyebrow">Apex Workspace</p>
+      <h1 class="welcome-screen__title">今天想让 Apex 做什么？</h1>
+      <p class="welcome-screen__subtitle">
+        从左侧新建会话、选择 Agent，然后在这里发起任务、补充上下文，或者继续把一个复杂问题拆解到底。
+      </p>
+    </div>
 
-        <div class="welcome-screen__highlights">
-          <span>流式输出</span>
-          <span>计划追踪</span>
-          <span>人工确认</span>
-        </div>
-      </div>
+    <div class="welcome-screen__suggestions">
+      <button
+        v-for="suggestion in suggestions"
+        :key="suggestion"
+        class="welcome-screen__suggestion"
+        type="button"
+        @click="useSuggestion(suggestion)"
+      >
+        {{ suggestion }}
+      </button>
+    </div>
 
-      <div class="welcome-screen__editor">
-        <label class="sr-only" for="welcome-prompt">任务输入</label>
-        <textarea
-          id="welcome-prompt"
-          v-model="prompt"
-          class="welcome-screen__textarea"
-          placeholder="例如：总结 docs 中的执行协议，并说明 plan-executor 与 react 模式的区别。"
-          rows="6"
-          @keydown.enter.exact.prevent="submitPrompt"
-        />
+    <div class="welcome-screen__composer">
+      <label class="sr-only" for="welcome-prompt">输入你的任务</label>
+      <textarea
+        id="welcome-prompt"
+        v-model="prompt"
+        class="welcome-screen__textarea"
+        placeholder="例如：检查当前工作台实现，给出一版接近 ChatGPT 首页的布局改造方案。"
+        rows="6"
+        @keydown.enter.exact.prevent="submitPrompt"
+      />
 
-        <div class="welcome-screen__controls">
-          <label class="welcome-screen__field">
-            <span>代理</span>
-            <select
-              :value="selectedAgentKey"
-              class="welcome-screen__select"
-              @change="emit('update:selectedAgentKey', ($event.target as HTMLSelectElement).value)"
-            >
-              <option v-for="agent in agents" :key="agent.agentKey" :value="agent.agentKey">
-                {{ agent.name }}
-              </option>
-            </select>
-          </label>
-
-          <label class="welcome-screen__field">
-            <span>用户 ID</span>
-            <input
-              :value="userId"
-              class="welcome-screen__input"
-              type="text"
-              placeholder="demo-user"
-              @input="emit('update:userId', ($event.target as HTMLInputElement).value)"
-            />
-          </label>
-
-          <button
-            class="welcome-screen__submit accent-button"
-            type="button"
-            :disabled="loading || !prompt.trim()"
-            @click="submitPrompt"
-          >
-            {{ loading ? '加载中...' : '进入工作台' }}
-          </button>
-        </div>
-      </div>
-
-      <p v-if="errorMessage" class="welcome-screen__error">{{ errorMessage }}</p>
-
-      <div class="welcome-screen__suggestions">
+      <div class="welcome-screen__actions">
+        <span class="welcome-screen__hint">Enter 发送，Shift + Enter 换行</span>
         <button
-          v-for="suggestion in suggestions"
-          :key="suggestion"
-          class="welcome-screen__suggestion"
+          class="welcome-screen__submit accent-button"
           type="button"
-          @click="useSuggestion(suggestion)"
+          :disabled="!prompt.trim()"
+          @click="submitPrompt"
         >
-          {{ suggestion }}
+          开始对话
         </button>
       </div>
     </div>
@@ -122,142 +82,130 @@ function useSuggestion(value: string): void {
 
 <style scoped>
 .welcome-screen {
-  min-height: 100vh;
   display: grid;
-  place-items: center;
-  padding: 32px 18px;
+  gap: 24px;
+  width: min(880px, 100%);
+  margin: 0 auto;
 }
 
-.welcome-screen__frame {
-  width: min(980px, 100%);
-  padding: 32px;
-  border: 1px solid var(--border-strong);
-  border-radius: 24px;
-  background: var(--surface);
-  box-shadow: var(--shadow-panel);
-}
-
-.welcome-screen__intro {
+.welcome-screen__copy {
   display: grid;
   gap: 14px;
+  text-align: center;
 }
 
 .welcome-screen__eyebrow {
   width: fit-content;
+  margin: 0 auto;
   padding: 6px 12px;
+  border: 1px solid var(--border);
   border-radius: 999px;
-  background: var(--surface-muted);
+  background: rgba(255, 255, 255, 0.82);
   color: var(--text-muted);
-  font-size: 0.86rem;
-  font-weight: 600;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .welcome-screen__title {
-  max-width: 16ch;
-  font-size: clamp(2rem, 5vw, 3.4rem);
-  line-height: 1.12;
-  letter-spacing: -0.04em;
+  margin: 0;
+  font-size: clamp(2.3rem, 5vw, 4rem);
+  line-height: 1.02;
+  letter-spacing: -0.05em;
 }
 
 .welcome-screen__subtitle {
-  max-width: 58ch;
+  max-width: 62ch;
+  margin: 0 auto;
   color: var(--text-soft);
-  line-height: 1.75;
-}
-
-.welcome-screen__highlights {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.welcome-screen__highlights span,
-.welcome-screen__suggestion {
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface-subtle);
-  color: var(--text-soft);
-}
-
-.welcome-screen__editor {
-  margin-top: 28px;
-  padding: 18px;
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  background: var(--surface-subtle);
-}
-
-.welcome-screen__textarea,
-.welcome-screen__select,
-.welcome-screen__input {
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--surface);
-  color: var(--text-strong);
-  font: inherit;
-}
-
-.welcome-screen__textarea {
-  min-height: 164px;
-  padding: 16px;
-  resize: vertical;
-}
-
-.welcome-screen__controls {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr) auto;
-  gap: 12px;
-  margin-top: 14px;
-}
-
-.welcome-screen__field {
-  display: grid;
-  gap: 8px;
-  color: var(--text-muted);
-  font-size: 0.9rem;
-}
-
-.welcome-screen__select,
-.welcome-screen__input,
-.welcome-screen__submit {
-  min-height: 46px;
-}
-
-.welcome-screen__select,
-.welcome-screen__input {
-  padding: 0 14px;
-}
-
-.welcome-screen__submit {
-  align-self: end;
-  padding: 0 18px;
-}
-
-.welcome-screen__error {
-  margin-top: 14px;
-  color: var(--danger);
+  line-height: 1.7;
 }
 
 .welcome-screen__suggestions {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 10px;
-  margin-top: 14px;
 }
 
 .welcome-screen__suggestion {
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--text-soft);
   text-align: left;
+  transition:
+    border-color 0.18s ease,
+    transform 0.18s ease,
+    background 0.18s ease;
 }
 
-@media (max-width: 900px) {
-  .welcome-screen__frame {
-    padding: 22px;
+.welcome-screen__suggestion:hover {
+  border-color: var(--accent);
+  background: var(--surface);
+  transform: translateY(-1px);
+}
+
+.welcome-screen__composer {
+  padding: 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 28px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(251, 250, 247, 0.96));
+  box-shadow: var(--shadow-panel);
+}
+
+.welcome-screen__textarea {
+  width: 100%;
+  min-height: 168px;
+  padding: 14px 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-strong);
+  font: inherit;
+  line-height: 1.7;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.welcome-screen__textarea:focus {
+  outline: none;
+}
+
+.welcome-screen__actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.welcome-screen__hint {
+  color: var(--text-muted);
+  font-size: 0.84rem;
+}
+
+.welcome-screen__submit {
+  min-height: 44px;
+  padding: 0 18px;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .welcome-screen__actions {
+    flex-direction: column;
+    align-items: stretch;
   }
 
-  .welcome-screen__controls {
-    grid-template-columns: 1fr;
+  .welcome-screen__hint {
+    text-align: center;
+  }
+
+  .welcome-screen__submit {
+    width: 100%;
   }
 }
 </style>

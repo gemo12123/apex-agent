@@ -2,27 +2,21 @@ import { mount } from '@vue/test-utils'
 import WelcomeScreen from '@/features/workspace/components/WelcomeScreen.vue'
 
 describe('WelcomeScreen', () => {
-  it('emits submit and configuration updates', async () => {
-    const wrapper = mount(WelcomeScreen, {
-      props: {
-        agents: [
-          { agentKey: 'default_agent', name: 'Default Agent' },
-          { agentKey: 'deer-flow', name: 'Deer Flow' },
-        ],
-        selectedAgentKey: 'default_agent',
-        userId: 'demo-user',
-        loading: false,
-        errorMessage: '',
-      },
-    })
+  it('shows welcome copy, fills suggestions, and emits submit', async () => {
+    const wrapper = mount(WelcomeScreen)
 
-    await wrapper.get('textarea').setValue('Inspect the SSE contract')
-    await wrapper.get('select').setValue('deer-flow')
-    await wrapper.get('input').setValue('workspace-user')
-    await wrapper.get('.welcome-screen__submit').trigger('click')
+    expect(wrapper.text()).toContain('今天想让 Apex 做什么？')
 
-    expect(wrapper.emitted('update:selectedAgentKey')?.[0]).toEqual(['deer-flow'])
-    expect(wrapper.emitted('update:userId')?.[0]).toEqual(['workspace-user'])
+    const suggestion = wrapper.findAll('button').at(0)
+    expect(suggestion).toBeDefined()
+    await suggestion!.trigger('click')
+
+    const textarea = wrapper.get('textarea')
+    expect((textarea.element as HTMLTextAreaElement).value.length).toBeGreaterThan(0)
+
+    await textarea.setValue('Inspect the SSE contract')
+    await textarea.trigger('keydown.enter')
+
     expect(wrapper.emitted('submit')?.[0]).toEqual(['Inspect the SSE contract'])
   })
 })
