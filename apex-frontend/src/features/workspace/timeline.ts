@@ -32,7 +32,7 @@ export function buildTimelineEntries(session: SessionViewModel): TimelineEntry[]
         id: `invocation:${invocation.id}`,
         kind: 'invocation',
         title: invocation.name,
-        subtitle: `${invocation.invocationType} · ${formatRuntimeStatus(invocation.status)}`,
+        subtitle: `${invocation.invocationType} / ${formatRuntimeStatus(invocation.status)}`,
         tone: toneFromStatus(invocation.status),
         body: invocation.content,
         defaultExpanded: false,
@@ -53,12 +53,25 @@ export function buildTimelineEntries(session: SessionViewModel): TimelineEntry[]
     })
   })
 
+  session.globalArtifacts.forEach((artifact) => {
+    entries.push({
+      id: `artifact:global:${artifact.id}`,
+      kind: 'artifact',
+      title: artifact.artifactName,
+      subtitle: `全局产物 / ${artifact.dataType}`,
+      tone: artifact.complete ? 'success' : 'active',
+      body: artifact.content,
+      exportFileName: `${artifact.artifactName}.md`,
+      defaultExpanded: false,
+    })
+  })
+
   if (session.pendingPrompts.length > 0) {
     entries.push({
       id: 'prompt:pending',
       kind: 'prompt',
       title: '等待人工确认',
-      subtitle: `${session.pendingPrompts.length} 个问题待答复`,
+      subtitle: `${session.pendingPrompts.length} 个问题待回复`,
       tone: 'warning',
       body: session.pendingPrompts.map((prompt) => prompt.question).join('\n'),
       defaultExpanded: false,

@@ -1,24 +1,33 @@
-@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
-
 :root {
-  --page: #f4f6f8;
-  --surface: rgba(255, 255, 255, 0.94);
-  --surface-subtle: #f8f9fb;
-  --surface-muted: #f2f4f7;
-  --text-strong: #111827;
-  --text-soft: #334155;
-  --text-muted: #6b7280;
-  --border: #e5e7eb;
-  --border-strong: #d8dee6;
-  --accent: #1d4ed8;
-  --accent-subtle: #eef4ff;
+  --page: #ede8de;
+  --surface: rgba(255, 255, 255, 0.92);
+  --surface-subtle: rgba(255, 255, 255, 0.72);
+  --surface-muted: rgba(248, 244, 237, 0.94);
+  --text-strong: #171717;
+  --text-soft: #3f3a35;
+  --text-muted: #7b756d;
+  --border: rgba(82, 74, 61, 0.12);
+  --border-strong: rgba(82, 74, 61, 0.18);
+  --accent: #111827;
+  --accent-subtle: rgba(17, 24, 39, 0.08);
   --success: #0f766e;
   --warning: #b45309;
   --danger: #dc2626;
-  --shadow-panel: 0 14px 32px -24px rgba(15, 23, 42, 0.28);
-  --shadow-soft: 0 10px 24px -22px rgba(15, 23, 42, 0.24);
-  --font-sans: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --font-mono: 'Fira Code', 'SFMono-Regular', Consolas, monospace;
+  --shadow-panel: 0 24px 60px -40px rgba(37, 33, 27, 0.42);
+  --shadow-soft: 0 18px 42px -34px rgba(37, 33, 27, 0.34);
+  --font-sans:
+    'Avenir Next',
+    'SF Pro Display',
+    'Segoe UI Variable Display',
+    'PingFang SC',
+    'Microsoft YaHei',
+    sans-serif;
+  --font-mono:
+    'JetBrains Mono',
+    'Cascadia Code',
+    'SFMono-Regular',
+    Consolas,
+    monospace;
 }
 
 * {
@@ -36,8 +45,8 @@ body {
   font-family: var(--font-sans);
   color: var(--text-strong);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.7)),
-    linear-gradient(180deg, var(--page), #edf1f5);
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.86), transparent 36%),
+    linear-gradient(180deg, #f7f4ef 0%, var(--page) 48%, #e6e0d6 100%);
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -73,16 +82,17 @@ button {
     border-color 180ms ease,
     background-color 180ms ease,
     color 180ms ease,
-    box-shadow 180ms ease;
+    box-shadow 180ms ease,
+    transform 180ms ease;
 }
 
 textarea:focus-visible,
 input:focus-visible,
 select:focus-visible,
 button:focus-visible {
-  outline: 2px solid rgba(29, 78, 216, 0.2);
-  outline-offset: 1px;
-  border-color: var(--accent);
+  outline: 2px solid rgba(17, 24, 39, 0.14);
+  outline-offset: 2px;
+  border-color: rgba(17, 24, 39, 0.28);
 }
 
 .sr-only {
@@ -100,34 +110,39 @@ button:focus-visible {
 .ghost-button {
   min-height: 42px;
   padding: 0 16px;
-  border-radius: 14px;
+  border-radius: 16px;
   border: 1px solid transparent;
   font-weight: 600;
 }
 
 .accent-button {
-  background: var(--text-strong);
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
+  box-shadow: 0 14px 28px -24px rgba(17, 24, 39, 0.72);
 }
 
 .accent-button:hover:enabled {
-  background: #1f2937;
+  background: #252f3f;
+  transform: translateY(-1px);
 }
 
 .ghost-button {
   border-color: var(--border-strong);
-  background: var(--surface);
+  background: rgba(255, 255, 255, 0.76);
   color: var(--text-soft);
 }
 
 .ghost-button:hover:enabled {
-  background: var(--surface-subtle);
+  background: rgba(255, 255, 255, 0.94);
+  transform: translateY(-1px);
 }
 
 .accent-button:disabled,
 .ghost-button:disabled {
   opacity: 0.56;
   cursor: not-allowed;
+  transform: none;
 }
 
 .status-pill {
@@ -143,20 +158,25 @@ button:focus-visible {
 .status-pill--idle,
 .status-pill--completed,
 .status-pill--success {
-  background: rgba(15, 118, 110, 0.1);
+  background: rgba(15, 118, 110, 0.12);
   color: var(--success);
 }
 
 .status-pill--streaming,
 .status-pill--active {
-  background: rgba(29, 78, 216, 0.08);
-  color: var(--accent);
+  background: rgba(15, 23, 42, 0.08);
+  color: #374151;
 }
 
 .status-pill--waiting-human,
 .status-pill--warning {
-  background: rgba(180, 83, 9, 0.1);
+  background: rgba(180, 83, 9, 0.12);
   color: var(--warning);
+}
+
+.status-pill--waiting-confirmation {
+  background: rgba(146, 64, 14, 0.12);
+  color: #92400e;
 }
 
 .status-pill--aborted,
@@ -168,7 +188,7 @@ button:focus-visible {
 
 .markdown {
   color: var(--text-soft);
-  line-height: 1.68;
+  line-height: 1.7;
 }
 
 .markdown > :first-child {
@@ -183,7 +203,10 @@ button:focus-visible {
 .markdown ul,
 .markdown ol,
 .markdown pre,
-.markdown blockquote {
+.markdown blockquote,
+.markdown h1,
+.markdown h2,
+.markdown h3 {
   margin: 0 0 0.8em;
 }
 
@@ -193,19 +216,19 @@ button:focus-visible {
 }
 
 .markdown code {
-  padding: 0.12rem 0.35rem;
-  border-radius: 6px;
-  background: #eef2f7;
+  padding: 0.14rem 0.35rem;
+  border-radius: 8px;
+  background: rgba(17, 24, 39, 0.08);
   font-family: var(--font-mono);
   font-size: 0.92em;
 }
 
 .markdown pre {
   overflow: auto;
-  padding: 12px;
-  border-radius: 12px;
-  background: #111827;
-  color: #e5e7eb;
+  padding: 14px;
+  border-radius: 16px;
+  background: #171717;
+  color: #f5f5f4;
 }
 
 .markdown blockquote {

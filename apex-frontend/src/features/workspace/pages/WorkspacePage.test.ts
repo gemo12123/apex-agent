@@ -2,7 +2,6 @@ import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createApexApiClient, setApexApiClientForTesting } from '@/services/apex-api'
-import WelcomeScreen from '@/features/workspace/components/WelcomeScreen.vue'
 import WorkspacePage from '@/features/workspace/pages/WorkspacePage.vue'
 import { useSessionStore } from '@/stores/session/store'
 import type { ApexApiClient } from '@/services/apex-api'
@@ -12,7 +11,7 @@ describe('WorkspacePage', () => {
     setApexApiClientForTesting(createApexApiClient())
   })
 
-  it('returns to the welcome screen and clears the current session when clicking back home', async () => {
+  it('opens the timeline drawer from the main pane and returns to the welcome state on new chat', async () => {
     const mockClient: ApexApiClient = {
       async fetchAgents() {
         return [
@@ -36,20 +35,18 @@ describe('WorkspacePage', () => {
     await flushPromises()
 
     const store = useSessionStore()
-    store.setSelectedAgent('deer-flow')
-    store.setUserId('workspace-user')
     store.session.sessionId = 'session-1'
     store.session.status = 'completed'
     store.session.messages = [
       {
         id: 'user-1',
         role: 'user',
-        content: 'Analyze the runtime.',
+        content: '总结执行流程',
       },
       {
         id: 'assistant-1',
         role: 'assistant',
-        content: 'Here is the summary.',
+        content: '好的',
         think: '',
         flows: [],
       },
@@ -57,8 +54,8 @@ describe('WorkspacePage', () => {
     store.session.stages = [
       {
         id: 'stage-1',
-        name: 'Collect context',
-        description: 'Inspect docs',
+        name: '收集上下文',
+        description: '读取 docs',
         status: 'COMPLETE',
         invocations: [],
         artifacts: [],
@@ -67,14 +64,15 @@ describe('WorkspacePage', () => {
 
     await nextTick()
 
-    await wrapper.get('[data-testid="back-home"]').trigger('click')
+    await wrapper.get('[data-testid="toggle-timeline"]').trigger('click')
+    expect(wrapper.get('[data-testid="timeline-entry-stage:stage-1"]').exists()).toBe(true)
+
+    await wrapper.get('[data-testid="new-chat"]').trigger('click')
     await nextTick()
 
-    expect(wrapper.findComponent(WelcomeScreen).exists()).toBe(true)
+    expect(wrapper.text()).toContain('今天想让 Apex 做什么？')
     expect(store.session.sessionId).toBeNull()
     expect(store.session.messages).toHaveLength(0)
     expect(store.session.stages).toHaveLength(0)
-    expect(store.selectedAgentKey).toBe('deer-flow')
-    expect(store.userId).toBe('workspace-user')
   })
 })

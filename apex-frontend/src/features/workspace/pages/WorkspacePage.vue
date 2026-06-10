@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import ChatPane from '@/features/workspace/components/ChatPane.vue'
-import DetailPanel from '@/features/workspace/components/DetailPanel.vue'
-import ExecutionRail from '@/features/workspace/components/ExecutionRail.vue'
-import WelcomeScreen from '@/features/workspace/components/WelcomeScreen.vue'
+import TimelineDrawer from '@/features/workspace/components/TimelineDrawer.vue'
+import WorkspaceSidebar from '@/features/workspace/components/WorkspaceSidebar.vue'
+import { buildTimelineEntries } from '@/features/workspace/timeline'
 import { useSessionStore } from '@/stores/session/store'
 
 const sessionStore = useSessionStore()
@@ -12,16 +12,14 @@ const {
   agents,
   errorMessage,
   hasStarted,
-  isLoadingAgents,
   selectedAgentKey,
-  selectedArtifact,
-  selectedInvocation,
   session,
   userId,
 } = storeToRefs(sessionStore)
 
-const selectedInvocationId = computed(() => selectedInvocation.value?.id ?? null)
-const selectedArtifactId = computed(() => selectedArtifact.value?.id ?? null)
+const timelineOpen = ref(false)
+const timelineEntries = computed(() => buildTimelineEntries(session.value))
+const historyItems = computed<Array<{ id: string; title: string; active?: boolean }>>(() => [])
 
 onMounted(() => {
   void sessionStore.initialize()
@@ -49,214 +47,123 @@ function handleToolConfirmation(payload: {
     payload.updatedArgs ?? {},
   )
 }
+
+function handleNewChat(): void {
+  timelineOpen.value = false
+  sessionStore.resetSession()
+}
+
+function toggleTimeline(): void {
+  timelineOpen.value = !timelineOpen.value
+}
 </script>
 
 <template>
-  <main class="workspace-page">
-    <WelcomeScreen
-      v-if="!hasStarted"
+  <main class="workspace-page" :class="{ 'workspace-page--timeline-open': timelineOpen }">
+    <WorkspaceSidebar
+      class="workspace-page__sidebar"
       :agents="agents"
       :selected-agent-key="selectedAgentKey"
       :user-id="userId"
-      :loading="isLoadingAgents"
-      :error-message="errorMessage"
-      @submit="handlePromptSubmit"
+      :history-items="historyItems"
+      @new-chat="handleNewChat"
       @update:selected-agent-key="sessionStore.setSelectedAgent"
       @update:user-id="sessionStore.setUserId"
     />
 
-    <div v-else class="workspace-page__shell">
-      <header class="workspace-page__header">
-        <div class="workspace-page__intro">
-          <p class="workspace-page__eyebrow">Apex 工作台</p>
-          <h1 class="workspace-page__headline">当前会话</h1>
-          <p class="workspace-page__description">在左侧继续对话，在右侧查看计划、调用和产物。</p>
-        </div>
-
-        <div class="workspace-page__controls">
-          <button
-            class="workspace-page__home-button ghost-button"
-            type="button"
-            data-testid="back-home"
-            @click="sessionStore.resetSession"
-          >
-            返回首页
-          </button>
-
-          <label class="workspace-page__field">
-            <span>代理</span>
-            <select
-              :value="selectedAgentKey"
-              class="workspace-page__input"
-              @change="sessionStore.setSelectedAgent(($event.target as HTMLSelectElement).value)"
-            >
-              <option v-for="agent in agents" :key="agent.agentKey" :value="agent.agentKey">
-                {{ agent.name }}
-              </option>
-            </select>
-          </label>
-
-          <label class="workspace-page__field">
-            <span>用户 ID</span>
-            <input
-              :value="userId"
-              class="workspace-page__input"
-              type="text"
-              @input="sessionStore.setUserId(($event.target as HTMLInputElement).value)"
-            />
-          </label>
-        </div>
-      </header>
-
+    <section class="workspace-page__main">
       <p v-if="errorMessage" class="workspace-page__error">{{ errorMessage }}</p>
 
-      <section class="workspace-page__layout">
-        <ChatPane
-          :messages="session.messages"
-          :pending-prompts="session.pendingPrompts"
-          :pending-confirmations="session.pendingConfirmations"
-          :status="session.status"
-          @send="handlePromptSubmit"
-          @stop="sessionStore.stopStream"
-          @submit-prompt="handleHumanPrompt"
-          @submit-confirmation="handleToolConfirmation"
-        />
+      <ChatPane
+        :has-started="hasStarted"
+        :messages="session.messages"
+        :pending-prompts="session.pendingPrompts"
+        :pending-confirmations="session.pendingConfirmations"
+        :status="session.status"
+        @send="handlePromptSubmit"
+        @stop="sessionStore.stopStream"
+        @toggle-timeline="toggleTimeline"
+        @submit-prompt="handleHumanPrompt"
+        @submit-confirmation="handleToolConfirmation"
+      />
+    </section>
 
-        <aside class="workspace-page__sidebar">
-          <ExecutionRail
-            :stages="session.stages"
-            :global-artifacts="session.globalArtifacts"
-            :selected-invocation-id="selectedInvocationId"
-            :selected-artifact-id="selectedArtifactId"
-            @select-invocation="sessionStore.selectInvocation($event.stageId, $event.invocationId)"
-            @select-artifact="sessionStore.selectArtifact($event.scope, $event.artifactId, $event.stageId)"
-          />
-
-          <DetailPanel :invocation="selectedInvocation" :artifact="selectedArtifact" />
-        </aside>
-      </section>
-    </div>
+    <TimelineDrawer
+      class="workspace-page__timeline-drawer"
+      :open="timelineOpen"
+      :entries="timelineEntries"
+      @close="timelineOpen = false"
+    />
   </main>
 </template>
 
 <style scoped>
 .workspace-page {
   min-height: 100vh;
-}
-
-.workspace-page__shell {
-  min-height: 100vh;
-  padding: 18px;
-}
-
-.workspace-page__header {
-  display: flex;
-  justify-content: space-between;
-  gap: 20px;
-  align-items: flex-end;
-  margin-bottom: 14px;
-  padding: 16px;
-  border: 1px solid var(--border-strong);
-  border-radius: 18px;
-  background: var(--surface);
-  box-shadow: var(--shadow-soft);
-}
-
-.workspace-page__intro {
   display: grid;
-  gap: 6px;
+  grid-template-columns: 278px minmax(0, 1fr);
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.56), transparent 42%),
+    linear-gradient(180deg, rgba(245, 242, 236, 0.96), rgba(238, 234, 227, 0.96));
+  transition: grid-template-columns 180ms ease;
 }
 
-.workspace-page__eyebrow {
-  margin: 0 0 6px;
-  color: var(--text-muted);
-  font-size: 0.84rem;
-}
-
-.workspace-page__headline {
-  font-size: 1.42rem;
-}
-
-.workspace-page__description {
-  color: var(--text-soft);
-}
-
-.workspace-page__controls {
-  display: flex;
-  gap: 12px;
-  align-items: flex-end;
-}
-
-.workspace-page__field {
-  display: grid;
-  gap: 8px;
-  color: var(--text-muted);
-  font-size: 0.88rem;
-}
-
-.workspace-page__home-button {
-  white-space: nowrap;
-}
-
-.workspace-page__input {
-  min-width: 180px;
-  min-height: 42px;
-  padding: 0 14px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--surface-subtle);
-  color: var(--text-strong);
-  font: inherit;
-}
-
-.workspace-page__layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
-  gap: 14px;
-  min-height: calc(100vh - 152px);
+.workspace-page--timeline-open {
+  grid-template-columns: 278px minmax(0, 1fr) 380px;
 }
 
 .workspace-page__sidebar {
+  min-width: 0;
+}
+
+.workspace-page__main {
   display: grid;
-  grid-template-rows: minmax(260px, 1fr) minmax(260px, 1fr);
-  gap: 14px;
-  min-height: 0;
+  grid-template-rows: auto 1fr;
+  gap: 16px;
+  min-width: 0;
+  min-height: 100vh;
+  padding: 24px;
 }
 
 .workspace-page__error {
-  margin: 0 0 16px;
+  margin: 0;
   padding: 12px 14px;
-  border: 1px solid rgba(220, 38, 38, 0.18);
-  border-radius: 14px;
-  background: #fff3f2;
+  border: 1px solid rgba(220, 38, 38, 0.16);
+  border-radius: 16px;
+  background: rgba(254, 242, 242, 0.86);
   color: var(--danger);
 }
 
-@media (max-width: 1080px) {
-  .workspace-page__shell {
-    padding: 18px;
-  }
+.workspace-page__timeline-drawer {
+  min-width: 0;
+  min-height: 100vh;
+}
 
-  .workspace-page__header {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .workspace-page__controls {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .workspace-page__home-button {
-    width: 100%;
-  }
-
-  .workspace-page__layout {
+@media (max-width: 1100px) {
+  .workspace-page,
+  .workspace-page--timeline-open {
     grid-template-columns: 1fr;
   }
 
   .workspace-page__sidebar {
-    grid-template-rows: auto auto;
+    min-height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .workspace-page__main {
+    min-height: auto;
+    padding: 16px;
+  }
+
+  .workspace-page__timeline-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(92vw, 380px);
+    z-index: 20;
+    box-shadow: -24px 0 60px rgba(15, 23, 42, 0.18);
   }
 }
 </style>

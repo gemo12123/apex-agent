@@ -10,19 +10,12 @@ import {
 } from '@/stores/session/reducer'
 import type {
   AgentSummary,
-  ArtifactRecord,
   ChatRequest,
   HumanPromptRecord,
-  InvocationRecord,
   ToolConfirmationRecord,
 } from '@/types/apex'
 
 const USER_ID_STORAGE_KEY = 'apex:user-id'
-
-type DetailSelection =
-  | { kind: 'invocation'; stageId: string; id: string }
-  | { kind: 'artifact'; scope: 'STAGE' | 'GLOBAL'; stageId?: string; id: string }
-  | null
 
 function defaultUserId(): string {
   return localStorage.getItem(USER_ID_STORAGE_KEY) ?? import.meta.env.VITE_APEX_USER_ID ?? 'demo-user'
@@ -33,7 +26,6 @@ export const useSessionStore = defineStore('session', () => {
   const agents = ref<AgentSummary[]>([])
   const selectedAgentKey = ref('default_agent')
   const userId = ref(defaultUserId())
-  const selection = ref<DetailSelection>(null)
   const isLoadingAgents = ref(false)
   const errorMessage = ref('')
   const activeController = ref<AbortController | null>(null)
@@ -41,34 +33,6 @@ export const useSessionStore = defineStore('session', () => {
   const hasStarted = computed(() =>
     session.value.messages.some((message) => message.role === 'user'),
   )
-
-  const selectedInvocation = computed<InvocationRecord | null>(() => {
-    if (!selection.value || selection.value.kind !== 'invocation') {
-      return null
-    }
-
-    return (
-      session.value.stages
-        .find((stage) => stage.id === selection.value?.stageId)
-        ?.invocations.find((invocation) => invocation.id === selection.value?.id) ?? null
-    )
-  })
-
-  const selectedArtifact = computed<ArtifactRecord | null>(() => {
-    if (!selection.value || selection.value.kind !== 'artifact') {
-      return null
-    }
-
-    if (selection.value.scope === 'GLOBAL') {
-      return session.value.globalArtifacts.find((artifact) => artifact.id === selection.value?.id) ?? null
-    }
-
-    return (
-      session.value.stages
-        .find((stage) => stage.id === selection.value?.stageId)
-        ?.artifacts.find((artifact) => artifact.id === selection.value?.id) ?? null
-    )
-  })
 
   async function initialize(): Promise<void> {
     if (isLoadingAgents.value) {
@@ -81,14 +45,15 @@ export const useSessionStore = defineStore('session', () => {
     try {
       const nextAgents = await getApexApiClient().fetchAgents(userId.value)
       agents.value = nextAgents
+
       if (nextAgents.length > 0) {
         selectedAgentKey.value = nextAgents.some((agent) => agent.agentKey === selectedAgentKey.value)
           ? selectedAgentKey.value
           : nextAgents[0].agentKey
       }
     } catch (error) {
-      errorMessage.value = error instanceof Error ? error.message : '加载代理列表失败。'
-      agents.value = [{ agentKey: 'default_agent', name: '默认代理' }]
+      errorMessage.value = error instanceof Error ? error.message : '加载 Agent 列表失败。'
+      agents.value = [{ agentKey: 'default_agent', name: '默认 Agent' }]
     } finally {
       isLoadingAgents.value = false
     }
@@ -107,7 +72,6 @@ export const useSessionStore = defineStore('session', () => {
   function resetSession(): void {
     activeController.value?.abort()
     activeController.value = null
-    selection.value = null
     errorMessage.value = ''
     session.value = createSessionViewModel()
   }
@@ -196,14 +160,6 @@ export const useSessionStore = defineStore('session', () => {
     session.value.status = 'aborted'
   }
 
-  function selectInvocation(stageId: string, invocationId: string): void {
-    selection.value = { kind: 'invocation', stageId, id: invocationId }
-  }
-
-  function selectArtifact(scope: 'STAGE' | 'GLOBAL', artifactId: string, stageId?: string): void {
-    selection.value = { kind: 'artifact', scope, stageId, id: artifactId }
-  }
-
   async function runChat(request: ChatRequest): Promise<void> {
     activeController.value?.abort()
     const controller = new AbortController()
@@ -236,12 +192,8 @@ export const useSessionStore = defineStore('session', () => {
     hasStarted,
     initialize,
     isLoadingAgents,
-    selectedAgentKey,
-    selectedArtifact,
-    selectedInvocation,
-    selectArtifact,
-    selectInvocation,
     resetSession,
+    selectedAgentKey,
     sendPrompt,
     session,
     setSelectedAgent,

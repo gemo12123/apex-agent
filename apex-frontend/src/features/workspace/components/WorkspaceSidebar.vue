@@ -23,9 +23,9 @@ const historySkeletons = computed(() => {
   }
 
   return [
-    { id: 'placeholder-1', title: '历史会话占位 1' },
-    { id: 'placeholder-2', title: '历史会话占位 2' },
-    { id: 'placeholder-3', title: '历史会话占位 3' },
+    { id: 'placeholder-1', title: '新会话将显示在这里' },
+    { id: 'placeholder-2', title: '后续可接入真实历史列表' },
+    { id: 'placeholder-3', title: '支持搜索、置顶与分组' },
   ]
 })
 </script>
@@ -33,6 +33,11 @@ const historySkeletons = computed(() => {
 <template>
   <aside class="workspace-sidebar">
     <div class="workspace-sidebar__top">
+      <div class="workspace-sidebar__brand">
+        <p class="workspace-sidebar__brand-title">Apex</p>
+        <p class="workspace-sidebar__brand-subtitle">Workspace</p>
+      </div>
+
       <button
         data-testid="new-chat"
         class="workspace-sidebar__new-chat accent-button"
@@ -55,15 +60,31 @@ const historySkeletons = computed(() => {
           </option>
         </select>
       </label>
+
+      <div class="workspace-sidebar__quick-actions">
+        <button class="workspace-sidebar__quick-action ghost-button" type="button" disabled>
+          规划任务
+        </button>
+        <button class="workspace-sidebar__quick-action ghost-button" type="button" disabled>
+          最近产物
+        </button>
+        <button class="workspace-sidebar__quick-action ghost-button" type="button" disabled>
+          待确认
+        </button>
+      </div>
     </div>
 
     <div class="workspace-sidebar__history">
-      <p class="workspace-sidebar__section-title">历史对话</p>
+      <div class="workspace-sidebar__section-head">
+        <p class="workspace-sidebar__section-title">历史对话</p>
+        <span class="workspace-sidebar__section-note">即将接入</span>
+      </div>
 
       <button
         v-for="item in historySkeletons"
         :key="item.id"
         class="workspace-sidebar__history-item"
+        :class="{ 'workspace-sidebar__history-item--active': item.active }"
         type="button"
       >
         {{ item.title }}
@@ -104,11 +125,12 @@ const historySkeletons = computed(() => {
 .workspace-sidebar {
   display: grid;
   grid-template-rows: auto 1fr auto;
-  gap: 18px;
+  gap: 22px;
   min-height: 100vh;
   padding: 18px 14px;
   border-right: 1px solid var(--border);
-  background: var(--surface-subtle);
+  background:
+    linear-gradient(180deg, rgba(248, 246, 241, 0.96), rgba(244, 241, 235, 0.96));
 }
 
 .workspace-sidebar__top,
@@ -118,10 +140,28 @@ const historySkeletons = computed(() => {
   gap: 12px;
 }
 
+.workspace-sidebar__brand {
+  display: grid;
+  gap: 2px;
+  padding: 4px 2px 2px;
+}
+
+.workspace-sidebar__brand-title {
+  font-size: 1.28rem;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.workspace-sidebar__brand-subtitle,
 .workspace-sidebar__label,
-.workspace-sidebar__section-title {
+.workspace-sidebar__section-title,
+.workspace-sidebar__section-note {
   color: var(--text-muted);
   font-size: 0.8rem;
+}
+
+.workspace-sidebar__new-chat {
+  justify-content: center;
 }
 
 .workspace-sidebar__agent,
@@ -133,34 +173,70 @@ const historySkeletons = computed(() => {
 .workspace-sidebar__select,
 .workspace-sidebar__input {
   width: 100%;
-  min-height: 40px;
+  min-height: 42px;
   padding: 0 12px;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.86);
   color: var(--text-strong);
+}
+
+.workspace-sidebar__quick-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.workspace-sidebar__quick-action {
+  min-height: 38px;
+  padding: 0 8px;
+  font-size: 0.84rem;
 }
 
 .workspace-sidebar__history {
   display: grid;
   align-content: start;
   gap: 8px;
+  min-height: 0;
+}
+
+.workspace-sidebar__section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .workspace-sidebar__history-item {
   width: 100%;
-  padding: 10px 12px;
+  padding: 11px 12px;
   border: 1px solid transparent;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.75);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
   color: var(--text-soft);
   text-align: left;
+}
+
+.workspace-sidebar__history-item:hover,
+.workspace-sidebar__history-item--active {
+  border-color: var(--border-strong);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text-strong);
 }
 
 .workspace-sidebar__empty {
   margin: 4px 0 0;
   color: var(--text-muted);
   font-size: 0.84rem;
-  line-height: 1.5;
+  line-height: 1.6;
+}
+
+@media (max-width: 720px) {
+  .workspace-sidebar {
+    min-height: auto;
+  }
+
+  .workspace-sidebar__quick-actions {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
