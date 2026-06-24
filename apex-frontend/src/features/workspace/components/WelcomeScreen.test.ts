@@ -19,4 +19,15 @@ describe('WelcomeScreen', () => {
 
     expect(wrapper.emitted('submit')?.[0]).toEqual(['Inspect the SSE contract'])
   })
+
+  it('shows a compact welcome composer and keeps suggestion buttons addressable', async () => {
+    const wrapper = mount(WelcomeScreen)
+
+    const textarea = wrapper.get('textarea')
+    expect(textarea.attributes('rows')).toBe('4')
+    expect(wrapper.find('[data-testid="welcome-suggestion-0"]').exists()).toBe(true)
+
+    await wrapper.get('[data-testid="welcome-suggestion-0"]').trigger('click')
+    expect((textarea.element as HTMLTextAreaElement).value.length).toBeGreaterThan(0)
+  })
 })

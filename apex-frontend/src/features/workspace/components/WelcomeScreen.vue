@@ -44,8 +44,9 @@ function useSuggestion(value: string): void {
 
     <div class="welcome-screen__suggestions">
       <button
-        v-for="suggestion in suggestions"
+        v-for="(suggestion, index) in suggestions"
         :key="suggestion"
+        :data-testid="`welcome-suggestion-${index}`"
         class="welcome-screen__suggestion"
         type="button"
         @click="useSuggestion(suggestion)"
@@ -61,7 +62,7 @@ function useSuggestion(value: string): void {
         v-model="prompt"
         class="welcome-screen__textarea"
         placeholder="例如：检查当前工作台实现，给出一版接近 ChatGPT 首页的布局改造方案。"
-        rows="6"
+        rows="4"
         @keydown.enter.exact.prevent="submitPrompt"
       />
 
@@ -83,57 +84,55 @@ function useSuggestion(value: string): void {
 <style scoped>
 .welcome-screen {
   display: grid;
-  gap: 24px;
-  width: min(880px, 100%);
+  gap: 20px;
+  width: min(100%, 760px);
   margin: 0 auto;
 }
 
 .welcome-screen__copy {
   display: grid;
-  gap: 14px;
+  gap: 10px;
   text-align: center;
 }
 
 .welcome-screen__eyebrow {
-  width: fit-content;
   margin: 0 auto;
-  padding: 6px 12px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.82);
+  padding: 0;
+  border: none;
+  background: transparent;
   color: var(--text-muted);
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .welcome-screen__title {
   margin: 0;
-  font-size: clamp(2.3rem, 5vw, 4rem);
-  line-height: 1.02;
-  letter-spacing: -0.05em;
+  font-size: clamp(2rem, 4vw, 3.2rem);
+  line-height: 1.04;
+  letter-spacing: -0.045em;
 }
 
 .welcome-screen__subtitle {
-  max-width: 62ch;
+  max-width: 58ch;
   margin: 0 auto;
   color: var(--text-soft);
   line-height: 1.7;
 }
 
 .welcome-screen__suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
 .welcome-screen__suggestion {
-  padding: 11px 14px;
+  min-height: 46px;
+  padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.78);
+  border-radius: var(--radius-card);
+  background: var(--surface-subtle);
   color: var(--text-soft);
   text-align: left;
   transition:
@@ -143,30 +142,29 @@ function useSuggestion(value: string): void {
 }
 
 .welcome-screen__suggestion:hover {
-  border-color: var(--accent);
+  border-color: var(--border-strong);
   background: var(--surface);
   transform: translateY(-1px);
 }
 
 .welcome-screen__composer {
-  padding: 18px;
-  border: 1px solid var(--border-strong);
-  border-radius: 28px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(251, 250, 247, 0.96));
-  box-shadow: var(--shadow-panel);
+  padding: 14px 16px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
 }
 
 .welcome-screen__textarea {
   width: 100%;
-  min-height: 168px;
-  padding: 14px 16px;
+  min-height: 112px;
+  padding: 10px 0 12px;
   border: none;
   background: transparent;
   color: var(--text-strong);
   font: inherit;
-  line-height: 1.7;
-  resize: vertical;
+  line-height: 1.6;
+  resize: none;
   box-sizing: border-box;
 }
 
@@ -189,12 +187,14 @@ function useSuggestion(value: string): void {
 }
 
 .welcome-screen__submit {
-  min-height: 44px;
-  padding: 0 18px;
   white-space: nowrap;
 }
 
 @media (max-width: 720px) {
+  .welcome-screen__suggestions {
+    grid-template-columns: 1fr;
+  }
+
   .welcome-screen__actions {
     flex-direction: column;
     align-items: stretch;
