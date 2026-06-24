@@ -102,32 +102,36 @@ function closeOverlays(): void {
     />
 
     <section class="workspace-page__main">
-      <header class="workspace-page__mobile-bar">
-        <button
-          data-testid="toggle-sidebar"
-          class="ghost-button"
-          type="button"
-          @click="toggleSidebar"
-        >
-          侧栏
-        </button>
-        <p class="workspace-page__mobile-title">Apex Workspace</p>
-      </header>
+      <div class="workspace-page__main-shell">
+        <header class="workspace-page__mobile-bar">
+          <button
+            data-testid="toggle-sidebar"
+            class="ghost-button"
+            type="button"
+            @click="toggleSidebar"
+          >
+            侧栏
+          </button>
+          <p class="workspace-page__mobile-title">Apex Workspace</p>
+        </header>
 
-      <p v-if="errorMessage" class="workspace-page__error">{{ errorMessage }}</p>
+        <p v-if="errorMessage" class="workspace-page__error">{{ errorMessage }}</p>
 
-      <ChatPane
-        :has-started="hasStarted"
-        :messages="session.messages"
-        :pending-prompts="session.pendingPrompts"
-        :pending-confirmations="session.pendingConfirmations"
-        :status="session.status"
-        @send="handlePromptSubmit"
-        @stop="sessionStore.stopStream"
-        @toggle-timeline="toggleTimeline"
-        @submit-prompt="handleHumanPrompt"
-        @submit-confirmation="handleToolConfirmation"
-      />
+        <div class="workspace-page__main-column">
+          <ChatPane
+            :has-started="hasStarted"
+            :messages="session.messages"
+            :pending-prompts="session.pendingPrompts"
+            :pending-confirmations="session.pendingConfirmations"
+            :status="session.status"
+            @send="handlePromptSubmit"
+            @stop="sessionStore.stopStream"
+            @toggle-timeline="toggleTimeline"
+            @submit-prompt="handleHumanPrompt"
+            @submit-confirmation="handleToolConfirmation"
+          />
+        </div>
+      </div>
     </section>
 
     <TimelineDrawer
@@ -143,15 +147,13 @@ function closeOverlays(): void {
 .workspace-page {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 278px minmax(0, 1fr);
-  background:
-    radial-gradient(circle at top, rgba(255, 255, 255, 0.56), transparent 42%),
-    linear-gradient(180deg, rgba(245, 242, 236, 0.96), rgba(238, 234, 227, 0.96));
+  grid-template-columns: 260px minmax(0, 1fr);
+  background: var(--page);
   transition: grid-template-columns 180ms ease;
 }
 
 .workspace-page--timeline-open {
-  grid-template-columns: 278px minmax(0, 1fr) 380px;
+  grid-template-columns: 260px minmax(0, 1fr) 344px;
 }
 
 .workspace-page__sidebar {
@@ -159,12 +161,23 @@ function closeOverlays(): void {
 }
 
 .workspace-page__main {
-  display: grid;
-  grid-template-rows: auto 1fr;
-  gap: 16px;
   min-width: 0;
   min-height: 100vh;
-  padding: 24px;
+  padding: 20px 28px;
+}
+
+.workspace-page__main-shell {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 12px;
+  width: 100%;
+  max-width: 980px;
+  min-height: 100%;
+  margin: 0 auto;
+}
+
+.workspace-page__main-column {
+  min-width: 0;
 }
 
 .workspace-page__mobile-bar,

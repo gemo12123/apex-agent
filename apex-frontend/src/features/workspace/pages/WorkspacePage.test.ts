@@ -11,6 +11,38 @@ describe('WorkspacePage', () => {
     setApexApiClientForTesting(createApexApiClient())
   })
 
+  it('keeps the centered main column stable while toggling the timeline drawer', async () => {
+    const mockClient: ApexApiClient = {
+      async fetchAgents() {
+        return [
+          { agentKey: 'default_agent', name: 'Default Agent' },
+          { agentKey: 'deer-flow', name: 'Deer Flow' },
+        ]
+      },
+      async streamChat() {},
+    }
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    setApexApiClientForTesting(mockClient)
+
+    const wrapper = mount(WorkspacePage, {
+      global: {
+        plugins: [pinia],
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('.workspace-page__main-column').exists()).toBe(true)
+    expect(wrapper.get('main').classes()).not.toContain('workspace-page--timeline-open')
+
+    await wrapper.get('[data-testid="toggle-timeline"]').trigger('click')
+
+    expect(wrapper.get('main').classes()).toContain('workspace-page--timeline-open')
+    expect(wrapper.find('.workspace-page__main-column').exists()).toBe(true)
+  })
+
   it('opens the timeline drawer from the main pane and returns to the welcome state on new chat', async () => {
     const mockClient: ApexApiClient = {
       async fetchAgents() {
