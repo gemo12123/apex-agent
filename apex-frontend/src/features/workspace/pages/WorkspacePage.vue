@@ -17,6 +17,7 @@ const {
   userId,
 } = storeToRefs(sessionStore)
 
+const sidebarOpen = ref(false)
 const timelineOpen = ref(false)
 const timelineEntries = computed(() => buildTimelineEntries(session.value))
 const historyItems = computed<Array<{ id: string; title: string; active?: boolean }>>(() => [])
@@ -49,19 +50,48 @@ function handleToolConfirmation(payload: {
 }
 
 function handleNewChat(): void {
+  sidebarOpen.value = false
   timelineOpen.value = false
   sessionStore.resetSession()
 }
 
+function isCompactViewport(): boolean {
+  return typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 1100px)').matches
+}
+
 function toggleTimeline(): void {
+  if (isCompactViewport()) {
+    sidebarOpen.value = false
+  }
   timelineOpen.value = !timelineOpen.value
+}
+
+function toggleSidebar(): void {
+  if (isCompactViewport()) {
+    timelineOpen.value = false
+  }
+  sidebarOpen.value = !sidebarOpen.value
+}
+
+function closeOverlays(): void {
+  sidebarOpen.value = false
+  timelineOpen.value = false
 }
 </script>
 
 <template>
   <main class="workspace-page" :class="{ 'workspace-page--timeline-open': timelineOpen }">
+    <button
+      v-if="sidebarOpen || timelineOpen"
+      class="workspace-page__mobile-backdrop"
+      type="button"
+      aria-label="关闭侧边抽屉"
+      @click="closeOverlays"
+    />
+
     <WorkspaceSidebar
       class="workspace-page__sidebar"
+      :class="{ 'workspace-page__sidebar--open': sidebarOpen }"
       :agents="agents"
       :selected-agent-key="selectedAgentKey"
       :user-id="userId"
@@ -72,6 +102,18 @@ function toggleTimeline(): void {
     />
 
     <section class="workspace-page__main">
+      <header class="workspace-page__mobile-bar">
+        <button
+          data-testid="toggle-sidebar"
+          class="ghost-button"
+          type="button"
+          @click="toggleSidebar"
+        >
+          侧栏
+        </button>
+        <p class="workspace-page__mobile-title">Apex Workspace</p>
+      </header>
+
       <p v-if="errorMessage" class="workspace-page__error">{{ errorMessage }}</p>
 
       <ChatPane
@@ -125,6 +167,23 @@ function toggleTimeline(): void {
   padding: 24px;
 }
 
+.workspace-page__mobile-bar,
+.workspace-page__mobile-backdrop {
+  display: none;
+}
+
+.workspace-page__mobile-bar {
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workspace-page__mobile-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
 .workspace-page__error {
   margin: 0;
   padding: 12px 14px;
@@ -146,14 +205,38 @@ function toggleTimeline(): void {
   }
 
   .workspace-page__sidebar {
-    min-height: auto;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(88vw, 320px);
+    min-height: 100vh;
+    z-index: 21;
+    transform: translateX(-100%);
+    transition: transform 180ms ease;
+    box-shadow: 20px 0 60px rgba(15, 23, 42, 0.16);
+  }
+
+  .workspace-page__sidebar--open {
+    transform: translateX(0);
   }
 
   .workspace-page__main {
     min-height: auto;
     padding: 16px;
+  }
+
+  .workspace-page__mobile-bar,
+  .workspace-page__mobile-backdrop {
+    display: flex;
+  }
+
+  .workspace-page__mobile-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 19;
+    border: none;
+    background: rgba(23, 23, 23, 0.22);
   }
 
   .workspace-page__timeline-drawer {

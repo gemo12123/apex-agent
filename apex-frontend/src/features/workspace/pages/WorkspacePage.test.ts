@@ -65,7 +65,7 @@ describe('WorkspacePage', () => {
     await nextTick()
 
     await wrapper.get('[data-testid="toggle-timeline"]').trigger('click')
-    expect(wrapper.get('[data-testid="timeline-entry-stage:stage-1"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="timeline-entry-stage:stage-1"]').exists()).toBe(true)
 
     await wrapper.get('[data-testid="new-chat"]').trigger('click')
     await nextTick()
