@@ -1,20 +1,23 @@
 :root {
-  --page: #ede8de;
-  --surface: rgba(255, 255, 255, 0.92);
-  --surface-subtle: rgba(255, 255, 255, 0.72);
-  --surface-muted: rgba(248, 244, 237, 0.94);
-  --text-strong: #171717;
-  --text-soft: #3f3a35;
-  --text-muted: #7b756d;
-  --border: rgba(82, 74, 61, 0.12);
-  --border-strong: rgba(82, 74, 61, 0.18);
+  --page: #f7f7f8;
+  --surface: #ffffff;
+  --surface-subtle: #fcfcfd;
+  --surface-muted: #f3f4f6;
+  --text-strong: #111827;
+  --text-soft: #374151;
+  --text-muted: #6b7280;
+  --border: rgba(15, 23, 42, 0.08);
+  --border-strong: rgba(15, 23, 42, 0.12);
   --accent: #111827;
-  --accent-subtle: rgba(17, 24, 39, 0.08);
+  --accent-subtle: rgba(15, 23, 42, 0.06);
   --success: #0f766e;
   --warning: #b45309;
   --danger: #dc2626;
-  --shadow-panel: 0 24px 60px -40px rgba(37, 33, 27, 0.42);
-  --shadow-soft: 0 18px 42px -34px rgba(37, 33, 27, 0.34);
+  --radius-panel: 18px;
+  --radius-card: 14px;
+  --radius-control: 12px;
+  --shadow-panel: 0 16px 40px -32px rgba(15, 23, 42, 0.18);
+  --shadow-soft: 0 12px 28px -24px rgba(15, 23, 42, 0.12);
   --font-sans:
     'Avenir Next',
     'SF Pro Display',
@@ -44,9 +47,7 @@ body {
   margin: 0;
   font-family: var(--font-sans);
   color: var(--text-strong);
-  background:
-    radial-gradient(circle at top, rgba(255, 255, 255, 0.86), transparent 36%),
-    linear-gradient(180deg, #f7f4ef 0%, var(--page) 48%, #e6e0d6 100%);
+  background: var(--page);
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -90,9 +91,9 @@ textarea:focus-visible,
 input:focus-visible,
 select:focus-visible,
 button:focus-visible {
-  outline: 2px solid rgba(17, 24, 39, 0.14);
+  outline: 2px solid rgba(15, 23, 42, 0.12);
   outline-offset: 2px;
-  border-color: rgba(17, 24, 39, 0.28);
+  border-color: rgba(15, 23, 42, 0.18);
 }
 
 .sr-only {
@@ -108,9 +109,9 @@ button:focus-visible {
 
 .accent-button,
 .ghost-button {
-  min-height: 42px;
-  padding: 0 16px;
-  border-radius: 16px;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: var(--radius-control);
   border: 1px solid transparent;
   font-weight: 600;
 }
@@ -119,22 +120,23 @@ button:focus-visible {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
-  box-shadow: 0 14px 28px -24px rgba(17, 24, 39, 0.72);
+  box-shadow: 0 10px 30px -24px rgba(15, 23, 42, 0.28);
 }
 
 .accent-button:hover:enabled {
-  background: #252f3f;
+  background: #1f2937;
   transform: translateY(-1px);
 }
 
 .ghost-button {
-  border-color: var(--border-strong);
-  background: rgba(255, 255, 255, 0.76);
+  border-color: var(--border);
+  background: rgba(255, 255, 255, 0.82);
   color: var(--text-soft);
 }
 
 .ghost-button:hover:enabled {
-  background: rgba(255, 255, 255, 0.94);
+  background: #ffffff;
+  border-color: var(--border-strong);
   transform: translateY(-1px);
 }
 
@@ -148,7 +150,7 @@ button:focus-visible {
 .status-pill {
   display: inline-flex;
   align-items: center;
-  min-height: 30px;
+  min-height: 28px;
   padding: 0 10px;
   border-radius: 999px;
   font-size: 0.8rem;
@@ -218,7 +220,7 @@ button:focus-visible {
 .markdown code {
   padding: 0.14rem 0.35rem;
   border-radius: 8px;
-  background: rgba(17, 24, 39, 0.08);
+  background: rgba(15, 23, 42, 0.08);
   font-family: var(--font-mono);
   font-size: 0.92em;
 }
@@ -226,7 +228,7 @@ button:focus-visible {
 .markdown pre {
   overflow: auto;
   padding: 14px;
-  border-radius: 16px;
+  border-radius: 14px;
   background: #171717;
   color: #f5f5f4;
 }
