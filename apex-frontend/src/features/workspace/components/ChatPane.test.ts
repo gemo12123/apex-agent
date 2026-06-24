@@ -40,4 +40,19 @@ describe('ChatPane', () => {
 
     expect(wrapper.get('textarea').attributes('disabled')).toBeDefined()
   })
+
+  it('uses a compact composer inside the shared reading column', () => {
+    const wrapper = mount(ChatPane, {
+      props: {
+        hasStarted: true,
+        messages: [],
+        pendingPrompts: [],
+        pendingConfirmations: [],
+        status: 'completed',
+      },
+    })
+
+    expect(wrapper.find('.chat-pane__body-column').exists()).toBe(true)
+    expect(wrapper.get('textarea').attributes('rows')).toBe('3')
+  })
 })
