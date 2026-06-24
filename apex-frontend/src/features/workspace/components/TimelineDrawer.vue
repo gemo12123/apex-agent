@@ -63,7 +63,7 @@ function formatKind(kind: TimelineEntry['kind']): string {
 </script>
 
 <template>
-  <aside v-if="open" class="timeline-drawer">
+  <aside v-if="open" data-testid="timeline-drawer" class="timeline-drawer">
     <header class="timeline-drawer__header">
       <div class="timeline-drawer__heading">
         <p class="timeline-drawer__eyebrow">Execution Timeline</p>
@@ -96,7 +96,11 @@ function formatKind(kind: TimelineEntry['kind']): string {
         </button>
 
         <div v-if="expandedId === entry.id" class="timeline-entry__detail">
-          <div v-if="entry.body" class="timeline-entry__body markdown" v-html="renderMarkdown(entry.body)" />
+          <div
+            v-if="entry.body"
+            class="timeline-entry__body markdown"
+            v-html="renderMarkdown(entry.body)"
+          />
           <p v-else class="timeline-entry__placeholder">当前节点暂无更多详情。</p>
 
           <button
@@ -120,16 +124,15 @@ function formatKind(kind: TimelineEntry['kind']): string {
   grid-template-rows: auto 1fr;
   min-height: 0;
   border-left: 1px solid var(--border);
-  background:
-    linear-gradient(180deg, rgba(252, 251, 248, 0.98), rgba(247, 244, 239, 0.98));
+  background: rgba(250, 251, 252, 0.96);
 }
 
 .timeline-drawer__header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 14px;
-  padding: 18px 18px 14px;
+  gap: 12px;
+  padding: 14px 16px 12px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -148,7 +151,7 @@ function formatKind(kind: TimelineEntry['kind']): string {
 
 .timeline-drawer__title {
   margin: 0;
-  font-size: 1.08rem;
+  font-size: 1.04rem;
 }
 
 .timeline-drawer__empty {
@@ -168,8 +171,8 @@ function formatKind(kind: TimelineEntry['kind']): string {
 
 .timeline-entry {
   border: 1px solid var(--border);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.74);
+  border-radius: var(--radius-card);
+  background: rgba(255, 255, 255, 0.82);
   overflow: hidden;
 }
 

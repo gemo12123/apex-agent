@@ -74,7 +74,7 @@ const historySkeletons = computed(() => {
       </div>
     </div>
 
-    <div class="workspace-sidebar__history">
+    <div data-testid="sidebar-history" class="workspace-sidebar__history">
       <div class="workspace-sidebar__section-head">
         <p class="workspace-sidebar__section-title">历史对话</p>
         <span class="workspace-sidebar__section-note">即将接入</span>
@@ -125,12 +125,11 @@ const historySkeletons = computed(() => {
 .workspace-sidebar {
   display: grid;
   grid-template-rows: auto 1fr auto;
-  gap: 22px;
+  gap: 16px;
   min-height: 100vh;
-  padding: 18px 14px;
+  padding: 14px 12px;
   border-right: 1px solid var(--border);
-  background:
-    linear-gradient(180deg, rgba(248, 246, 241, 0.96), rgba(244, 241, 235, 0.96));
+  background: var(--surface-muted);
 }
 
 .workspace-sidebar__top,
@@ -147,7 +146,7 @@ const historySkeletons = computed(() => {
 }
 
 .workspace-sidebar__brand-title {
-  font-size: 1.28rem;
+  font-size: 1.24rem;
   font-weight: 700;
   letter-spacing: -0.04em;
 }
@@ -173,11 +172,11 @@ const historySkeletons = computed(() => {
 .workspace-sidebar__select,
 .workspace-sidebar__input {
   width: 100%;
-  min-height: 42px;
+  min-height: 38px;
   padding: 0 12px;
   border: 1px solid var(--border);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.86);
+  border-radius: var(--radius-control);
+  background: rgba(255, 255, 255, 0.9);
   color: var(--text-strong);
 }
 
@@ -188,7 +187,7 @@ const historySkeletons = computed(() => {
 }
 
 .workspace-sidebar__quick-action {
-  min-height: 38px;
+  min-height: 36px;
   padding: 0 8px;
   font-size: 0.84rem;
 }
@@ -208,18 +207,18 @@ const historySkeletons = computed(() => {
 
 .workspace-sidebar__history-item {
   width: 100%;
-  padding: 11px 12px;
+  padding: 10px 12px;
   border: 1px solid transparent;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.72);
+  border-radius: var(--radius-card);
+  background: transparent;
   color: var(--text-soft);
   text-align: left;
 }
 
 .workspace-sidebar__history-item:hover,
 .workspace-sidebar__history-item--active {
-  border-color: var(--border-strong);
-  background: rgba(255, 255, 255, 0.92);
+  border-color: var(--border);
+  background: rgba(255, 255, 255, 0.78);
   color: var(--text-strong);
 }
 

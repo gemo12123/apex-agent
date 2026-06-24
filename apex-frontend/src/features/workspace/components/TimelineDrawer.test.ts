@@ -13,9 +13,9 @@ const timelineEntries: TimelineEntry[] = [
     id: 'invocation:1',
     kind: 'invocation',
     title: '搜索联系人',
-    subtitle: 'search 路 已完成',
+    subtitle: 'search 路径已完成',
     tone: 'success',
-    body: '找到 2 条记录',
+    body: '找到 2 条记录。',
     defaultExpanded: false,
   },
   {
@@ -43,6 +43,7 @@ describe('TimelineDrawer', () => {
       },
     })
 
+    expect(wrapper.get('[data-testid="timeline-drawer"]').classes()).toContain('timeline-drawer')
     expect(wrapper.text()).toContain('执行开始后，这里会显示计划、调用和产物时间线。')
   })
 
@@ -55,11 +56,11 @@ describe('TimelineDrawer', () => {
     })
 
     await wrapper.get('[data-testid="timeline-entry-invocation:1"]').trigger('click')
-    expect(wrapper.text()).toContain('找到 2 条记录')
+    expect(wrapper.text()).toContain('找到 2 条记录。')
 
     await wrapper.get('[data-testid="timeline-entry-artifact:1"]').trigger('click')
     expect(wrapper.text()).toContain('Draft')
-    expect(wrapper.text()).not.toContain('找到 2 条记录')
+    expect(wrapper.text()).not.toContain('找到 2 条记录。')
   })
 
   it('exports artifact entries', async () => {
