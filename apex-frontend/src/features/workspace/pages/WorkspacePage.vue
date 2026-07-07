@@ -146,6 +146,7 @@ function closeOverlays(): void {
 <style scoped>
 .workspace-page {
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
   background: var(--page);
@@ -163,21 +164,28 @@ function closeOverlays(): void {
 .workspace-page__main {
   min-width: 0;
   min-height: 100vh;
-  padding: 20px 28px;
+  min-height: 100dvh;
+  display: flex;
+  padding: 18px 24px 0 28px;
+  background: #fcfcfd;
 }
 
 .workspace-page__main-shell {
   display: grid;
-  grid-template-rows: auto auto 1fr;
-  gap: 12px;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 8px;
   width: 100%;
-  max-width: 980px;
+  max-width: 1180px;
   min-height: 100%;
+  height: 100%;
   margin: 0 auto;
 }
 
 .workspace-page__main-column {
   min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex: 1;
 }
 
 .workspace-page__mobile-bar,
@@ -236,7 +244,7 @@ function closeOverlays(): void {
 
   .workspace-page__main {
     min-height: auto;
-    padding: 16px;
+    padding: 16px 16px 0;
   }
 
   .workspace-page__mobile-bar,

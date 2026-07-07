@@ -1,7 +1,7 @@
 :root {
   --page: #f7f7f8;
   --surface: #ffffff;
-  --surface-subtle: #fcfcfd;
+  --surface-subtle: #f8f8fb;
   --surface-muted: #f3f4f6;
   --text-strong: #111827;
   --text-soft: #374151;
@@ -13,11 +13,11 @@
   --success: #0f766e;
   --warning: #b45309;
   --danger: #dc2626;
-  --radius-panel: 18px;
-  --radius-card: 14px;
-  --radius-control: 12px;
+  --radius-panel: 16px;
+  --radius-card: 12px;
+  --radius-control: 10px;
   --shadow-panel: 0 16px 40px -32px rgba(15, 23, 42, 0.18);
-  --shadow-soft: 0 12px 28px -24px rgba(15, 23, 42, 0.12);
+  --shadow-soft: 0 10px 24px -24px rgba(15, 23, 42, 0.18);
   --font-sans:
     'Avenir Next',
     'SF Pro Display',
@@ -109,7 +109,7 @@ button:focus-visible {
 
 .accent-button,
 .ghost-button {
-  min-height: 38px;
+  min-height: 36px;
   padding: 0 14px;
   border-radius: var(--radius-control);
   border: 1px solid transparent;
@@ -130,7 +130,7 @@ button:focus-visible {
 
 .ghost-button {
   border-color: var(--border);
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.88);
   color: var(--text-soft);
 }
 

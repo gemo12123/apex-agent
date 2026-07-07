@@ -70,9 +70,13 @@ watch(
   },
 )
 
+function applySuggestion(value: string): void {
+  draft.value = value
+}
+
 function submitMessage(): void {
   const value = draft.value.trim()
-  if (!value) {
+  if (!value || composerDisabled.value) {
     return
   }
 
@@ -83,12 +87,12 @@ function submitMessage(): void {
 
 <template>
   <section class="chat-pane" :class="{ 'chat-pane--empty': !props.hasStarted }">
-    <header class="chat-pane__header">
-      <div class="chat-pane__header-shell">
+    <div class="chat-pane__shell">
+      <header class="chat-pane__header">
         <div class="chat-pane__header-copy">
           <p class="chat-pane__eyebrow">{{ props.hasStarted ? '当前会话' : '新的会话' }}</p>
           <h2 class="chat-pane__title">
-            {{ props.hasStarted ? '和 Apex 一起推进任务' : '准备开始一段新的对话' }}
+            {{ props.hasStarted ? '继续推进当前任务' : '准备开始一段新的对话' }}
           </h2>
         </div>
 
@@ -106,81 +110,78 @@ function submitMessage(): void {
             {{ formatSessionStatus(props.status) }}
           </span>
         </div>
+      </header>
+
+      <div v-if="!props.hasStarted" class="chat-pane__welcome">
+        <WelcomeScreen @fill-draft="applySuggestion" />
       </div>
-    </header>
 
-    <div v-if="!props.hasStarted" class="chat-pane__welcome">
-      <div class="chat-pane__welcome-shell">
-        <WelcomeScreen @submit="emit('send', $event)" />
-      </div>
-    </div>
+      <div v-else ref="transcriptRef" class="chat-pane__transcript">
+        <article
+          v-for="message in props.messages"
+          :key="message.id"
+          class="chat-message"
+          :class="`chat-message--${message.role}`"
+        >
+          <div class="chat-message__card">
+            <div v-if="message.role === 'user'" class="chat-message__plain">{{ message.content }}</div>
 
-    <template v-else>
-      <div class="chat-pane__body-column">
-        <div ref="transcriptRef" class="chat-pane__transcript">
-          <article
-            v-for="message in props.messages"
-            :key="message.id"
-            class="chat-message"
-            :class="`chat-message--${message.role}`"
-          >
-            <div class="chat-message__card">
-              <div v-if="message.role === 'user'" class="chat-message__plain">{{ message.content }}</div>
-
-              <template v-else>
-                <details v-if="message.think" class="chat-message__think">
-                  <summary>查看思考过程</summary>
-                  <div class="markdown" v-html="renderMarkdown(message.think)" />
-                </details>
-                <div class="markdown" v-html="renderMarkdown(message.content || '_正在生成回复..._')" />
-              </template>
-            </div>
-          </article>
-
-          <div v-if="props.pendingConfirmations.length" class="chat-pane__prompts">
-            <ToolConfirmationCard
-              v-for="confirmation in props.pendingConfirmations"
-              :key="confirmation.id"
-              :confirmation="confirmation"
-              @submit="emit('submit-confirmation', { confirmation, ...$event })"
-            />
+            <template v-else>
+              <details v-if="message.think" class="chat-message__think">
+                <summary>推理过程</summary>
+                <div class="markdown" v-html="renderMarkdown(message.think)" />
+              </details>
+              <div class="markdown" v-html="renderMarkdown(message.content || '_正在生成回复..._')" />
+            </template>
           </div>
+        </article>
 
-          <div v-if="props.pendingPrompts.length" class="chat-pane__prompts">
-            <HumanPromptCard
-              v-for="prompt in props.pendingPrompts"
-              :key="prompt.id"
-              :prompt="prompt"
-              @submit="emit('submit-prompt', { prompt, answer: $event })"
-            />
-          </div>
+        <div v-if="props.pendingConfirmations.length" class="chat-pane__prompts">
+          <ToolConfirmationCard
+            v-for="confirmation in props.pendingConfirmations"
+            :key="confirmation.id"
+            :confirmation="confirmation"
+            @submit="emit('submit-confirmation', { confirmation, ...$event })"
+          />
         </div>
 
-        <footer class="chat-pane__composer">
-          <label class="sr-only" for="chat-pane-draft">继续输入任务</label>
+        <div v-if="props.pendingPrompts.length" class="chat-pane__prompts">
+          <HumanPromptCard
+            v-for="prompt in props.pendingPrompts"
+            :key="prompt.id"
+            :prompt="prompt"
+            @submit="emit('submit-prompt', { prompt, answer: $event })"
+          />
+        </div>
+      </div>
+
+      <footer class="chat-pane__composer">
+        <div class="chat-pane__composer-shell">
+          <label class="sr-only" for="chat-pane-draft">继续输入你的任务</label>
           <textarea
             id="chat-pane-draft"
             v-model="draft"
             class="chat-pane__textarea"
             rows="3"
-            placeholder="继续补充上下文、追问上一步结果，或者给 Apex 一个新的执行方向。"
             :disabled="composerDisabled"
+            placeholder="继续补充上下文、追问上一轮结果，或者给 Apex 一个新的执行方向。"
             @keydown.enter.exact.prevent="submitMessage"
           />
 
           <div class="chat-pane__actions">
-            <span class="chat-pane__hint">Enter 发送，Shift + Enter 换行</span>
+            <button
+              class="ghost-button"
+              type="button"
+              :disabled="props.status !== 'streaming'"
+              @click="emit('stop')"
+            >
+              停止生成
+            </button>
 
-            <div class="chat-pane__action-buttons">
+            <div class="chat-pane__action-group">
+              <span class="chat-pane__hint">Enter 发送，Shift + Enter 换行</span>
               <button
-                class="ghost-button"
-                type="button"
-                :disabled="props.status !== 'streaming'"
-                @click="emit('stop')"
-              >
-                停止生成
-              </button>
-              <button
+                data-testid="send-button"
                 class="accent-button"
                 type="button"
                 :disabled="!draft.trim() || composerDisabled"
@@ -190,45 +191,38 @@ function submitMessage(): void {
               </button>
             </div>
           </div>
-        </footer>
-      </div>
-    </template>
+        </div>
+      </footer>
+    </div>
   </section>
 </template>
 
 <style scoped>
 .chat-pane {
-  display: grid;
-  grid-template-rows: auto 1fr;
+  display: flex;
+  flex: 1;
+  width: 100%;
   min-height: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
-  background: var(--surface);
-  box-shadow: var(--shadow-soft);
-  overflow: hidden;
+  background: transparent;
 }
 
-.chat-pane--empty {
-  grid-template-rows: auto 1fr;
+.chat-pane__shell {
+  width: 100%;
+  max-width: 920px;
+  min-height: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  padding: 0 8px;
 }
 
 .chat-pane__header {
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--border);
-}
-
-.chat-pane__header-shell,
-.chat-pane__welcome-shell,
-.chat-pane__body-column {
-  width: min(100%, 820px);
-  margin: 0 auto;
-}
-
-.chat-pane__header-shell {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  gap: 18px;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 6px 0 14px;
 }
 
 .chat-pane__header-copy {
@@ -252,26 +246,27 @@ function submitMessage(): void {
 
 .chat-pane__title {
   margin: 0;
-  font-size: 1.06rem;
+  font-size: 1.04rem;
+  line-height: 1.35;
 }
 
 .chat-pane__welcome {
-  padding: 24px 24px 28px;
-}
-
-.chat-pane__body-column {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  flex: 1;
   min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px 0 10px;
 }
 
 .chat-pane__transcript {
+  flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 20px 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  padding: 14px 0 18px;
+  display: grid;
+  gap: 20px;
+  align-content: start;
 }
 
 .chat-message {
@@ -283,19 +278,21 @@ function submitMessage(): void {
 }
 
 .chat-message__card {
-  max-width: min(72ch, 100%);
-  padding: 12px 14px;
-  border-radius: var(--radius-card);
-}
-
-.chat-message--user .chat-message__card {
-  background: linear-gradient(180deg, #1f2937, #111827);
-  color: white;
+  max-width: min(80ch, 100%);
 }
 
 .chat-message--assistant .chat-message__card {
-  border: 1px solid var(--border);
-  background: var(--surface-subtle);
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.chat-message--user .chat-message__card {
+  max-width: min(68ch, 100%);
+  padding: 10px 14px;
+  border-radius: 18px;
+  background: #f1f2f6;
+  color: var(--text-strong);
 }
 
 .chat-message__plain {
@@ -304,9 +301,11 @@ function submitMessage(): void {
 }
 
 .chat-message__think {
-  margin-bottom: 8px;
-  padding-bottom: 8px;
-  border-bottom: 1px dashed var(--border);
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-subtle);
 }
 
 .chat-message__think summary {
@@ -321,21 +320,41 @@ function submitMessage(): void {
 }
 
 .chat-pane__composer {
-  padding: 0 0 18px;
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+  padding: 18px 0 8px;
+  background: linear-gradient(
+    180deg,
+    rgba(252, 252, 253, 0) 0%,
+    rgba(252, 252, 253, 0.9) 38%,
+    #fcfcfd 100%
+  );
+}
+
+.chat-pane__composer-shell {
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 18px 40px -30px rgba(15, 23, 42, 0.24);
+  padding: 12px 14px 14px;
 }
 
 .chat-pane__textarea {
   width: 100%;
   min-height: 72px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: var(--surface-subtle);
+  padding: 0;
+  border: none;
+  background: transparent;
   color: var(--text-strong);
   font: inherit;
   line-height: 1.6;
   resize: none;
   box-sizing: border-box;
+}
+
+.chat-pane__textarea:focus {
+  outline: none;
 }
 
 .chat-pane__actions {
@@ -344,6 +363,14 @@ function submitMessage(): void {
   align-items: center;
   gap: 12px;
   margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.chat-pane__action-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .chat-pane__hint {
@@ -351,31 +378,17 @@ function submitMessage(): void {
   font-size: 0.84rem;
 }
 
-.chat-pane__action-buttons {
-  display: flex;
-  gap: 10px;
-}
-
 @media (max-width: 720px) {
   .chat-pane__header,
-  .chat-pane__welcome {
-    padding-left: 16px;
-    padding-right: 16px;
-  }
-
-  .chat-pane__header-shell,
-  .chat-pane__actions {
+  .chat-pane__actions,
+  .chat-pane__action-group {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .chat-pane__header-actions,
-  .chat-pane__action-buttons {
+  .chat-pane__header-actions {
     width: 100%;
-  }
-
-  .chat-pane__action-buttons {
-    display: grid;
+    justify-content: space-between;
   }
 
   .chat-pane__hint {
