@@ -217,6 +217,15 @@ function submitMessage(): void {
   padding: 0 8px;
 }
 
+.chat-pane--empty .chat-pane__shell {
+  justify-content: center;
+  gap: 18px;
+}
+
+.chat-pane--empty .chat-pane__header {
+  display: none;
+}
+
 .chat-pane__header {
   display: flex;
   justify-content: space-between;
@@ -257,6 +266,27 @@ function submitMessage(): void {
   align-items: center;
   justify-content: center;
   padding: 18px 0 10px;
+}
+
+.chat-pane--empty .chat-pane__welcome {
+  display: contents;
+  flex: initial;
+  padding: 0;
+}
+
+.chat-pane--empty .chat-pane__welcome :deep(.welcome-screen) {
+  display: contents;
+}
+
+.chat-pane--empty .chat-pane__welcome :deep(.welcome-screen__copy) {
+  order: 1;
+  width: 100%;
+}
+
+.chat-pane--empty .chat-pane__welcome :deep(.welcome-screen__suggestions) {
+  order: 3;
+  width: 100%;
+  margin-top: 2px;
 }
 
 .chat-pane__transcript {
@@ -330,6 +360,14 @@ function submitMessage(): void {
     rgba(252, 252, 253, 0.9) 38%,
     #fcfcfd 100%
   );
+}
+
+.chat-pane--empty .chat-pane__composer {
+  order: 2;
+  position: static;
+  margin-top: 0;
+  padding: 0;
+  background: transparent;
 }
 
 .chat-pane__composer-shell {
