@@ -147,6 +147,8 @@ function closeOverlays(): void {
 .workspace-page {
   min-height: 100vh;
   min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
   background: var(--page);
@@ -165,7 +167,10 @@ function closeOverlays(): void {
   min-width: 0;
   min-height: 100vh;
   min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
   display: flex;
+  overflow: hidden;
   padding: 18px 24px 0 28px;
   background: #fcfcfd;
 }
@@ -176,12 +181,13 @@ function closeOverlays(): void {
   gap: 8px;
   width: 100%;
   max-width: 1180px;
-  min-height: 100%;
+  min-height: 0;
   height: 100%;
   margin: 0 auto;
 }
 
 .workspace-page__main-column {
+  grid-row: 3;
   min-width: 0;
   min-height: 0;
   display: flex;

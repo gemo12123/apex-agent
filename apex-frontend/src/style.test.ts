@@ -16,6 +16,13 @@ describe('global style tokens', () => {
   )
   const chatPaneSource = readFileSync(chatPanePath, 'utf8')
 
+  function cssRule(source: string, selector: string): string {
+    const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const match = source.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`))
+
+    return match?.[1] ?? ''
+  }
+
   it('uses a near-white workspace palette and restrained radii', () => {
     expect(css).toContain('--page: #f7f7f8;')
     expect(css).toContain('--surface: #ffffff;')
@@ -38,6 +45,23 @@ describe('global style tokens', () => {
     expect(workspacePageSource).toContain('height: 100%;')
     expect(workspacePageSource).toContain('.workspace-page__main-column {')
     expect(workspacePageSource).toContain('flex: 1;')
+  })
+
+  it('gives the workspace layout a definite viewport height so the chat composer can stay pinned', () => {
+    const pageRule = cssRule(workspacePageSource, '.workspace-page')
+    const mainRule = cssRule(workspacePageSource, '.workspace-page__main')
+    const shellRule = cssRule(workspacePageSource, '.workspace-page__main-shell')
+
+    expect(pageRule).toMatch(/(^|\n)\s+height: 100dvh;/)
+    expect(mainRule).toMatch(/(^|\n)\s+height: 100dvh;/)
+    expect(mainRule).toContain('overflow: hidden;')
+    expect(shellRule).toContain('min-height: 0;')
+  })
+
+  it('places the chat column in the flexible workspace row even when optional header rows are absent', () => {
+    const mainColumnRule = cssRule(workspacePageSource, '.workspace-page__main-column')
+
+    expect(mainColumnRule).toContain('grid-row: 3;')
   })
 
   it('keeps the chat pane full-width before and after the first reply', () => {
