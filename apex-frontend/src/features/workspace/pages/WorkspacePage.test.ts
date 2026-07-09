@@ -102,9 +102,91 @@ describe('WorkspacePage', () => {
     await wrapper.get('[data-testid="new-chat"]').trigger('click')
     await nextTick()
 
-    expect(wrapper.text()).toContain('今天想让 Apex 做什么？')
     expect(store.session.sessionId).toBeNull()
     expect(store.session.messages).toHaveLength(0)
     expect(store.session.stages).toHaveLength(0)
+    expect(wrapper.find('[data-testid="timeline-entry-stage:stage-1"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="send-button"]').exists()).toBe(true)
+  })
+
+  it('saves session settings from the timeline drawer before the first prompt', async () => {
+    const mockClient: ApexApiClient = {
+      async fetchAgents() {
+        return [
+          { agentKey: 'default_agent', name: 'Default Agent' },
+          { agentKey: 'deer-flow', name: 'Deer Flow' },
+        ]
+      },
+      async streamChat() {},
+    }
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    setApexApiClientForTesting(mockClient)
+
+    const wrapper = mount(WorkspacePage, {
+      global: {
+        plugins: [pinia],
+      },
+    })
+
+    await flushPromises()
+
+    const store = useSessionStore()
+
+    await wrapper.get('[data-testid="sidebar-settings-trigger"]').trigger('click')
+    await wrapper.get('[data-testid="settings-agent-select"]').setValue('deer-flow')
+    await wrapper.get('[data-testid="settings-user-id-input"]').setValue('workspace-user')
+    await wrapper.get('[data-testid="settings-save"]').trigger('click')
+
+    expect(store.selectedAgentKey).toBe('deer-flow')
+    expect(store.userId).toBe('workspace-user')
+  })
+
+  it('locks session settings in the sidebar after the conversation has started and unlocks them after new chat', async () => {
+    const mockClient: ApexApiClient = {
+      async fetchAgents() {
+        return [
+          { agentKey: 'default_agent', name: 'Default Agent' },
+          { agentKey: 'deer-flow', name: 'Deer Flow' },
+        ]
+      },
+      async streamChat() {},
+    }
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    setApexApiClientForTesting(mockClient)
+
+    const wrapper = mount(WorkspacePage, {
+      global: {
+        plugins: [pinia],
+      },
+    })
+
+    await flushPromises()
+
+    const store = useSessionStore()
+    store.session.sessionId = 'session-1'
+    store.session.status = 'completed'
+    store.session.messages = [
+      { id: 'user-1', role: 'user', content: '总结执行流程' },
+      { id: 'assistant-1', role: 'assistant', content: '好的', think: '', flows: [] },
+    ]
+
+    await nextTick()
+
+    await wrapper.get('[data-testid="sidebar-settings-trigger"]').trigger('click')
+
+    expect(wrapper.get('[data-testid="settings-agent-select"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="settings-user-id-input"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('对话开始后不可修改智能体和用户 ID')
+
+    await wrapper.get('[data-testid="new-chat"]').trigger('click')
+    await nextTick()
+    await wrapper.get('[data-testid="sidebar-settings-trigger"]').trigger('click')
+
+    expect(wrapper.get('[data-testid="settings-agent-select"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-testid="settings-user-id-input"]').attributes('disabled')).toBeUndefined()
   })
 })

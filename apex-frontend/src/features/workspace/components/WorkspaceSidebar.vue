@@ -1,21 +1,51 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { AgentSummary } from '@/types/apex'
+import TimelineSettingsPopover from '@/features/workspace/components/TimelineSettingsPopover.vue'
 
 const props = defineProps<{
   agents: AgentSummary[]
   selectedAgentKey: string
   userId: string
+  hasStarted: boolean
   historyItems: Array<{ id: string; title: string; active?: boolean }>
 }>()
 
 const emit = defineEmits<{
   (event: 'new-chat'): void
-  (event: 'update:selectedAgentKey', value: string): void
-  (event: 'update:userId', value: string): void
+  (event: 'save-settings', payload: { agentKey: string; userId: string }): void
 }>()
 
-const userSettingsOpen = ref(false)
+const settingsOpen = ref(false)
+const footerRef = ref<HTMLElement | null>(null)
+
+watch(
+  () => props.hasStarted,
+  () => {
+    settingsOpen.value = false
+  },
+)
+
+function handleDocumentPointerDown(event: PointerEvent): void {
+  if (!settingsOpen.value || !footerRef.value) {
+    return
+  }
+
+  const target = event.target
+  if (target instanceof Node && footerRef.value.contains(target)) {
+    return
+  }
+
+  settingsOpen.value = false
+}
+
+onMounted(() => {
+  document.addEventListener('pointerdown', handleDocumentPointerDown)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', handleDocumentPointerDown)
+})
 
 const historySkeletons = computed(() => {
   if (props.historyItems.length > 0) {
@@ -28,6 +58,11 @@ const historySkeletons = computed(() => {
     { id: 'placeholder-3', title: '支持搜索、置顶与分组' },
   ]
 })
+
+function handleSaveSettings(payload: { agentKey: string; userId: string }): void {
+  emit('save-settings', payload)
+  settingsOpen.value = false
+}
 </script>
 
 <template>
@@ -46,21 +81,6 @@ const historySkeletons = computed(() => {
       >
         新建会话
       </button>
-
-      <label class="workspace-sidebar__agent">
-        <span class="workspace-sidebar__label">Agent</span>
-        <select
-          data-testid="agent-select"
-          :value="selectedAgentKey"
-          class="workspace-sidebar__select"
-          @change="emit('update:selectedAgentKey', ($event.target as HTMLSelectElement).value)"
-        >
-          <option v-for="agent in agents" :key="agent.agentKey" :value="agent.agentKey">
-            {{ agent.name }}
-          </option>
-        </select>
-      </label>
-
     </div>
 
     <div data-testid="sidebar-history" class="workspace-sidebar__history">
@@ -84,29 +104,32 @@ const historySkeletons = computed(() => {
       </p>
     </div>
 
-    <div class="workspace-sidebar__footer">
-      <button
-        data-testid="toggle-user-settings"
-        class="workspace-sidebar__user-toggle ghost-button"
-        type="button"
-        @click="userSettingsOpen = !userSettingsOpen"
+    <footer ref="footerRef" class="workspace-sidebar__footer">
+      <div
+        v-if="settingsOpen"
+        data-testid="sidebar-settings-popover"
+        class="workspace-sidebar__popover"
       >
-        用户 ID
-      </button>
-
-      <div v-if="userSettingsOpen" class="workspace-sidebar__user-settings">
-        <label class="workspace-sidebar__user-field">
-          <span class="workspace-sidebar__label">当前用户</span>
-          <input
-            data-testid="user-id-input"
-            :value="userId"
-            class="workspace-sidebar__input"
-            type="text"
-            @input="emit('update:userId', ($event.target as HTMLInputElement).value)"
-          />
-        </label>
+        <TimelineSettingsPopover
+          :agents="agents"
+          :selected-agent-key="selectedAgentKey"
+          :user-id="userId"
+          :has-started="hasStarted"
+          @save="handleSaveSettings"
+          @cancel="settingsOpen = false"
+          @close="settingsOpen = false"
+        />
       </div>
-    </div>
+
+      <button
+        data-testid="sidebar-settings-trigger"
+        class="ghost-button workspace-sidebar__settings-trigger"
+        type="button"
+        @click="settingsOpen = !settingsOpen"
+      >
+        设置
+      </button>
+    </footer>
   </aside>
 </template>
 
@@ -121,9 +144,7 @@ const historySkeletons = computed(() => {
   background: var(--surface-muted);
 }
 
-.workspace-sidebar__top,
-.workspace-sidebar__footer,
-.workspace-sidebar__user-settings {
+.workspace-sidebar__top {
   display: grid;
   gap: 12px;
 }
@@ -141,7 +162,6 @@ const historySkeletons = computed(() => {
 }
 
 .workspace-sidebar__brand-subtitle,
-.workspace-sidebar__label,
 .workspace-sidebar__section-title,
 .workspace-sidebar__section-note {
   color: var(--text-muted);
@@ -150,23 +170,6 @@ const historySkeletons = computed(() => {
 
 .workspace-sidebar__new-chat {
   justify-content: center;
-}
-
-.workspace-sidebar__agent,
-.workspace-sidebar__user-field {
-  display: grid;
-  gap: 8px;
-}
-
-.workspace-sidebar__select,
-.workspace-sidebar__input {
-  width: 100%;
-  min-height: 38px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  background: rgba(255, 255, 255, 0.9);
-  color: var(--text-strong);
 }
 
 .workspace-sidebar__history {
@@ -204,6 +207,23 @@ const historySkeletons = computed(() => {
   color: var(--text-muted);
   font-size: 0.84rem;
   line-height: 1.6;
+}
+
+.workspace-sidebar__footer {
+  position: relative;
+  display: grid;
+  gap: 10px;
+}
+
+.workspace-sidebar__popover {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 2;
+}
+
+.workspace-sidebar__settings-trigger {
+  justify-content: center;
 }
 
 @media (max-width: 720px) {

@@ -49,6 +49,11 @@ function handleToolConfirmation(payload: {
   )
 }
 
+function handleSaveSettings(payload: { agentKey: string; userId: string }): void {
+  sessionStore.setSelectedAgent(payload.agentKey)
+  sessionStore.setUserId(payload.userId)
+}
+
 function handleNewChat(): void {
   sidebarOpen.value = false
   timelineOpen.value = false
@@ -95,10 +100,10 @@ function closeOverlays(): void {
       :agents="agents"
       :selected-agent-key="selectedAgentKey"
       :user-id="userId"
+      :has-started="hasStarted"
       :history-items="historyItems"
       @new-chat="handleNewChat"
-      @update:selected-agent-key="sessionStore.setSelectedAgent"
-      @update:user-id="sessionStore.setUserId"
+      @save-settings="handleSaveSettings"
     />
 
     <section class="workspace-page__main">
