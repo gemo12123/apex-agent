@@ -359,7 +359,7 @@ function submitComposerAction(): void {
 
 .chat-pane__composer {
   position: sticky;
-  bottom: 0;
+  bottom: 20px;
   margin-top: auto;
   padding: 18px 0 8px;
   background: linear-gradient(
