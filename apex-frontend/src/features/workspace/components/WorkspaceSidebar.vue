@@ -61,17 +61,6 @@ const historySkeletons = computed(() => {
         </select>
       </label>
 
-      <div class="workspace-sidebar__quick-actions">
-        <button class="workspace-sidebar__quick-action ghost-button" type="button" disabled>
-          规划任务
-        </button>
-        <button class="workspace-sidebar__quick-action ghost-button" type="button" disabled>
-          最近产物
-        </button>
-        <button class="workspace-sidebar__quick-action ghost-button" type="button" disabled>
-          待确认
-        </button>
-      </div>
     </div>
 
     <div data-testid="sidebar-history" class="workspace-sidebar__history">
@@ -180,18 +169,6 @@ const historySkeletons = computed(() => {
   color: var(--text-strong);
 }
 
-.workspace-sidebar__quick-actions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.workspace-sidebar__quick-action {
-  min-height: 36px;
-  padding: 0 8px;
-  font-size: 0.84rem;
-}
-
 .workspace-sidebar__history {
   display: grid;
   align-content: start;
@@ -232,10 +209,6 @@ const historySkeletons = computed(() => {
 @media (max-width: 720px) {
   .workspace-sidebar {
     min-height: auto;
-  }
-
-  .workspace-sidebar__quick-actions {
-    grid-template-columns: 1fr;
   }
 }
 </style>

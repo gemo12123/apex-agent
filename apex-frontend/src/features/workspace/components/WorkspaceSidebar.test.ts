@@ -17,6 +17,9 @@ describe('WorkspaceSidebar', () => {
 
     expect(wrapper.get('[data-testid="sidebar-history"]').text()).toContain('历史对话')
     expect(wrapper.get('[data-testid="toggle-user-settings"]').text()).toContain('用户 ID')
+    expect(wrapper.text()).not.toContain('规划任务')
+    expect(wrapper.text()).not.toContain('最近产物')
+    expect(wrapper.text()).not.toContain('待确认')
 
     await wrapper.get('[data-testid="new-chat"]').trigger('click')
     await wrapper.get('[data-testid="agent-select"]').setValue('deer-flow')
