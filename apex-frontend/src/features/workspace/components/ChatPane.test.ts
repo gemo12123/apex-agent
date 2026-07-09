@@ -13,13 +13,19 @@ describe('ChatPane', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('今天想让 Apex 做什么？')
+    expect(wrapper.text()).toContain('我们先从哪里开始呢？')
     expect(wrapper.find('.chat-pane__composer-shell').exists()).toBe(true)
+    expect(wrapper.find('.chat-pane__composer-shell--prompt-bar').exists()).toBe(true)
+    expect(wrapper.get('textarea').attributes('placeholder')).toBe('有问题，尽管问')
+    expect(wrapper.find('[data-testid="add-context-button"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="voice-button"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="send-button"]').text()).toBe('开始')
+    expect(wrapper.find('.chat-pane__hint').exists()).toBe(false)
 
     await wrapper.get('[data-testid="welcome-suggestion-0"]').trigger('click')
 
     const textarea = wrapper.get('textarea')
-    expect((textarea.element as HTMLTextAreaElement).value).toContain('前端')
+    expect((textarea.element as HTMLTextAreaElement).value).toBe('生成图片')
   })
 
   it('switches into transcript mode without moving the shared composer', () => {
@@ -39,6 +45,10 @@ describe('ChatPane', () => {
     expect(wrapper.find('.chat-pane__transcript').exists()).toBe(true)
     expect(wrapper.find('.chat-message--assistant .chat-message__card').exists()).toBe(true)
     expect(wrapper.find('.chat-pane__composer-shell').exists()).toBe(true)
+    expect(wrapper.find('.chat-pane__composer-shell--prompt-bar').exists()).toBe(true)
+    expect(wrapper.get('textarea').attributes('rows')).toBe('1')
+    expect(wrapper.get('[data-testid="send-button"]').text()).toBe('发送')
+    expect(wrapper.find('.chat-pane__hint').exists()).toBe(false)
   })
 
   it('disables the shared composer while waiting for confirmation', () => {

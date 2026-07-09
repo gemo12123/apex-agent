@@ -48,6 +48,16 @@ const composerDisabled = computed(
     props.status === 'waiting-human' ||
     props.status === 'waiting-confirmation',
 )
+const composerButtonLabel = computed(() => {
+  if (props.status === 'streaming') {
+    return '停止'
+  }
+
+  return props.hasStarted ? '发送' : '开始'
+})
+const composerButtonDisabled = computed(
+  () => props.status !== 'streaming' && (!draft.value.trim() || composerDisabled.value),
+)
 
 watch(
   () => [
@@ -82,6 +92,15 @@ function submitMessage(): void {
 
   emit('send', value)
   draft.value = ''
+}
+
+function submitComposerAction(): void {
+  if (props.status === 'streaming') {
+    emit('stop')
+    return
+  }
+
+  submitMessage()
 }
 </script>
 
@@ -156,40 +175,29 @@ function submitMessage(): void {
       </div>
 
       <footer class="chat-pane__composer">
-        <div class="chat-pane__composer-shell">
+        <div class="chat-pane__composer-shell chat-pane__composer-shell--prompt-bar">
           <label class="sr-only" for="chat-pane-draft">继续输入你的任务</label>
           <textarea
             id="chat-pane-draft"
             v-model="draft"
             class="chat-pane__textarea"
-            rows="3"
+            rows="1"
             :disabled="composerDisabled"
-            placeholder="继续补充上下文、追问上一轮结果，或者给 Apex 一个新的执行方向。"
-            @keydown.enter.exact.prevent="submitMessage"
+            :placeholder="props.hasStarted ? '继续补充上下文、追问上一轮结果，或者给 Apex 一个新的执行方向。' : '有问题，尽管问'"
+            @keydown.enter.exact.prevent="submitComposerAction"
           />
 
-          <div class="chat-pane__actions">
+          <div class="chat-pane__prompt-actions">
             <button
-              class="ghost-button"
+              data-testid="send-button"
+              class="chat-pane__prompt-submit"
               type="button"
-              :disabled="props.status !== 'streaming'"
-              @click="emit('stop')"
+              :disabled="composerButtonDisabled"
+              :aria-label="composerButtonLabel"
+              @click="submitComposerAction"
             >
-              停止生成
+              {{ composerButtonLabel }}
             </button>
-
-            <div class="chat-pane__action-group">
-              <span class="chat-pane__hint">Enter 发送，Shift + Enter 换行</span>
-              <button
-                data-testid="send-button"
-                class="accent-button"
-                type="button"
-                :disabled="!draft.trim() || composerDisabled"
-                @click="submitMessage"
-              >
-                发送
-              </button>
-            </div>
           </div>
         </div>
       </footer>
@@ -219,7 +227,7 @@ function submitMessage(): void {
 
 .chat-pane--empty .chat-pane__shell {
   justify-content: center;
-  gap: 18px;
+  gap: 20px;
 }
 
 .chat-pane--empty .chat-pane__header {
@@ -286,7 +294,7 @@ function submitMessage(): void {
 .chat-pane--empty .chat-pane__welcome :deep(.welcome-screen__suggestions) {
   order: 3;
   width: 100%;
-  margin-top: 2px;
+  margin-top: 4px;
 }
 
 .chat-pane__transcript {
@@ -378,6 +386,19 @@ function submitMessage(): void {
   padding: 12px 14px 14px;
 }
 
+.chat-pane__composer-shell--prompt-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: min(100%, 768px);
+  min-height: 60px;
+  margin: 0 auto;
+  padding: 0 8px 0 20px;
+  border-color: rgba(15, 23, 42, 0.1);
+  border-radius: 999px;
+  box-shadow: 0 18px 34px -26px rgba(15, 23, 42, 0.28);
+}
+
 .chat-pane__textarea {
   width: 100%;
   min-height: 72px;
@@ -389,6 +410,17 @@ function submitMessage(): void {
   line-height: 1.6;
   resize: none;
   box-sizing: border-box;
+}
+
+.chat-pane__composer-shell--prompt-bar .chat-pane__textarea {
+  min-height: 24px;
+  height: 24px;
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+.chat-pane__composer-shell--prompt-bar .chat-pane__textarea::placeholder {
+  color: #8a8f98;
 }
 
 .chat-pane__textarea:focus {
@@ -416,6 +448,40 @@ function submitMessage(): void {
   font-size: 0.84rem;
 }
 
+.chat-pane__prompt-actions {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+
+.chat-pane__prompt-submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border: none;
+}
+
+.chat-pane__prompt-submit {
+  min-width: 58px;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: #050505;
+  color: #ffffff;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.chat-pane__prompt-submit:hover:enabled {
+  background: #171717;
+}
+
+.chat-pane__prompt-submit:disabled {
+  opacity: 1;
+  cursor: not-allowed;
+}
+
 @media (max-width: 720px) {
   .chat-pane__header,
   .chat-pane__actions,
@@ -431,6 +497,12 @@ function submitMessage(): void {
 
   .chat-pane__hint {
     text-align: center;
+  }
+
+  .chat-pane__composer-shell--prompt-bar {
+    width: 100%;
+    gap: 10px;
+    padding-left: 16px;
   }
 }
 </style>
