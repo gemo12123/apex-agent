@@ -76,7 +76,7 @@ public class DefaultConversationMemoryManagerTest {
         context.setPersistedDialogueMessageIndex(2);
 
         when(tokenEstimator.estimate(any())).thenReturn(200);
-        when(sessionContextStore.countUncompactedMessagesBeforeTurn("session-1", 2)).thenReturn(2);
+        when(sessionContextStore.countUncompactedMessagesBeforeTurn("session-1", 2L)).thenReturn(2);
         when(dialogueSummaryGenerator.generateSummary(eq(latestSummary), eq(List.of(firstUserMessage, firstAssistantMessage))))
                 .thenReturn("new-summary");
 
@@ -90,8 +90,8 @@ public class DefaultConversationMemoryManagerTest {
         assertEquals("u2", context.getDialogueMessages().getFirst().getText());
         assertEquals(1, context.getPersistedDialogueMessageIndex());
         assertEquals(14L, context.getNextMessageSortNo());
-        verify(sessionContextStore).appendDialogueMessages("session-1", 2, 12L, List.of(retainedMessage));
-        verify(sessionContextStore).compactDialogue("session-1", context.getLatestCompressedMessage(), 12L, 2);
+        verify(sessionContextStore).appendDialogueMessages("session-1", 2L, 12L, List.of(retainedMessage));
+        verify(sessionContextStore).compactDialogue("session-1", context.getLatestCompressedMessage(), 12L, 2L);
         verify(dialogueSummaryGenerator).generateSummary(latestSummary, List.of(firstUserMessage, firstAssistantMessage));
     }
 

@@ -46,10 +46,16 @@ public final class SessionContextEntityConverter {
         snapshot.setPendingToolResult(context.getPendingToolResult());
         snapshot.setPendingHumanInteraction(context.getPendingHumanInteraction());
         snapshot.setPendingToolExecution(context.getPendingToolExecution());
+        snapshot.setTurnNo(context.getTurnNo());
+        snapshot.setTraceNo(context.getTraceNo());
+        snapshot.setWorkingMessagesPayload(MessageEntityConverter.toPayloadList(context.getWorkingMessages()));
+        snapshot.setActiveSkillNames(context.getActiveSkillNames() != null
+                ? new ArrayList<>(context.getActiveSkillNames())
+                : new ArrayList<>());
         return snapshot;
     }
 
-    public static List<AgentSessionDialogueMessageEntity> toDialogueEntities(String sessionId, Integer turnNo,
+    public static List<AgentSessionDialogueMessageEntity> toDialogueEntities(String sessionId, Long turnNo,
             Long baseSortNo, List<Message> messages) {
         List<AgentSessionDialogueMessageEntity> entities = new ArrayList<>();
         if (messages == null || messages.isEmpty()) {
@@ -77,13 +83,18 @@ public final class SessionContextEntityConverter {
         return entities;
     }
 
+    public static List<AgentSessionDialogueMessageEntity> toDialogueEntities(String sessionId, Integer turnNo,
+            Long baseSortNo, List<Message> messages) {
+        return toDialogueEntities(sessionId, turnNo != null ? turnNo.longValue() : null, baseSortNo, messages);
+    }
+
     public static List<AgentSessionDialogueMessageEntity> toDialogueEntities(SuperAgentContext context) {
         return toDialogueEntities(context.getSessionId(), context.getTurnNo(), context.getTurnStartSortNo(),
                 context.getDialogueMessages());
     }
 
     public static AgentSessionDialogueSummaryEntity toSummaryEntity(String sessionId, Message summaryMessage,
-            Long compactedToSortNo, Integer turnNo, LocalDateTime createTime) {
+            Long compactedToSortNo, Long turnNo, LocalDateTime createTime) {
         if (summaryMessage == null) {
             return null;
         }
@@ -103,6 +114,12 @@ public final class SessionContextEntityConverter {
         return entity;
     }
 
+    public static AgentSessionDialogueSummaryEntity toSummaryEntity(String sessionId, Message summaryMessage,
+            Long compactedToSortNo, Integer turnNo, LocalDateTime createTime) {
+        return toSummaryEntity(sessionId, summaryMessage, compactedToSortNo,
+                turnNo != null ? turnNo.longValue() : null, createTime);
+    }
+
     public static AgentSessionDialogueSummaryEntity toSummaryEntity(SuperAgentContext context, LocalDateTime createTime) {
         return toSummaryEntity(context.getSessionId(), context.getLatestCompressedMessage(),
                 context.getLatestCompressedSortNo(), context.getTurnNo(), createTime);
@@ -111,7 +128,7 @@ public final class SessionContextEntityConverter {
     public static SuperAgentContext fromEntities(AgentSessionEntity sessionEntity,
             AgentSessionDialogueSummaryEntity summaryEntity,
             List<AgentSessionDialogueMessageEntity> dialogueEntities,
-            Integer inferredTurnNo) {
+            Long inferredTurnNo) {
         SuperAgentContext context = new SuperAgentContext();
         context.setSessionId(sessionEntity.getSessionId());
         context.setAgentKey(sessionEntity.getAgentKey());
@@ -136,6 +153,11 @@ public final class SessionContextEntityConverter {
             context.setPendingToolResult(snapshot.getPendingToolResult());
             context.setPendingHumanInteraction(snapshot.getPendingHumanInteraction());
             context.setPendingToolExecution(snapshot.getPendingToolExecution());
+            context.setTraceNo(snapshot.getTraceNo() != null ? snapshot.getTraceNo() : 0);
+            context.setWorkingMessages(MessageEntityConverter.fromPayloadList(snapshot.getWorkingMessagesPayload()));
+            context.setActiveSkillNames(snapshot.getActiveSkillNames() != null
+                    ? new ArrayList<>(snapshot.getActiveSkillNames())
+                    : new ArrayList<>());
         }
         if (summaryEntity != null) {
             context.setLatestCompressedMessage(MessageEntityConverter.fromPayload(summaryEntity.getMessagePayload(),
@@ -154,10 +176,21 @@ public final class SessionContextEntityConverter {
         context.setTurnStartSortNo(context.getLatestCompressedSortNo());
         int dialogueSize = context.getDialogueMessages().size();
         context.setPersistedDialogueMessageIndex(dialogueSize);
-        context.setTurnNo(resolveTurnNo(inferredTurnNo, summaryEntity));
+        context.setTurnNo(resolveTurnNo(
+                snapshot != null ? snapshot.getTurnNo() : null,
+                inferredTurnNo,
+                summaryEntity));
         long nextSortNo = context.getTurnStartSortNo() + dialogueSize + 1L;
         context.setNextMessageSortNo(Math.max(nextSortNo, 1L));
         return context;
+    }
+
+    public static SuperAgentContext fromEntities(AgentSessionEntity sessionEntity,
+            AgentSessionDialogueSummaryEntity summaryEntity,
+            List<AgentSessionDialogueMessageEntity> dialogueEntities,
+            Integer inferredTurnNo) {
+        return fromEntities(sessionEntity, summaryEntity, dialogueEntities,
+                inferredTurnNo != null ? inferredTurnNo.longValue() : null);
     }
 
     public static Message buildSummaryMessage(String content) {
@@ -168,14 +201,16 @@ public final class SessionContextEntityConverter {
         return message != null && message.getText() != null ? Math.max(1, message.getText().length() / 4) : 0;
     }
 
-    private static int resolveTurnNo(Integer inferredTurnNo, AgentSessionDialogueSummaryEntity summaryEntity) {
+    private static long resolveTurnNo(Long snapshotTurnNo, Long inferredTurnNo,
+            AgentSessionDialogueSummaryEntity summaryEntity) {
+        long resolved = snapshotTurnNo != null ? snapshotTurnNo : 0L;
         if (inferredTurnNo != null) {
-            return inferredTurnNo;
+            resolved = Math.max(resolved, inferredTurnNo);
         }
         if (summaryEntity != null && summaryEntity.getSourceTurnNo() != null) {
-            return summaryEntity.getSourceTurnNo();
+            resolved = Math.max(resolved, summaryEntity.getSourceTurnNo());
         }
-        return 0;
+        return resolved;
     }
 
     private static SuperAgentContext.Stage parseCurrentStage(String rawValue) {

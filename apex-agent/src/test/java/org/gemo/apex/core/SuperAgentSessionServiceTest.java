@@ -15,6 +15,7 @@ import org.gemo.apex.memory.model.MemoryItem;
 import org.gemo.apex.memory.model.MemoryRecallPackage;
 import org.gemo.apex.memory.recall.MemoryRecallService;
 import org.gemo.apex.memory.session.SessionContextStore;
+import org.gemo.apex.hook.lifecycle.AgentExecutionStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -61,6 +62,9 @@ class SuperAgentSessionServiceTest {
     @Mock
     private MemoryRecallService memoryRecallService;
 
+    @Mock
+    private AgentExecutionStore agentExecutionStore;
+
     @InjectMocks
     private SuperAgentSessionService sessionService;
 
@@ -73,6 +77,7 @@ class SuperAgentSessionServiceTest {
         when(globalToolRegistry.getSubAgentToolCallbacks(anyString())).thenReturn(List.of());
         when(globalToolRegistry.getSkillsTool(anyString())).thenReturn(null);
         when(agentDefinitionLoader.load(anyString())).thenReturn(definition(ModeEnum.REACT));
+        when(agentExecutionStore.nextTurnNo()).thenReturn(1L);
     }
 
     @AfterEach
@@ -91,7 +96,7 @@ class SuperAgentSessionServiceTest {
         assertEquals("session-1", context.getSessionId());
         assertEquals("agent-1", context.getAgentKey());
         assertEquals("user-1", context.getUserId());
-        assertEquals(1, context.getTurnNo());
+        assertEquals(1L, context.getTurnNo());
         assertEquals(SuperAgentContext.Stage.EXECUTION, context.getCurrentStage());
         assertEquals(ModeEnum.REACT, context.getExecutionMode());
         assertEquals(1, context.getPersistedDialogueMessageIndex());
@@ -102,7 +107,7 @@ class SuperAgentSessionServiceTest {
         assertSame(recallPackage, context.getMemoryRecallPackage());
 
         ArgumentCaptor<List<Message>> messagesCaptor = ArgumentCaptor.forClass(List.class);
-        verify(sessionContextStore).appendDialogueMessages(eq("session-1"), eq(1), eq(0L), messagesCaptor.capture());
+        verify(sessionContextStore).appendDialogueMessages(eq("session-1"), eq(1L), eq(0L), messagesCaptor.capture());
         assertEquals(1, messagesCaptor.getValue().size());
         assertEquals("hello", messagesCaptor.getValue().getFirst().getText());
         verify(memoryRecallService).recall(context);
@@ -136,13 +141,14 @@ class SuperAgentSessionServiceTest {
         existingContext.setCurrentStageId("stage-1");
         existingContext.setPendingToolResult(java.util.Map.of("approved", true));
         when(sessionContextStore.load("session-1")).thenReturn(Optional.of(existingContext));
+        when(agentExecutionStore.nextTurnNo()).thenReturn(3L);
         MemoryRecallPackage recallPackage = recallPackage();
         when(memoryRecallService.recall(existingContext)).thenReturn(recallPackage);
 
         SuperAgentContext context = sessionService.createContext("session-1", "agent-1", "follow up");
 
         assertEquals(existingContext, context);
-        assertEquals(3, context.getTurnNo());
+        assertEquals(3L, context.getTurnNo());
         assertEquals(SuperAgentContext.Stage.EXECUTION, context.getCurrentStage());
         assertEquals(ModeEnum.REACT, context.getExecutionMode());
         assertEquals(4L, context.getTurnStartSortNo());
@@ -156,7 +162,7 @@ class SuperAgentSessionServiceTest {
         assertEquals("follow up", context.getDialogueMessages().getLast().getText());
 
         ArgumentCaptor<List<Message>> messagesCaptor = ArgumentCaptor.forClass(List.class);
-        verify(sessionContextStore).appendDialogueMessages(eq("session-1"), eq(3), eq(5L), messagesCaptor.capture());
+        verify(sessionContextStore).appendDialogueMessages(eq("session-1"), eq(3L), eq(5L), messagesCaptor.capture());
         assertEquals(1, messagesCaptor.getValue().size());
         assertEquals("follow up", messagesCaptor.getValue().getFirst().getText());
         verify(memoryRecallService).recall(existingContext);
@@ -176,7 +182,7 @@ class SuperAgentSessionServiceTest {
                 () -> sessionService.createContext("session-1", "agent-1", "follow up"));
 
         assertTrue(exception.getMessage().contains("HUMAN_RESPONSE"));
-        verify(sessionContextStore, never()).appendDialogueMessages(anyString(), any(), anyLong(), any());
+        verify(sessionContextStore, never()).appendDialogueMessages(anyString(), any(Long.class), anyLong(), any());
         verify(sessionContextStore, never()).save(any(SuperAgentContext.class));
     }
 
@@ -192,7 +198,7 @@ class SuperAgentSessionServiceTest {
         assertThrows(IllegalStateException.class,
                 () -> sessionService.createContext("session-1", "agent-1", "follow up"));
 
-        verify(sessionContextStore, never()).appendDialogueMessages(anyString(), any(), anyLong(), any());
+        verify(sessionContextStore, never()).appendDialogueMessages(anyString(), any(Long.class), anyLong(), any());
         verify(sessionContextStore, never()).save(any(SuperAgentContext.class));
     }
 
@@ -208,7 +214,7 @@ class SuperAgentSessionServiceTest {
         assertThrows(IllegalStateException.class,
                 () -> sessionService.createContext("session-1", "agent-1", "follow up"));
 
-        verify(sessionContextStore, never()).appendDialogueMessages(anyString(), any(), anyLong(), any());
+        verify(sessionContextStore, never()).appendDialogueMessages(anyString(), any(Long.class), anyLong(), any());
         verify(sessionContextStore, never()).save(any(SuperAgentContext.class));
     }
 

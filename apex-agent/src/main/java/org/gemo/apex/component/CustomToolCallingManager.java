@@ -446,43 +446,13 @@ public class CustomToolCallingManager implements ToolCallingManager {
             // 生成唯一的 invocation_id
             String invocationId = "invocationId_" + IdUtil.fastSimpleUUID();
             Map<String, Object> parsedArguments = parseArguments(finalToolInputArguments);
-            Set<String> skippedHookBeans = resolveSkippedHookBeans(toolContext);
-
             toolInvocationNotifier.beforeExecution(toolCallback, sessionContext, invocationId);
 
-            PreToolCallHookResult preResult = agentHookRuntime.runPreHooks(PreToolCallHookContext.builder()
-                    .agentKey(sessionContext != null ? sessionContext.getAgentKey() : null)
-                    .sessionId(sessionContext != null ? sessionContext.getSessionId() : null)
-                    .userId(sessionContext != null ? sessionContext.getUserId() : null)
-                    .toolCallId(toolCall.id())
-                    .invocationId(invocationId)
-                    .toolName(toolName)
-                    .toolDescription(toolCallback.getToolDefinition().description())
-                    .toolType(resolveToolType(toolCallback))
-                    .rawArguments(finalToolInputArguments)
-                    .arguments(new LinkedHashMap<>(parsedArguments))
-                    .skippedHookBeans(skippedHookBeans)
-                    .superAgentContext(sessionContext)
-                    .build());
-
-            Map<String, Object> resolvedArguments = preResult.getUpdatedArgs() != null
-                    ? new LinkedHashMap<>(preResult.getUpdatedArgs())
-                    : new LinkedHashMap<>(parsedArguments);
-
-            if (preResult.getOutcome() == PreToolCallHookResult.Outcome.BLOCK) {
-                toolResponses.add(new ToolResponseMessage.ToolResponse(toolCall.id(), toolName,
-                        preResult.getBlockReason() != null ? preResult.getBlockReason() : ""));
-                continue;
-            }
-
-            if (preResult.getOutcome() == PreToolCallHookResult.Outcome.REQUEST_CONFIRMATION) {
-                suspendForConfirmation(sessionContext, toolCall, toolName, invocationId, resolvedArguments,
-                        preResult.getConfirmationSpec(), preResult.getExecutedHookBeans());
-            }
+            // 生命周期 Hook 已迁移到 SuperAgent 主循环；底层执行器只调用真实工具。
+            Map<String, Object> resolvedArguments = new LinkedHashMap<>(parsedArguments);
 
             ToolContext finalToolContext = toolContext;
             String resolvedToolInputArguments = JacksonUtils.toJson(resolvedArguments);
-            boolean[] toolExecutionSucceeded = {true};
             String toolCallResult = ToolCallingObservationDocumentation.TOOL_CALL
                     .observation(this.observationConvention, DEFAULT_OBSERVATION_CONVENTION, () -> observationContext,
                             this.observationRegistry)
@@ -491,7 +461,6 @@ public class CustomToolCallingManager implements ToolCallingManager {
                         try {
                             toolResult = toolCallback.call(resolvedToolInputArguments, finalToolContext);
                         } catch (ToolExecutionException ex) {
-                            toolExecutionSucceeded[0] = false;
                             toolResult = this.toolExecutionExceptionProcessor.process(ex);
                         }
                         observationContext.setToolCallResult(toolResult);
@@ -499,24 +468,6 @@ public class CustomToolCallingManager implements ToolCallingManager {
                     });
 
             // 打印工具执行后的日志并发送 SSE 消息
-            PostToolCallHookResult postResult = agentHookRuntime.runPostHooks(PostToolCallHookContext.builder()
-                    .agentKey(sessionContext != null ? sessionContext.getAgentKey() : null)
-                    .sessionId(sessionContext != null ? sessionContext.getSessionId() : null)
-                    .userId(sessionContext != null ? sessionContext.getUserId() : null)
-                    .toolCallId(toolCall.id())
-                    .invocationId(invocationId)
-                    .toolName(toolName)
-                    .rawArguments(resolvedToolInputArguments)
-                    .arguments(new LinkedHashMap<>(resolvedArguments))
-                    .originalResult(toolCallResult)
-                    .currentResult(toolCallResult)
-                    .toolExecutionSucceeded(toolExecutionSucceeded[0])
-                    .superAgentContext(sessionContext)
-                    .build());
-            if (postResult.getOutcome() == PostToolCallHookResult.Outcome.REPLACE_RESULT) {
-                toolCallResult = postResult.getNextResult();
-            }
-
             toolInvocationNotifier.afterExecution(toolCallback, sessionContext, invocationId);
 
             toolResponses.add(new ToolResponseMessage.ToolResponse(toolCall.id(), toolName,

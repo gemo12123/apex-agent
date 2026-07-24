@@ -6,6 +6,8 @@ import org.gemo.apex.domain.interaction.PendingHumanInteraction;
 import org.gemo.apex.domain.interaction.PendingToolExecution;
 
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 会话运行态快照。
@@ -31,4 +33,12 @@ public class SessionRuntimeSnapshot {
     private PendingHumanInteraction pendingHumanInteraction;
 
     private PendingToolExecution pendingToolExecution;
+
+    private Long turnNo;
+
+    private Integer traceNo;
+
+    private String workingMessagesPayload;
+
+    private List<String> activeSkillNames = new ArrayList<>();
 }

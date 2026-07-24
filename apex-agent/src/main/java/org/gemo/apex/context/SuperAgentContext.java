@@ -137,7 +137,31 @@ public class SuperAgentContext {
     /**
      * 当前会话轮次号。
      */
-    private Integer turnNo = 0;
+    private Long turnNo = 0L;
+
+    /**
+     * 当前 Turn 内的 Trace 序号。挂起时保留，正常新建 Turn 时重置。
+     */
+    private Integer traceNo = 0;
+
+    /**
+     * 当前 Turn 已激活的 Skill。
+     */
+    private List<String> activeSkillNames = new ArrayList<>();
+
+    /**
+     * 生命周期 Hook 使用的当前 Turn 工作消息副本。
+     */
+    @JsonIgnore
+    private List<Message> workingMessages = new ArrayList<>();
+
+    public void setTurnNo(Integer turnNo) {
+        this.turnNo = turnNo != null ? turnNo.longValue() : null;
+    }
+
+    public void setTurnNo(Long turnNo) {
+        this.turnNo = turnNo;
+    }
 
     /**
      * 最近活跃时间。

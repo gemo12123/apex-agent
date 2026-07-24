@@ -83,7 +83,7 @@ class CustomToolCallingManagerTest {
     }
 
     @Test
-    void executeToolCallsShouldSendToolConfirmationAndSuspendBeforeCallingRealTool() {
+    void executeToolCallsShouldLeaveLifecycleHooksToAgentLoop() {
         ToolInvocationNotifier notifier = Mockito.mock(ToolInvocationNotifier.class);
         AgentHookRuntime hookRuntime = Mockito.mock(AgentHookRuntime.class);
         CustomToolCallingManager manager = CustomToolCallingManager.builder()
@@ -129,19 +129,18 @@ class CustomToolCallingManagerTest {
                 .toolCalls(List.of(new AssistantMessage.ToolCall("call-1", "function", "meeting_tool", "{}")))
                 .build();
 
-        assertThrows(HumanInTheLoopException.class,
-                () -> manager.executeToolCalls(prompt, new ChatResponse(List.of(new Generation(assistantMessage)))));
+        ToolExecutionResult result = manager.executeToolCalls(
+                prompt,
+                new ChatResponse(List.of(new Generation(assistantMessage))));
 
-        verify(toolCallback, never()).call(any(String.class), any());
-        assertEquals(ExecutionStatus.HUMAN_IN_THE_LOOP, sessionContext.getExecutionStatus());
-        assertEquals("TOOL_CONFIRMATION", sessionContext.getPendingHumanInteraction().getInteractionType());
-        assertEquals(List.of("mutateRoomHook", "toolConfirmHook"),
-                sessionContext.getPendingToolExecution().getExecutedPreHookBeans());
-        assertTrue(emitter.payloads.stream().anyMatch(payload -> payload.contains("TOOL_CONFIRMATION")));
+        verify(toolCallback).call(any(String.class), any());
+        verify(hookRuntime, never()).runPreHooks(any());
+        ToolResponseMessage response = (ToolResponseMessage) result.conversationHistory().get(2);
+        assertEquals("should-not-run", response.getResponses().getFirst().responseData());
     }
 
     @Test
-    void executeToolCallsShouldApplyPostHookReplacementForActivateSkill() {
+    void executeToolCallsShouldReturnRawResultWithoutLifecyclePostProcessing() {
         ToolInvocationNotifier notifier = Mockito.mock(ToolInvocationNotifier.class);
         AgentHookRuntime hookRuntime = Mockito.mock(AgentHookRuntime.class);
         CustomToolCallingManager manager = CustomToolCallingManager.builder()
@@ -194,7 +193,8 @@ class CustomToolCallingManagerTest {
         ToolExecutionResult result = manager.executeToolCalls(prompt, new ChatResponse(List.of(new Generation(assistantMessage))));
 
         ToolResponseMessage response = (ToolResponseMessage) result.conversationHistory().get(2);
-        assertTrue(response.getResponses().getFirst().responseData().contains("# Skill经验"));
+        assertTrue(response.getResponses().getFirst().responseData().contains("<activated_skill"));
+        verify(hookRuntime, never()).runPostHooks(any());
     }
 
     private static class CapturingSseEmitter extends SseEmitter {

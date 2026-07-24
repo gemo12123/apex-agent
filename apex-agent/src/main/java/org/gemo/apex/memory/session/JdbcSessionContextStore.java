@@ -74,7 +74,7 @@ public class JdbcSessionContextStore implements SessionContextStore {
                         .isNotNull(AgentSessionDialogueMessageEntity::getTurnNo)
                         .orderByDesc(AgentSessionDialogueMessageEntity::getTurnNo)
                         .last("LIMIT 1"));
-        Integer inferredTurnNo = latestTurnEntity != null ? latestTurnEntity.getTurnNo() : null;
+        Long inferredTurnNo = latestTurnEntity != null ? latestTurnEntity.getTurnNo() : null;
         return Optional.of(SessionContextEntityConverter.fromEntities(sessionEntity, summaryEntity, dialogueEntities,
                 inferredTurnNo));
     }
@@ -93,7 +93,7 @@ public class JdbcSessionContextStore implements SessionContextStore {
 
     @Override
     @Transactional
-    public void appendDialogueMessages(String sessionId, Integer turnNo, Long baseSortNo, List<Message> messages) {
+    public void appendDialogueMessages(String sessionId, Long turnNo, Long baseSortNo, List<Message> messages) {
         for (AgentSessionDialogueMessageEntity entity : SessionContextEntityConverter.toDialogueEntities(sessionId,
                 turnNo, baseSortNo, messages)) {
             entity.setSearchText(searchIndexTextBuilder.buildDialogueMessageText(null, entity.getContent(), entity.getToolName()));
@@ -133,7 +133,7 @@ public class JdbcSessionContextStore implements SessionContextStore {
     }
 
     @Override
-    public int countUncompactedMessagesBeforeTurn(String sessionId, Integer turnNo) {
+    public int countUncompactedMessagesBeforeTurn(String sessionId, Long turnNo) {
         LambdaQueryWrapper<AgentSessionDialogueMessageEntity> queryWrapper =
                 new LambdaQueryWrapper<AgentSessionDialogueMessageEntity>()
                         .eq(AgentSessionDialogueMessageEntity::getSessionId, sessionId)
@@ -147,7 +147,7 @@ public class JdbcSessionContextStore implements SessionContextStore {
 
     @Override
     @Transactional
-    public void compactDialogue(String sessionId, Message summaryMessage, Long compactedToSortNo, Integer turnNo) {
+    public void compactDialogue(String sessionId, Message summaryMessage, Long compactedToSortNo, Long turnNo) {
         if (summaryMessage == null || compactedToSortNo == null) {
             return;
         }

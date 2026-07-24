@@ -20,4 +20,7 @@ public class PendingToolExecution {
     private List<String> editableFieldKeys;
     private String confirmationId;
     private List<String> executedPreHookBeans;
+    private Long turnNo;
+    private Integer traceNo;
+    private Integer toolIndex;
 }

@@ -70,7 +70,7 @@ class InMemorySessionContextStoreTest {
         assertFalse(runtimeSnapshot.containsKey("turnStartSortNo"));
         assertFalse(runtimeSnapshot.containsKey("persistedDialogueMessageIndex"));
         assertFalse(runtimeSnapshot.containsKey("nextMessageSortNo"));
-        assertFalse(runtimeSnapshot.containsKey("turnNo"));
+        assertEquals(2, ((Number) runtimeSnapshot.get("turnNo")).longValue());
 
         context.setAgentKey("agent-mutated");
         context.setPendingToolResult(Map.of("approved", false));

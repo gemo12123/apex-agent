@@ -13,13 +13,19 @@ public class SessionSearchHit {
     private String sourceType;
     private String sessionId;
     private String messageId;
-    private Integer turnNo;
+    private Long turnNo;
     private Long sortNo;
     private String role;
     private double score;
     private ScoreBreakdown scoreBreakdown;
     private String snippet;
     private LocalDateTime createTime;
+
+    public SessionSearchHit(String sourceType, String sessionId, String messageId, Integer turnNo, Long sortNo,
+            String role, double score, ScoreBreakdown scoreBreakdown, String snippet, LocalDateTime createTime) {
+        this(sourceType, sessionId, messageId, turnNo != null ? turnNo.longValue() : null, sortNo, role, score,
+                scoreBreakdown, snippet, createTime);
+    }
 
     @Data
     @NoArgsConstructor

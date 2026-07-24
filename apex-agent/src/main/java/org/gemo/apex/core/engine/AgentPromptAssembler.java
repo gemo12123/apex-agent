@@ -8,7 +8,9 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import org.springframework.ai.chat.messages.Message;
 
 @Component
 public class AgentPromptAssembler {
@@ -23,17 +25,25 @@ public class AgentPromptAssembler {
     }
 
     public Prompt assemble(SuperAgentContext context, StageToolPlan toolPlan) {
+        return assemble(context, toolPlan, prepareWorkingMessages(context, toolPlan));
+    }
+
+    public List<Message> prepareWorkingMessages(SuperAgentContext context, StageToolPlan toolPlan) {
         String stageSystemPrompt = stagePromptBuilder.build(context, toolPlan.promptDescribedTools());
         conversationMemoryManager.refreshFixedMessages(context, stageSystemPrompt);
         conversationMemoryManager.compactIfNeeded(context);
+        return new java.util.ArrayList<>(conversationMemoryManager.buildModelMessages(context));
+    }
 
+    public Prompt assemble(SuperAgentContext context, StageToolPlan toolPlan, List<Message> workingMessages) {
         DashScopeChatOptions options = DashScopeChatOptions.builder()
                 .withInternalToolExecutionEnabled(false)
                 .withToolCallbacks(toolPlan.callableTools())
                 .withToolContext(buildToolContext(context, Map.of()))
+                .withMultiModel(true)
                 .build();
 
-        return new Prompt(conversationMemoryManager.buildModelMessages(context), options);
+        return new Prompt(workingMessages != null ? new java.util.ArrayList<>(workingMessages) : List.of(), options);
     }
 
     public Prompt assembleToolExecutionPrompt(SuperAgentContext context, Map<String, Object> extraToolContext) {
@@ -43,7 +53,10 @@ public class AgentPromptAssembler {
                 .withToolContext(buildToolContext(context, extraToolContext != null ? extraToolContext : Map.of()))
                 .build();
 
-        return new Prompt(conversationMemoryManager.buildModelMessages(context), options);
+        List<Message> messages = context.getWorkingMessages() != null && !context.getWorkingMessages().isEmpty()
+                ? context.getWorkingMessages()
+                : conversationMemoryManager.buildModelMessages(context);
+        return new Prompt(new java.util.ArrayList<>(messages), options);
     }
 
     private Map<String, Object> buildToolContext(SuperAgentContext context, Map<String, Object> extraToolContext) {

@@ -43,10 +43,10 @@ public class InMemorySessionContextStore implements SessionContextStore {
                 .filter(entity -> !Boolean.TRUE.equals(entity.getCompacted()))
                 .sorted(Comparator.comparing(AgentSessionDialogueMessageEntity::getSortNo))
                 .toList();
-        Integer inferredTurnNo = dialogueMessageMap.getOrDefault(sessionId, List.of()).stream()
+        Long inferredTurnNo = dialogueMessageMap.getOrDefault(sessionId, List.of()).stream()
                 .map(AgentSessionDialogueMessageEntity::getTurnNo)
                 .filter(Objects::nonNull)
-                .max(Integer::compareTo)
+                .max(Long::compareTo)
                 .orElse(null);
         return Optional.of(SessionContextEntityConverter.fromEntities(sessionEntity, summaryEntity, dialogueEntities,
                 inferredTurnNo));
@@ -63,7 +63,7 @@ public class InMemorySessionContextStore implements SessionContextStore {
     }
 
     @Override
-    public void appendDialogueMessages(String sessionId, Integer turnNo, Long baseSortNo, List<Message> messages) {
+    public void appendDialogueMessages(String sessionId, Long turnNo, Long baseSortNo, List<Message> messages) {
         if (sessionId == null || messages == null || messages.isEmpty()) {
             return;
         }
@@ -97,7 +97,7 @@ public class InMemorySessionContextStore implements SessionContextStore {
     }
 
     @Override
-    public int countUncompactedMessagesBeforeTurn(String sessionId, Integer turnNo) {
+    public int countUncompactedMessagesBeforeTurn(String sessionId, Long turnNo) {
         return (int) dialogueMessageMap.getOrDefault(sessionId, List.of()).stream()
                 .filter(entity -> !Boolean.TRUE.equals(entity.getCompacted()))
                 .filter(entity -> turnNo == null || entity.getTurnNo() == null || entity.getTurnNo() < turnNo)
@@ -105,7 +105,7 @@ public class InMemorySessionContextStore implements SessionContextStore {
     }
 
     @Override
-    public void compactDialogue(String sessionId, Message summaryMessage, Long compactedToSortNo, Integer turnNo) {
+    public void compactDialogue(String sessionId, Message summaryMessage, Long compactedToSortNo, Long turnNo) {
         if (sessionId == null || summaryMessage == null || compactedToSortNo == null) {
             return;
         }

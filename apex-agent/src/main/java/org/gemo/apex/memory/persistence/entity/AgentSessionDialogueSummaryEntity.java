@@ -34,7 +34,7 @@ public class AgentSessionDialogueSummaryEntity {
     private Long compactedToSortNo;
 
     @TableField("source_turn_no")
-    private Integer sourceTurnNo;
+    private Long sourceTurnNo;
 
     @TableField("version_no")
     private Long versionNo;

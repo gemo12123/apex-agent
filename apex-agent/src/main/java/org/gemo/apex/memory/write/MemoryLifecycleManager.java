@@ -72,7 +72,7 @@ public class MemoryLifecycleManager {
         longTermTasks.put(context.getSessionId(), future);
     }
 
-    private void executeExecutionHistoryTask(String sessionId, Integer turnNo) {
+    private void executeExecutionHistoryTask(String sessionId, Long turnNo) {
         sessionContextStore.load(sessionId).ifPresent(context -> {
             if (context.getTurnNo() != null && turnNo != null && context.getTurnNo() < turnNo) {
                 return;

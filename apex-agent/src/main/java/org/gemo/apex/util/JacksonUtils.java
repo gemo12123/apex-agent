@@ -43,6 +43,9 @@ public class JacksonUtils {
     static {
         com.fasterxml.jackson.databind.module.SimpleModule springAiModule = new com.fasterxml.jackson.databind.module.SimpleModule();
         springAiModule.addDeserializer(org.springframework.ai.chat.messages.Message.class, new MessageDeserializer());
+        springAiModule.addDeserializer(
+                org.springframework.ai.chat.model.ChatResponse.class,
+                new ChatResponseDeserializer());
         OBJECT_MAPPER.registerModule(springAiModule);
     }
 

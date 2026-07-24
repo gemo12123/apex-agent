@@ -22,7 +22,7 @@ public class AgentSessionDialogueMessageEntity {
     private String sessionId;
 
     @TableField("turn_no")
-    private Integer turnNo;
+    private Long turnNo;
 
     @TableField("sort_no")
     private Long sortNo;

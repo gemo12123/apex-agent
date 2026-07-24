@@ -185,6 +185,39 @@ class AgentDefinitionClasspathYmlLoaderTest {
     }
 
     @Test
+    void loadShouldParseAllLifecycleHookPoints() {
+        AgentConfig global = new AgentConfig();
+        global.setAgentKey("agent-lifecycle-hooks");
+        global.setDefaultExecutionMode(ModeEnum.REACT);
+        apexGlobalProperties.setAgents(Map.of("agent-lifecycle-hooks", global));
+        when(resourceLoader.getResource("classpath:agents/agent-lifecycle-hooks/config.yml"))
+                .thenReturn(resource("""
+                        hooks:
+                          turn-start: [{bean: turnStart}]
+                          trace-start: [{bean: traceStart}]
+                          pre-model-call: [{bean: preModel}]
+                          post-model-call: [{bean: postModel}]
+                          pre-tool-call: [{bean: preTool}]
+                          post-tool-call: [{bean: postTool}]
+                          trace-end: [{bean: traceEnd}]
+                          turn-end: [{bean: turnEnd}]
+                        """));
+        stubCommonPromptAndRulesMissing("classpath:agents/agent-lifecycle-hooks/");
+        stubCommonDefaultsMissing();
+
+        AgentHooksConfig hooks = loader.load("agent-lifecycle-hooks").hooks();
+
+        assertEquals("turnStart", hooks.getTurnStart().getFirst().getBean());
+        assertEquals("traceStart", hooks.getTraceStart().getFirst().getBean());
+        assertEquals("preModel", hooks.getPreModelCall().getFirst().getBean());
+        assertEquals("postModel", hooks.getPostModelCall().getFirst().getBean());
+        assertEquals("preTool", hooks.getPreToolCall().getFirst().getBean());
+        assertEquals("postTool", hooks.getPostToolCall().getFirst().getBean());
+        assertEquals("traceEnd", hooks.getTraceEnd().getFirst().getBean());
+        assertEquals("turnEnd", hooks.getTurnEnd().getFirst().getBean());
+    }
+
+    @Test
     void loadShouldFailWhenWorkspaceConfigIsInvalid() {
         AgentConfig global = new AgentConfig();
         global.setAgentKey("agent-3");

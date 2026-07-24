@@ -22,15 +22,28 @@ public interface SessionContextStore {
      */
     void save(SuperAgentContext context);
 
-    void appendDialogueMessages(String sessionId, Integer turnNo, Long baseSortNo, List<Message> messages);
+    void appendDialogueMessages(String sessionId, Long turnNo, Long baseSortNo, List<Message> messages);
+
+    default void appendDialogueMessages(String sessionId, Integer turnNo, Long baseSortNo, List<Message> messages) {
+        appendDialogueMessages(sessionId, turnNo != null ? turnNo.longValue() : null, baseSortNo, messages);
+    }
 
     List<Message> loadAllRawDialogueMessages(String sessionId);
 
     List<SkillSessionMessage> loadSkillSessionMessages(String sessionId);
 
-    int countUncompactedMessagesBeforeTurn(String sessionId, Integer turnNo);
+    int countUncompactedMessagesBeforeTurn(String sessionId, Long turnNo);
 
-    void compactDialogue(String sessionId, Message summaryMessage, Long compactedToSortNo, Integer turnNo);
+    default int countUncompactedMessagesBeforeTurn(String sessionId, Integer turnNo) {
+        return countUncompactedMessagesBeforeTurn(sessionId, turnNo != null ? turnNo.longValue() : null);
+    }
+
+    void compactDialogue(String sessionId, Message summaryMessage, Long compactedToSortNo, Long turnNo);
+
+    default void compactDialogue(String sessionId, Message summaryMessage, Long compactedToSortNo, Integer turnNo) {
+        compactDialogue(sessionId, summaryMessage, compactedToSortNo,
+                turnNo != null ? turnNo.longValue() : null);
+    }
 
     /**
      * 删除上下文。

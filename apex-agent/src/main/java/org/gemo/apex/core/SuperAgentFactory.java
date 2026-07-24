@@ -11,7 +11,16 @@ import org.gemo.apex.domain.dto.ChatRequest;
 import org.gemo.apex.memory.conversation.ConversationMemoryManager;
 import org.gemo.apex.memory.session.SessionContextStore;
 import org.gemo.apex.memory.write.MemoryLifecycleManager;
+import org.gemo.apex.definition.agent.IAgentDefinitionLoader;
+import org.gemo.apex.hook.lifecycle.AgentExecutionStore;
+import org.gemo.apex.hook.lifecycle.AgentLifecycleHookRuntime;
+import org.gemo.apex.hook.lifecycle.HookDispatchResult;
+import org.gemo.apex.hook.lifecycle.InMemoryAgentExecutionStore;
+import org.gemo.apex.config.model.AgentHooksConfig;
+import org.gemo.apex.constant.ModeEnum;
+import org.gemo.apex.definition.agent.AgentDefinition;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.Map;
@@ -29,6 +38,9 @@ public class SuperAgentFactory {
     private final ConversationMemoryManager conversationMemoryManager;
     private final SessionContextStore sessionContextStore;
     private final MemoryLifecycleManager memoryLifecycleManager;
+    private final IAgentDefinitionLoader agentDefinitionLoader;
+    private final AgentLifecycleHookRuntime lifecycleHookRuntime;
+    private final AgentExecutionStore agentExecutionStore;
 
     public SuperAgentFactory(SuperAgentSessionService sessionService,
             HumanInLoopResumer humanInLoopResumer,
@@ -40,6 +52,36 @@ public class SuperAgentFactory {
             ConversationMemoryManager conversationMemoryManager,
             SessionContextStore sessionContextStore,
             MemoryLifecycleManager memoryLifecycleManager) {
+        this(sessionService,
+                humanInLoopResumer,
+                stageToolResolver,
+                agentPromptAssembler,
+                modelResponseStreamer,
+                toolInterceptor,
+                toolCallProcessor,
+                conversationMemoryManager,
+                sessionContextStore,
+                memoryLifecycleManager,
+                agentKey -> new AgentDefinition(agentKey, ModeEnum.REACT, java.util.List.of(), java.util.List.of(),
+                        java.util.List.of(), AgentHooksConfig.empty(), "", "", "", ""),
+                (point, runtime, skipped) -> HookDispatchResult.continued(),
+                new InMemoryAgentExecutionStore());
+    }
+
+    @Autowired
+    public SuperAgentFactory(SuperAgentSessionService sessionService,
+            HumanInLoopResumer humanInLoopResumer,
+            StageToolResolver stageToolResolver,
+            AgentPromptAssembler agentPromptAssembler,
+            ModelResponseStreamer modelResponseStreamer,
+            ToolInterceptor toolInterceptor,
+            ToolCallProcessor toolCallProcessor,
+            ConversationMemoryManager conversationMemoryManager,
+            SessionContextStore sessionContextStore,
+            MemoryLifecycleManager memoryLifecycleManager,
+            IAgentDefinitionLoader agentDefinitionLoader,
+            AgentLifecycleHookRuntime lifecycleHookRuntime,
+            AgentExecutionStore agentExecutionStore) {
         this.sessionService = sessionService;
         this.humanInLoopResumer = humanInLoopResumer;
         this.stageToolResolver = stageToolResolver;
@@ -50,6 +92,9 @@ public class SuperAgentFactory {
         this.conversationMemoryManager = conversationMemoryManager;
         this.sessionContextStore = sessionContextStore;
         this.memoryLifecycleManager = memoryLifecycleManager;
+        this.agentDefinitionLoader = agentDefinitionLoader;
+        this.lifecycleHookRuntime = lifecycleHookRuntime;
+        this.agentExecutionStore = agentExecutionStore;
     }
 
     public SuperAgent create(ChatRequest request, SseEmitter emitter) {
@@ -94,6 +139,9 @@ public class SuperAgentFactory {
                 toolCallProcessor,
                 conversationMemoryManager,
                 sessionContextStore,
-                memoryLifecycleManager);
+                memoryLifecycleManager,
+                agentDefinitionLoader,
+                lifecycleHookRuntime,
+                agentExecutionStore);
     }
 }

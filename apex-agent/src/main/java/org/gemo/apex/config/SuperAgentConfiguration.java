@@ -2,7 +2,6 @@ package org.gemo.apex.config;
 
 import org.gemo.apex.component.CustomToolCallingManager;
 import org.gemo.apex.component.ToolInvocationNotifier;
-import org.gemo.apex.hook.AgentHookRuntime;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.model.tool.ToolCallingManager;
@@ -24,11 +23,9 @@ public class SuperAgentConfiguration {
     }
 
     @Bean
-    public ToolCallingManager toolCallingManager(ToolInvocationNotifier toolInvocationNotifier,
-            AgentHookRuntime agentHookRuntime){
+    public ToolCallingManager toolCallingManager(ToolInvocationNotifier toolInvocationNotifier){
         return CustomToolCallingManager.builder()
                 .toolInvocationNotifier(toolInvocationNotifier)
-                .agentHookRuntime(agentHookRuntime)
                 .build();
     }
 }

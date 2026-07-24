@@ -14,6 +14,9 @@ import org.gemo.apex.memory.persistence.repository.MemoryWriteRepository;
 import org.gemo.apex.memory.session.InMemorySessionContextStore;
 import org.gemo.apex.memory.session.JdbcSessionContextStore;
 import org.gemo.apex.memory.session.SessionContextStore;
+import org.gemo.apex.hook.lifecycle.AgentExecutionStore;
+import org.gemo.apex.hook.lifecycle.InMemoryAgentExecutionStore;
+import org.gemo.apex.hook.lifecycle.JdbcAgentExecutionStore;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -48,6 +51,17 @@ public class MemoryConfiguration {
             return jdbcSessionContextStoreProvider.getIfAvailable();
         }
         return inMemorySessionContextStore;
+    }
+
+    @Bean
+    @Primary
+    public AgentExecutionStore agentExecutionStore(MemoryProperties properties,
+            InMemoryAgentExecutionStore inMemoryAgentExecutionStore,
+            ObjectProvider<JdbcAgentExecutionStore> jdbcAgentExecutionStoreProvider) {
+        if ("jdbc".equalsIgnoreCase(properties.getStore().getType())) {
+            return jdbcAgentExecutionStoreProvider.getIfAvailable();
+        }
+        return inMemoryAgentExecutionStore;
     }
 
     @Bean

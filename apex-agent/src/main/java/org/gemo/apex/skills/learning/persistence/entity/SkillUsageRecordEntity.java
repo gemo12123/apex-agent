@@ -25,7 +25,7 @@ public class SkillUsageRecordEntity {
     private String sessionId;
 
     @TableField("turn_no")
-    private Integer turnNo;
+    private Long turnNo;
 
     @TableField("activation_message_sort_no")
     private Long activationMessageSortNo;

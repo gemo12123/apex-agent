@@ -1,5 +1,41 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 
+CREATE SEQUENCE IF NOT EXISTS agent_turn_no_seq;
+
+CREATE TABLE IF NOT EXISTS agent_turn (
+    turn_no BIGINT PRIMARY KEY DEFAULT nextval('agent_turn_no_seq'),
+    session_id VARCHAR(64) NOT NULL,
+    user_id VARCHAR(64),
+    agent_key VARCHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    last_trace_no INT NOT NULL DEFAULT 0,
+    hook_executions TEXT,
+    message_mutations TEXT,
+    start_time TIMESTAMP NOT NULL,
+    end_time TIMESTAMP,
+    update_time TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_turn_session
+    ON agent_turn(session_id, turn_no);
+
+ALTER TABLE agent_turn
+    ADD COLUMN IF NOT EXISTS message_mutations TEXT;
+
+CREATE TABLE IF NOT EXISTS agent_trace (
+    turn_no BIGINT NOT NULL,
+    trace_no INT NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    trace_payload TEXT NOT NULL,
+    start_time TIMESTAMP NOT NULL,
+    end_time TIMESTAMP,
+    update_time TIMESTAMP NOT NULL,
+    PRIMARY KEY (turn_no, trace_no)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_trace_turn
+    ON agent_trace(turn_no, trace_no);
+
 CREATE TABLE IF NOT EXISTS agent_session (
     session_id VARCHAR(64) PRIMARY KEY,
     user_id VARCHAR(64) NOT NULL,
@@ -17,7 +53,7 @@ CREATE TABLE IF NOT EXISTS agent_session (
 CREATE TABLE IF NOT EXISTS agent_session_dialogue_message (
     id BIGINT PRIMARY KEY,
     session_id VARCHAR(64) NOT NULL,
-    turn_no INT,
+    turn_no BIGINT,
     sort_no BIGINT NOT NULL,
     role VARCHAR(32),
     message_type VARCHAR(64),
@@ -52,7 +88,7 @@ CREATE TABLE IF NOT EXISTS agent_session_dialogue_summary (
     content TEXT,
     token_count INT,
     compacted_to_sort_no BIGINT,
-    source_turn_no INT,
+    source_turn_no BIGINT,
     version_no BIGINT,
     message_payload TEXT,
     search_text TEXT,
@@ -102,7 +138,7 @@ CREATE TABLE IF NOT EXISTS user_execution_history_memory (
     end_time TIMESTAMP,
     structured_payload TEXT,
     confidence DECIMAL(5, 4),
-    last_turn_no INT,
+    last_turn_no BIGINT,
     version_no BIGINT,
     status VARCHAR(32) NOT NULL,
     source_session_id VARCHAR(64),
@@ -150,7 +186,7 @@ CREATE TABLE IF NOT EXISTS skill_usage_record (
     agent_key VARCHAR(64) NOT NULL,
     skill_name VARCHAR(128) NOT NULL,
     session_id VARCHAR(64) NOT NULL,
-    turn_no INT,
+    turn_no BIGINT,
     activation_message_sort_no BIGINT NOT NULL,
     created_time TIMESTAMP NOT NULL
 );
@@ -166,6 +202,15 @@ CREATE TABLE IF NOT EXISTS skill_experience_memory (
     version_no BIGINT NOT NULL,
     create_time TIMESTAMP NOT NULL,
     update_time TIMESTAMP NOT NULL
+);
+
+SELECT setval(
+    'agent_turn_no_seq',
+    GREATEST(
+        COALESCE((SELECT MAX(turn_no) FROM agent_session_dialogue_message), 0),
+        COALESCE((SELECT MAX(turn_no) FROM agent_turn), 0)
+    ) + 1,
+    false
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_skill_experience_memory_agent_skill

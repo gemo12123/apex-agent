@@ -23,7 +23,7 @@ public class PostgresSessionSearchRepository implements SessionSearchRepository 
                     rs.getString("source_type"),
                     rs.getString("session_id"),
                     rs.getString("message_id"),
-                    (Integer) rs.getObject("turn_no"),
+                    rs.getObject("turn_no") != null ? rs.getLong("turn_no") : null,
                     (Long) rs.getObject("sort_no"),
                     rs.getString("role"),
                     rs.getDouble("hybrid_score"),

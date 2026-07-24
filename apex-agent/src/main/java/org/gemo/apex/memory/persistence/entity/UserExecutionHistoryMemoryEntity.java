@@ -50,7 +50,7 @@ public class UserExecutionHistoryMemoryEntity {
     private BigDecimal confidence;
 
     @TableField("last_turn_no")
-    private Integer lastTurnNo;
+    private Long lastTurnNo;
 
     @TableField("version_no")
     private Long versionNo;

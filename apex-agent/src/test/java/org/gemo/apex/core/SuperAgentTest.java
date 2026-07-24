@@ -11,6 +11,7 @@ import org.gemo.apex.core.engine.StageToolResolver;
 import org.gemo.apex.core.engine.ToolCallProcessingResult;
 import org.gemo.apex.core.engine.ToolCallProcessor;
 import org.gemo.apex.exception.HumanInTheLoopException;
+import org.gemo.apex.hook.lifecycle.AgentRuntimeContext;
 import org.gemo.apex.memory.conversation.ConversationMemoryManager;
 import org.gemo.apex.memory.session.SessionContextStore;
 import org.gemo.apex.memory.write.MemoryLifecycleManager;
@@ -30,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -81,6 +83,8 @@ class SuperAgentTest {
         when(agentPromptAssembler.assemble(any(), any())).thenReturn(new Prompt(List.of()));
         when(toolInterceptor.interceptIllegalToolCalls(any(), any())).thenReturn(null);
         when(toolCallProcessor.process(any(), any(), any(), any())).thenReturn(ToolCallProcessingResult.continueLoop());
+        when(toolCallProcessor.process(any(), any(), any(), any(), any()))
+                .thenReturn(ToolCallProcessingResult.continueLoop());
         superAgent = new SuperAgent(
                 context,
                 humanInLoopResumer,
@@ -101,7 +105,7 @@ class SuperAgentTest {
         superAgent.run();
 
         assertEquals(ExecutionStatus.COMPLETED, context.getExecutionStatus());
-        verify(humanInLoopResumer).resume(context);
+        verify(humanInLoopResumer).resume(same(context), any());
         verify(conversationMemoryManager).appendDialogueMessage(any(), any(AssistantMessage.class));
         verify(sessionContextStore).save(context);
         verify(memoryLifecycleManager).onTurnCompleted(context);
@@ -139,7 +143,7 @@ class SuperAgentTest {
 
         assertEquals(ExecutionStatus.HUMAN_IN_THE_LOOP, context.getExecutionStatus());
         verify(sessionContextStore, times(1)).save(context);
-        verify(memoryLifecycleManager, times(1)).onTurnCompleted(context);
+        verify(memoryLifecycleManager, never()).onTurnCompleted(context);
     }
 
     @Test
@@ -151,6 +155,54 @@ class SuperAgentTest {
         assertEquals(ExecutionStatus.FAILED, context.getExecutionStatus());
         verify(sessionContextStore).save(context);
         verify(memoryLifecycleManager).onTurnCompleted(context);
+    }
+
+    @Test
+    void runShouldResumeOutstandingToolCallsInSameTrace() {
+        AssistantMessage toolCallingMessage = AssistantMessage.builder()
+                .toolCalls(List.of(
+                        new AssistantMessage.ToolCall("call-1", "function", "meeting_tool", "{}"),
+                        new AssistantMessage.ToolCall("call-2", "function", "notify_tool", "{}")))
+                .build();
+        ToolResponseMessage firstResponse = ToolResponseMessage.builder()
+                .responses(List.of(new ToolResponseMessage.ToolResponse(
+                        "call-1", "meeting_tool", "approved")))
+                .build();
+        context.setTurnNo(1L);
+        context.setTraceNo(1);
+        context.setExecutionStatus(ExecutionStatus.HUMAN_IN_THE_LOOP);
+        context.setWorkingMessages(new java.util.ArrayList<>(List.of(toolCallingMessage)));
+        context.setDialogueMessages(new java.util.ArrayList<>());
+        doAnswer(invocation -> {
+            AgentRuntimeContext runtime = invocation.getArgument(1);
+            runtime.getWorkingMessages().add(firstResponse);
+            context.getDialogueMessages().add(firstResponse);
+            context.setExecutionStatus(ExecutionStatus.IN_PROGRESS);
+            return null;
+        }).when(humanInLoopResumer).resume(same(context), any());
+        when(agentPromptAssembler.assembleToolExecutionPrompt(same(context), any())).thenReturn(new Prompt(List.of()));
+        when(modelResponseStreamer.stream(any(), same(context))).thenReturn(response("done"));
+
+        superAgent.run();
+
+        verify(toolCallProcessor).process(
+                any(),
+                argThat(message -> message.getToolCalls().size() == 1
+                        && "call-2".equals(message.getToolCalls().getFirst().id())),
+                same(context),
+                same(context.getCurrentStage()),
+                any());
+        assertEquals(ExecutionStatus.COMPLETED, context.getExecutionStatus());
+    }
+
+    @Test
+    void runShouldResetActiveSkillsAfterTurnCompletion() {
+        context.setActiveSkillNames(new java.util.ArrayList<>(List.of("meeting-skill")));
+        when(modelResponseStreamer.stream(any(), same(context))).thenReturn(response("done"));
+
+        superAgent.run();
+
+        assertEquals(List.of(), context.getActiveSkillNames());
     }
 
     private ChatResponse response(String text) {

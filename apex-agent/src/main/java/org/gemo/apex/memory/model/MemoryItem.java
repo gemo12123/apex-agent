@@ -108,7 +108,7 @@ public class MemoryItem {
     /**
      * 最近写入轮次。
      */
-    private Integer turnNo;
+    private Long turnNo;
 
     /**
      * 乐观锁版本。

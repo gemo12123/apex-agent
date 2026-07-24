@@ -11,6 +11,8 @@ import org.gemo.apex.exception.SessionResumeNotAllowedException;
 import org.gemo.apex.memory.context.UserContextHolder;
 import org.gemo.apex.memory.recall.MemoryRecallService;
 import org.gemo.apex.memory.session.SessionContextStore;
+import org.gemo.apex.hook.lifecycle.AgentExecutionStore;
+import org.gemo.apex.hook.lifecycle.InMemoryAgentExecutionStore;
 import org.gemo.apex.skills.Skills;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.tool.ToolCallback;
@@ -43,6 +45,9 @@ public class SuperAgentSessionService {
 
     @Autowired
     private MemoryRecallService memoryRecallService;
+
+    @Autowired(required = false)
+    private AgentExecutionStore agentExecutionStore = new InMemoryAgentExecutionStore();
 
     @Transactional
     public SuperAgentContext createContext(String sessionId, String agentKey, String userQuery) {
@@ -87,7 +92,7 @@ public class SuperAgentSessionService {
         log.info("创建全新会话上下文: sessionId={}, agentKey={}", sessionId, agentKey);
         SuperAgentContext context = new SuperAgentContext();
         context.setSessionId(sessionId);
-        context.setTurnNo(0);
+        context.setTurnNo(0L);
         return initializeNewTurn(context, sessionId, agentKey, userId, userQuery);
     }
 
@@ -127,7 +132,10 @@ public class SuperAgentSessionService {
         context.setCurrentStageId(null);
         context.setExecutionStatus(ExecutionStatus.IN_PROGRESS);
         context.setPendingToolResult(null);
-        context.setTurnNo(context.getTurnNo() != null ? context.getTurnNo() + 1 : 1);
+        context.setTurnNo(agentExecutionStore.nextTurnNo());
+        context.setTraceNo(0);
+        context.setActiveSkillNames(new java.util.ArrayList<>());
+        context.setWorkingMessages(new java.util.ArrayList<>());
         context.setTurnStartSortNo(context.getLatestCompressedSortNo());
         context.setPersistedDialogueMessageIndex(context.getDialogueMessages().size());
 

@@ -65,7 +65,7 @@ class AgentPromptAssemblerTest {
         assertEquals("stage-1", snapshot.get("currentStageId"));
         assertEquals("react", snapshot.get("executionMode"));
         assertEquals("IN_PROGRESS", snapshot.get("executionStatus"));
-        assertEquals(3, snapshot.get("turnNo"));
+        assertEquals(3L, snapshot.get("turnNo"));
         assertFalse(snapshot.containsKey("lastActiveTime"));
     }
 }
