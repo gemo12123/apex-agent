@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.tool.ToolCallback;
 
 @Component
 public class AgentPromptAssembler {
@@ -29,16 +30,26 @@ public class AgentPromptAssembler {
     }
 
     public List<Message> prepareWorkingMessages(SuperAgentContext context, StageToolPlan toolPlan) {
-        String stageSystemPrompt = stagePromptBuilder.build(context, toolPlan.promptDescribedTools());
-        conversationMemoryManager.refreshFixedMessages(context, stageSystemPrompt);
+        refreshFixedMessages(context, toolPlan);
         conversationMemoryManager.compactIfNeeded(context);
         return new java.util.ArrayList<>(conversationMemoryManager.buildModelMessages(context));
     }
 
+    public List<Message> refreshFixedMessages(SuperAgentContext context, StageToolPlan toolPlan) {
+        String stageSystemPrompt = stagePromptBuilder.build(context, toolPlan.promptDescribedTools());
+        conversationMemoryManager.refreshFixedMessages(context, stageSystemPrompt);
+        return new java.util.ArrayList<>(context.getFixedMessages());
+    }
+
     public Prompt assemble(SuperAgentContext context, StageToolPlan toolPlan, List<Message> workingMessages) {
+        return assemble(context, toolPlan, workingMessages, toolPlan.callableTools());
+    }
+
+    public Prompt assemble(SuperAgentContext context, StageToolPlan toolPlan, List<Message> workingMessages,
+            List<ToolCallback> enabledTools) {
         DashScopeChatOptions options = DashScopeChatOptions.builder()
                 .withInternalToolExecutionEnabled(false)
-                .withToolCallbacks(toolPlan.callableTools())
+                .withToolCallbacks(enabledTools != null ? enabledTools : List.of())
                 .withToolContext(buildToolContext(context, Map.of()))
                 .withMultiModel(true)
                 .build();

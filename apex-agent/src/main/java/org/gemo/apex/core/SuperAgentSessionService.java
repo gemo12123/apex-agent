@@ -135,6 +135,7 @@ public class SuperAgentSessionService {
         context.setTurnNo(agentExecutionStore.nextTurnNo());
         context.setTraceNo(0);
         context.setActiveSkillNames(new java.util.ArrayList<>());
+        context.setEnabledToolNames(new java.util.ArrayList<>());
         context.setWorkingMessages(new java.util.ArrayList<>());
         context.setTurnStartSortNo(context.getLatestCompressedSortNo());
         context.setPersistedDialogueMessageIndex(context.getDialogueMessages().size());

@@ -71,6 +71,7 @@ class InMemorySessionContextStoreTest {
         assertFalse(runtimeSnapshot.containsKey("persistedDialogueMessageIndex"));
         assertFalse(runtimeSnapshot.containsKey("nextMessageSortNo"));
         assertEquals(2, ((Number) runtimeSnapshot.get("turnNo")).longValue());
+        assertEquals(List.of("meeting_tool"), runtimeSnapshot.get("enabledToolNames"));
 
         context.setAgentKey("agent-mutated");
         context.setPendingToolResult(Map.of("approved", false));
@@ -116,6 +117,7 @@ class InMemorySessionContextStoreTest {
         assertTrue(loaded.getAvailableTools().isEmpty());
         assertNull(loaded.getSkills());
         assertNull(loaded.getSseEmitter());
+        assertEquals(List.of("meeting_tool"), loaded.getEnabledToolNames());
 
         loaded.setAgentKey("agent-after-load");
         loaded.setPendingToolResult(Map.of("approved", "changed"));
@@ -281,6 +283,7 @@ class InMemorySessionContextStoreTest {
         context.setPlan(buildPlan());
         context.setFixedMessages(new ArrayList<>(List.of(new SystemMessage("fixed-1"))));
         context.setAvailableTools(new ArrayList<>(List.of(mock(ToolCallback.class))));
+        context.setEnabledToolNames(new ArrayList<>(List.of("meeting_tool")));
         context.setSkills(Skills.from(Skill.builder()
                 .name("demo-skill")
                 .description("demo description")

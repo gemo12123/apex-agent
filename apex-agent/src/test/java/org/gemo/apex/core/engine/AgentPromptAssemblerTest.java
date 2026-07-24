@@ -9,6 +9,8 @@ import org.gemo.apex.memory.conversation.ConversationMemoryManager;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.definition.DefaultToolDefinition;
 
 import java.util.List;
 import java.util.Map;
@@ -67,5 +69,29 @@ class AgentPromptAssemblerTest {
         assertEquals("IN_PROGRESS", snapshot.get("executionStatus"));
         assertEquals(3L, snapshot.get("turnNo"));
         assertFalse(snapshot.containsKey("lastActiveTime"));
+    }
+
+    @Test
+    void assembleShouldUseEnabledToolsAfterHookAdjustment() {
+        ConversationMemoryManager conversationMemoryManager = mock(ConversationMemoryManager.class);
+        StagePromptBuilder stagePromptBuilder = mock(StagePromptBuilder.class);
+        AgentPromptAssembler assembler = new AgentPromptAssembler(conversationMemoryManager, stagePromptBuilder);
+        ToolCallback configuredTool = mock(ToolCallback.class);
+        when(configuredTool.getToolDefinition()).thenReturn(DefaultToolDefinition.builder()
+                .name("meeting_tool")
+                .description("meeting")
+                .inputSchema("{}")
+                .build());
+        SuperAgentContext context = new SuperAgentContext();
+        StageToolPlan plan = new StageToolPlan(List.of(configuredTool), List.of(configuredTool));
+
+        Prompt prompt = assembler.assemble(
+                context,
+                plan,
+                List.of(new UserMessage("hello")),
+                List.of());
+
+        DashScopeChatOptions options = (DashScopeChatOptions) prompt.getOptions();
+        assertEquals(List.of(), options.getToolCallbacks());
     }
 }

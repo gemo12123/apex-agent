@@ -15,6 +15,8 @@ public class PostToolCallHookContext {
     private String toolCallId;
     private String invocationId;
     private String toolName;
+    private String toolDescription;
+    private String toolType;
     private String rawArguments;
     private Map<String, Object> arguments;
     private Map<String, Object> hookOptions;

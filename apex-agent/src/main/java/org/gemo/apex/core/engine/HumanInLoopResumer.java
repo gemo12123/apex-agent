@@ -15,6 +15,7 @@ import org.gemo.apex.hook.lifecycle.HookDispatchResult;
 import org.gemo.apex.hook.lifecycle.HookFlowAction;
 import org.gemo.apex.hook.lifecycle.HookPoint;
 import org.gemo.apex.hook.lifecycle.ToolCallRecord;
+import org.gemo.apex.tool.metadata.CustomToolMetadata;
 import org.gemo.apex.util.JacksonUtils;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -22,6 +23,7 @@ import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.util.CollectionUtils;
 
 import java.util.ArrayList;
@@ -163,7 +165,12 @@ public class HumanInLoopResumer {
             AssistantMessage.ToolCall resumedCall = assistantMessage.getToolCalls().getFirst();
             if (runtimeContext != null) {
                 runtimeContext.setCurrentToolCall(resumedCall);
+                runtimeContext.setCurrentInvocationId(pendingExecution.getInvocationId());
                 runtimeContext.setCurrentToolArguments(new LinkedHashMap<>(mergedArguments));
+                runtimeContext.setCurrentToolOriginalResult(null);
+                runtimeContext.setCurrentToolResult(null);
+                runtimeContext.setCurrentToolExecutionSucceeded(false);
+                populateToolMetadata(runtimeContext, pendingExecution.getToolName());
                 HookDispatchResult remainingPreHooks = lifecycleHookRuntime.run(
                         HookPoint.PRE_TOOL_CALL,
                         runtimeContext,
@@ -184,6 +191,7 @@ public class HumanInLoopResumer {
                     conversationMemoryManager.appendDialogueMessage(context, stoppedResponse);
                     runtimeContext.getWorkingMessages().add(stoppedResponse);
                     runtimeContext.getTrace().setFlowAction(preResult.getAction());
+                    recordToolCall(runtimeContext, pendingExecution, false, preResult.getAction(), reason);
                     clearPendingState(context);
                     return;
                 }
@@ -198,16 +206,50 @@ public class HumanInLoopResumer {
                         .build();
             }
 
+            if (runtimeContext != null && !isToolEnabled(runtimeContext, pendingExecution.getToolName())) {
+                String reason = JacksonUtils.toJson(Map.of(
+                        "status", "blocked",
+                        "reason", "tool disabled by lifecycle hook",
+                        "tool", pendingExecution.getToolName()));
+                ToolResponseMessage blockedResponse = ToolResponseMessage.builder()
+                        .responses(List.of(new ToolResponseMessage.ToolResponse(
+                                pendingExecution.getToolCallId(), pendingExecution.getToolName(), reason)))
+                        .build();
+                conversationMemoryManager.appendDialogueMessage(context, blockedResponse);
+                runtimeContext.getWorkingMessages().add(blockedResponse);
+                recordToolCall(runtimeContext, pendingExecution, false, HookFlowAction.BLOCK_TOOL, reason);
+                clearPendingState(context);
+                return;
+            }
+
             Prompt prompt = agentPromptAssembler.assembleToolExecutionPrompt(context, Map.of(
                     ToolContextKeys.SKIP_PRE_HOOK_BEANS,
                     pendingExecution.getExecutedPreHookBeans() != null
                             ? List.copyOf(pendingExecution.getExecutedPreHookBeans())
                             : List.of()));
-            ToolResponseMessage responseMessage = agentToolExecutor.execute(prompt, assistantMessage);
+            ToolResponseMessage responseMessage;
+            boolean succeeded = false;
+            String error = null;
+            try {
+                ToolExecutionPromptSupport.PreparedToolExecutionPrompt preparedPrompt =
+                        ToolExecutionPromptSupport.prepare(prompt, pendingExecution.getInvocationId());
+                responseMessage = agentToolExecutor.execute(
+                        preparedPrompt.prompt(),
+                        assistantMessage);
+                succeeded = preparedPrompt.outcome().isSucceeded();
+                error = preparedPrompt.outcome().getError();
+            } catch (Exception ex) {
+                error = "工具调用异常，请检查参数。错误: " + ex.getMessage();
+                responseMessage = ToolResponseMessage.builder()
+                        .responses(List.of(new ToolResponseMessage.ToolResponse(
+                                pendingExecution.getToolCallId(), pendingExecution.getToolName(), error)))
+                        .build();
+            }
             if (runtimeContext != null && !responseMessage.getResponses().isEmpty()) {
                 String rawResult = responseMessage.getResponses().getFirst().responseData();
                 runtimeContext.setCurrentToolOriginalResult(rawResult);
                 runtimeContext.setCurrentToolResult(rawResult);
+                runtimeContext.setCurrentToolExecutionSucceeded(succeeded);
                 HookDispatchResult postDispatch = lifecycleHookRuntime.run(HookPoint.POST_TOOL_CALL, runtimeContext);
                 String finalResult = runtimeContext.getCurrentToolResult();
                 responseMessage = ToolResponseMessage.builder()
@@ -223,8 +265,9 @@ public class HumanInLoopResumer {
                         .arguments(new LinkedHashMap<>(runtimeContext.getCurrentToolArguments()))
                         .originalResult(rawResult)
                         .finalResult(finalResult)
-                        .succeeded(true)
+                        .succeeded(succeeded)
                         .action(postDispatch.getResult().getAction())
+                        .error(error)
                         .build();
                 runtimeContext.getTrace().getToolCalls().add(record);
                 runtimeContext.getTurnToolCalls().add(record);
@@ -259,6 +302,42 @@ public class HumanInLoopResumer {
         }
 
         clearPendingState(context);
+    }
+
+    private void populateToolMetadata(AgentRuntimeContext runtimeContext, String toolName) {
+        ToolCallback callback = runtimeContext.getAvailableTools().stream()
+                .filter(tool -> toolName.equals(tool.getToolDefinition().name()))
+                .findFirst()
+                .orElse(null);
+        runtimeContext.setCurrentToolDescription(callback != null
+                ? callback.getToolDefinition().description()
+                : null);
+        runtimeContext.setCurrentToolType(callback != null
+                && callback.getToolMetadata() instanceof CustomToolMetadata metadata
+                        ? metadata.getType()
+                        : null);
+    }
+
+    private boolean isToolEnabled(AgentRuntimeContext runtimeContext, String toolName) {
+        return runtimeContext.getEnabledTools().stream()
+                .anyMatch(tool -> toolName.equals(tool.getToolDefinition().name()));
+    }
+
+    private void recordToolCall(AgentRuntimeContext runtimeContext, PendingToolExecution pendingExecution,
+            boolean succeeded, HookFlowAction action, String error) {
+        ToolCallRecord record = ToolCallRecord.builder()
+                .toolCallId(pendingExecution.getToolCallId())
+                .invocationId(pendingExecution.getInvocationId())
+                .toolName(pendingExecution.getToolName())
+                .arguments(new LinkedHashMap<>(runtimeContext.getCurrentToolArguments()))
+                .originalResult(runtimeContext.getCurrentToolOriginalResult())
+                .finalResult(runtimeContext.getCurrentToolResult())
+                .succeeded(succeeded)
+                .action(action)
+                .error(error)
+                .build();
+        runtimeContext.getTrace().getToolCalls().add(record);
+        runtimeContext.getTurnToolCalls().add(record);
     }
 
     private void clearPendingState(SuperAgentContext context) {

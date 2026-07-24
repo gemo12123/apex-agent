@@ -145,7 +145,10 @@ public class DefaultAgentLifecycleHookRuntime implements AgentLifecycleHookRunti
                 .sessionId(session.getSessionId())
                 .userId(session.getUserId())
                 .toolCallId(call != null ? call.id() : null)
+                .invocationId(runtime.getCurrentInvocationId())
                 .toolName(call != null ? call.name() : null)
+                .toolDescription(runtime.getCurrentToolDescription())
+                .toolType(runtime.getCurrentToolType())
                 .rawArguments(call != null ? call.arguments() : null)
                 .arguments(new LinkedHashMap<>(runtime.getCurrentToolArguments()))
                 .hookOptions(binding.getOptions())
@@ -161,14 +164,17 @@ public class DefaultAgentLifecycleHookRuntime implements AgentLifecycleHookRunti
                 .sessionId(session.getSessionId())
                 .userId(session.getUserId())
                 .toolCallId(call != null ? call.id() : null)
+                .invocationId(runtime.getCurrentInvocationId())
                 .toolName(call != null ? call.name() : null)
+                .toolDescription(runtime.getCurrentToolDescription())
+                .toolType(runtime.getCurrentToolType())
                 .rawArguments(call != null ? call.arguments() : null)
                 .arguments(new LinkedHashMap<>(runtime.getCurrentToolArguments()))
                 .hookOptions(binding.getOptions())
                 .hookSource(binding.getBean())
                 .originalResult(runtime.getCurrentToolOriginalResult())
                 .currentResult(runtime.getCurrentToolResult())
-                .toolExecutionSucceeded(true)
+                .toolExecutionSucceeded(runtime.isCurrentToolExecutionSucceeded())
                 .superAgentContext(session)
                 .build();
     }
@@ -220,6 +226,9 @@ public class DefaultAgentLifecycleHookRuntime implements AgentLifecycleHookRunti
                 case DELETE -> {
                     validateIndex(messages, operation.getIndex());
                     record.setBeforeMessage(messages.remove(operation.getIndex().intValue()));
+                    if (operation.getIndex() < context.getFixedMessageCount()) {
+                        context.setFixedMessageCount(context.getFixedMessageCount() - 1);
+                    }
                 }
                 case REPLACE -> {
                     validateIndex(messages, operation.getIndex());

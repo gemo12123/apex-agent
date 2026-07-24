@@ -3,6 +3,7 @@ package org.gemo.apex.component;
 import org.gemo.apex.constant.ExecutionStatus;
 import org.gemo.apex.constant.ToolContextKeys;
 import org.gemo.apex.context.SuperAgentContext;
+import org.gemo.apex.core.engine.ToolExecutionOutcome;
 import org.gemo.apex.exception.HumanInTheLoopException;
 import org.gemo.apex.hook.AgentHookRuntime;
 import org.gemo.apex.hook.tool.PostToolCallHookResult;
@@ -22,6 +23,7 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
 import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.ai.tool.metadata.ToolMetadata;
+import org.springframework.ai.tool.execution.ToolExecutionException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
@@ -35,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -62,7 +65,8 @@ class CustomToolCallingManagerTest {
         ToolCallingChatOptions chatOptions = Mockito.mock(ToolCallingChatOptions.class);
         when(chatOptions.getToolCallbacks()).thenReturn(List.of(toolCallback));
         when(chatOptions.getToolNames()).thenReturn(Set.of());
-        when(chatOptions.getToolContext()).thenReturn(Map.of());
+        when(chatOptions.getToolContext()).thenReturn(Map.of(
+                ToolContextKeys.INVOCATION_ID, "invocation-main"));
 
         Prompt prompt = new Prompt(List.of(new UserMessage("hello")), chatOptions);
         AssistantMessage assistantMessage = AssistantMessage.builder()
@@ -78,8 +82,8 @@ class CustomToolCallingManagerTest {
         assertEquals(AssistantMessage.class, result.conversationHistory().get(1).getClass());
         assertEquals(ToolResponseMessage.class, result.conversationHistory().get(2).getClass());
         assertFalse(result.returnDirect());
-        verify(notifier, times(1)).beforeExecution(any(), any(), any());
-        verify(notifier, times(1)).afterExecution(any(), any(), any());
+        verify(notifier, times(1)).beforeExecution(any(), any(), eq("invocation-main"));
+        verify(notifier, times(1)).afterExecution(any(), any(), eq("invocation-main"));
     }
 
     @Test
@@ -137,6 +141,44 @@ class CustomToolCallingManagerTest {
         verify(hookRuntime, never()).runPreHooks(any());
         ToolResponseMessage response = (ToolResponseMessage) result.conversationHistory().get(2);
         assertEquals("should-not-run", response.getResponses().getFirst().responseData());
+    }
+
+    @Test
+    void executeToolCallsShouldExposeConvertedToolFailureOutcome() {
+        CustomToolCallingManager manager = CustomToolCallingManager.builder()
+                .toolInvocationNotifier(Mockito.mock(ToolInvocationNotifier.class))
+                .toolExecutionExceptionProcessor(exception -> "converted failure")
+                .build();
+        ToolCallback toolCallback = Mockito.mock(ToolCallback.class);
+        ToolDefinition definition = DefaultToolDefinition.builder()
+                .name("meeting_tool")
+                .description("meeting")
+                .inputSchema("{}")
+                .build();
+        when(toolCallback.getToolDefinition()).thenReturn(definition);
+        when(toolCallback.getToolMetadata()).thenReturn(ToolMetadata.builder().returnDirect(false).build());
+        when(toolCallback.call(any(String.class), any()))
+                .thenThrow(new ToolExecutionException(definition, new IllegalStateException("boom")));
+        ToolExecutionOutcome outcome = new ToolExecutionOutcome();
+        ToolCallingChatOptions chatOptions = Mockito.mock(ToolCallingChatOptions.class);
+        when(chatOptions.getToolCallbacks()).thenReturn(List.of(toolCallback));
+        when(chatOptions.getToolNames()).thenReturn(Set.of());
+        when(chatOptions.getToolContext()).thenReturn(Map.of(
+                ToolContextKeys.EXECUTION_OUTCOME, outcome,
+                ToolContextKeys.INVOCATION_ID, "invocation-failed"));
+        AssistantMessage assistantMessage = AssistantMessage.builder()
+                .toolCalls(List.of(new AssistantMessage.ToolCall(
+                        "call-1", "function", "meeting_tool", "{}")))
+                .build();
+
+        ToolExecutionResult result = manager.executeToolCalls(
+                new Prompt(List.of(new UserMessage("hello")), chatOptions),
+                new ChatResponse(List.of(new Generation(assistantMessage))));
+
+        assertFalse(outcome.isSucceeded());
+        assertEquals("converted failure",
+                ((ToolResponseMessage) result.conversationHistory().getLast())
+                        .getResponses().getFirst().responseData());
     }
 
     @Test

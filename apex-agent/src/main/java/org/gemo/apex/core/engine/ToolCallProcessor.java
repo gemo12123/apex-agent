@@ -21,6 +21,7 @@ import org.gemo.apex.memory.conversation.ConversationMemoryManager;
 import org.gemo.apex.message.AskHumanMessage;
 import org.gemo.apex.message.ToolConfirmationMessage;
 import org.gemo.apex.tool.AskHumanTool;
+import org.gemo.apex.tool.metadata.CustomToolMetadata;
 import org.gemo.apex.util.JacksonUtils;
 import org.gemo.apex.util.MessageUtils;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -29,6 +30,7 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
+import org.springframework.ai.tool.ToolCallback;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -97,10 +99,14 @@ public class ToolCallProcessor {
         Set<String> respondedCallIds = new java.util.HashSet<>();
         for (int index = 0; index < calls.size(); index++) {
             AssistantMessage.ToolCall toolCall = calls.get(index);
+            String invocationId = UUID.randomUUID().toString();
             runtimeContext.setCurrentToolCall(toolCall);
+            runtimeContext.setCurrentInvocationId(invocationId);
             runtimeContext.setCurrentToolArguments(parseArguments(toolCall.arguments()));
             runtimeContext.setCurrentToolOriginalResult(null);
             runtimeContext.setCurrentToolResult(null);
+            runtimeContext.setCurrentToolExecutionSucceeded(false);
+            populateToolMetadata(runtimeContext, toolCall.name());
 
             HookDispatchResult preDispatch = lifecycleHookRuntime.run(
                     HookPoint.PRE_TOOL_CALL,
@@ -110,13 +116,13 @@ public class ToolCallProcessor {
             HookFlowAction preAction = preResult.getAction();
 
             if (preAction == HookFlowAction.REQUEST_CONFIRMATION) {
-                suspendForConfirmation(context, runtimeContext, toolCall, index, preDispatch);
+                suspendForConfirmation(context, runtimeContext, toolCall, invocationId, index, preDispatch);
             }
             if (preAction == HookFlowAction.BLOCK_TOOL) {
                 String reason = preResult.getBlockReason() != null ? preResult.getBlockReason() : "tool blocked by hook";
                 appendToolResponse(context, runtimeContext, toolCall, reason);
                 respondedCallIds.add(toolCall.id());
-                recordToolCall(runtimeContext, toolCall, false, preAction, reason, null);
+                recordToolCall(runtimeContext, toolCall, false, preAction, reason, invocationId);
                 continue;
             }
             if (preAction == HookFlowAction.SKIP_TRACE || preAction == HookFlowAction.END_TURN) {
@@ -134,7 +140,17 @@ public class ToolCallProcessor {
                 continue;
             }
 
-            String invocationId = UUID.randomUUID().toString();
+            if (!isToolEnabled(runtimeContext, toolCall.name())) {
+                String reason = JacksonUtils.toJson(Map.of(
+                        "status", "blocked",
+                        "reason", "tool disabled by lifecycle hook",
+                        "tool", toolCall.name()));
+                appendToolResponse(context, runtimeContext, toolCall, reason);
+                respondedCallIds.add(toolCall.id());
+                recordToolCall(runtimeContext, toolCall, false, HookFlowAction.BLOCK_TOOL, reason, invocationId);
+                continue;
+            }
+
             AssistantMessage effectiveAssistant = AssistantMessage.builder()
                     .toolCalls(List.of(new AssistantMessage.ToolCall(
                             toolCall.id(),
@@ -142,40 +158,50 @@ public class ToolCallProcessor {
                             toolCall.name(),
                             JacksonUtils.toJson(runtimeContext.getCurrentToolArguments()))))
                     .build();
+            boolean succeeded = false;
+            String error = null;
             try {
-                ToolResponseMessage rawResponse = agentToolExecutor.execute(input, effectiveAssistant);
+                ToolExecutionPromptSupport.PreparedToolExecutionPrompt preparedPrompt =
+                        ToolExecutionPromptSupport.prepare(input, invocationId);
+                ToolResponseMessage rawResponse = agentToolExecutor.execute(
+                        preparedPrompt.prompt(),
+                        effectiveAssistant);
                 String rawResult = rawResponse.getResponses().isEmpty()
                         ? ""
                         : rawResponse.getResponses().getFirst().responseData();
                 runtimeContext.setCurrentToolOriginalResult(rawResult);
                 runtimeContext.setCurrentToolResult(rawResult);
-
-                HookDispatchResult postDispatch = lifecycleHookRuntime.run(HookPoint.POST_TOOL_CALL, runtimeContext);
-                String finalResult = runtimeContext.getCurrentToolResult() != null
-                        ? runtimeContext.getCurrentToolResult()
-                        : "";
-                appendToolResponse(context, runtimeContext, toolCall, finalResult);
-                respondedCallIds.add(toolCall.id());
-                activateSkillIfNeeded(runtimeContext, toolCall);
-                recordToolCall(runtimeContext, toolCall, true, postDispatch.getResult().getAction(), null, invocationId);
-
-                HookFlowAction postAction = postDispatch.getResult().getAction();
-                if (postAction == HookFlowAction.SKIP_TRACE || postAction == HookFlowAction.END_TURN) {
-                    markFlow(runtimeContext, postAction);
-                    appendMissingResponses(context, runtimeContext, calls, respondedCallIds, index + 1,
-                            postAction == HookFlowAction.SKIP_TRACE ? "tool skipped by lifecycle hook"
-                                    : "turn ended by lifecycle hook");
-                    return postAction == HookFlowAction.END_TURN
-                            ? ToolCallProcessingResult.terminateLoop()
-                            : ToolCallProcessingResult.continueLoop();
-                }
+                succeeded = preparedPrompt.outcome().isSucceeded();
+                error = preparedPrompt.outcome().getError();
             } catch (HumanInTheLoopException ex) {
                 throw ex;
             } catch (Exception ex) {
-                String error = "工具调用异常，请检查参数。错误: " + ex.getMessage();
-                appendToolResponse(context, runtimeContext, toolCall, error);
-                respondedCallIds.add(toolCall.id());
-                recordToolCall(runtimeContext, toolCall, false, HookFlowAction.CONTINUE, error, invocationId);
+                error = "工具调用异常，请检查参数。错误: " + ex.getMessage();
+                runtimeContext.setCurrentToolOriginalResult(error);
+                runtimeContext.setCurrentToolResult(error);
+            }
+
+            runtimeContext.setCurrentToolExecutionSucceeded(succeeded);
+            HookDispatchResult postDispatch = lifecycleHookRuntime.run(HookPoint.POST_TOOL_CALL, runtimeContext);
+            String finalResult = runtimeContext.getCurrentToolResult() != null
+                    ? runtimeContext.getCurrentToolResult()
+                    : "";
+            appendToolResponse(context, runtimeContext, toolCall, finalResult);
+            respondedCallIds.add(toolCall.id());
+            if (succeeded) {
+                activateSkillIfNeeded(runtimeContext, toolCall);
+            }
+            recordToolCall(runtimeContext, toolCall, succeeded, postDispatch.getResult().getAction(), error, invocationId);
+
+            HookFlowAction postAction = postDispatch.getResult().getAction();
+            if (postAction == HookFlowAction.SKIP_TRACE || postAction == HookFlowAction.END_TURN) {
+                markFlow(runtimeContext, postAction);
+                appendMissingResponses(context, runtimeContext, calls, respondedCallIds, index + 1,
+                        postAction == HookFlowAction.SKIP_TRACE ? "tool skipped by lifecycle hook"
+                                : "turn ended by lifecycle hook");
+                return postAction == HookFlowAction.END_TURN
+                        ? ToolCallProcessingResult.terminateLoop()
+                        : ToolCallProcessingResult.continueLoop();
             }
         }
         return ToolCallProcessingResult.continueLoop();
@@ -243,12 +269,12 @@ public class ToolCallProcessor {
     }
 
     private void suspendForConfirmation(SuperAgentContext context, AgentRuntimeContext runtimeContext,
-            AssistantMessage.ToolCall toolCall, int toolIndex, HookDispatchResult dispatchResult) {
+            AssistantMessage.ToolCall toolCall, String invocationId, int toolIndex,
+            HookDispatchResult dispatchResult) {
         var spec = dispatchResult.getResult().getConfirmationSpec();
         if (spec == null) {
             throw new IllegalStateException("REQUEST_CONFIRMATION 缺少 confirmationSpec");
         }
-        String invocationId = UUID.randomUUID().toString();
         List<String> editableKeys = spec.getEditableFields() != null
                 ? spec.getEditableFields().stream().map(field -> field.getKey()).toList()
                 : List.of();
@@ -275,6 +301,25 @@ public class ToolCallProcessor {
         runtimeContext.getTrace().setFlowAction(HookFlowAction.REQUEST_CONFIRMATION);
         MessageUtils.sendMessage(context, ToolConfirmationMessage.from(context, toolCall, invocationId, spec));
         throw new HumanInLoopExceptionAdapter();
+    }
+
+    private void populateToolMetadata(AgentRuntimeContext runtimeContext, String toolName) {
+        ToolCallback callback = runtimeContext.getAvailableTools().stream()
+                .filter(tool -> toolName.equals(tool.getToolDefinition().name()))
+                .findFirst()
+                .orElse(null);
+        runtimeContext.setCurrentToolDescription(callback != null
+                ? callback.getToolDefinition().description()
+                : null);
+        runtimeContext.setCurrentToolType(callback != null
+                && callback.getToolMetadata() instanceof CustomToolMetadata metadata
+                        ? metadata.getType()
+                        : null);
+    }
+
+    private boolean isToolEnabled(AgentRuntimeContext runtimeContext, String toolName) {
+        return runtimeContext.getEnabledTools().stream()
+                .anyMatch(tool -> toolName.equals(tool.getToolDefinition().name()));
     }
 
     private void activateSkillIfNeeded(AgentRuntimeContext runtimeContext, AssistantMessage.ToolCall toolCall) {

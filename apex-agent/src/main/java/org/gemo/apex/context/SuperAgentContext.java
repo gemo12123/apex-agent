@@ -150,6 +150,11 @@ public class SuperAgentContext {
     private List<String> activeSkillNames = new ArrayList<>();
 
     /**
+     * 当前 Trace 经 Hook 调整后的启用工具名称，用于挂起恢复。
+     */
+    private List<String> enabledToolNames = new ArrayList<>();
+
+    /**
      * 生命周期 Hook 使用的当前 Turn 工作消息副本。
      */
     @JsonIgnore

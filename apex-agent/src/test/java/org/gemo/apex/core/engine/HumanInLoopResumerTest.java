@@ -6,6 +6,12 @@ import org.gemo.apex.context.SuperAgentContext;
 import org.gemo.apex.domain.interaction.InteractionType;
 import org.gemo.apex.domain.interaction.PendingHumanInteraction;
 import org.gemo.apex.domain.interaction.PendingToolExecution;
+import org.gemo.apex.hook.lifecycle.AgentLifecycleHookRuntime;
+import org.gemo.apex.hook.lifecycle.AgentRuntimeContext;
+import org.gemo.apex.hook.lifecycle.AgentTrace;
+import org.gemo.apex.hook.lifecycle.AgentTurn;
+import org.gemo.apex.hook.lifecycle.HookDispatchResult;
+import org.gemo.apex.hook.lifecycle.HookPoint;
 import org.gemo.apex.memory.conversation.ConversationMemoryManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -14,9 +20,13 @@ import org.mockito.MockitoAnnotations;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.definition.DefaultToolDefinition;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -133,5 +143,75 @@ class HumanInLoopResumerTest {
         assertNull(context.getPendingToolExecution());
         assertNull(context.getPendingToolResult());
         assertEquals(ExecutionStatus.IN_PROGRESS, context.getExecutionStatus());
+    }
+
+    @Test
+    void resumeShouldReuseInvocationIdForRemainingHooksAndExecutionRecord() {
+        SuperAgentContext context = new SuperAgentContext();
+        context.setExecutionStatus(ExecutionStatus.HUMAN_IN_THE_LOOP);
+        context.setAgentKey("default_agent");
+        context.setSessionId("session-1");
+        context.setMessages(new ArrayList<>(List.of(
+                AssistantMessage.builder()
+                        .toolCalls(List.of(new AssistantMessage.ToolCall(
+                                "call-1", "function", "meeting_tool", "{}")))
+                        .build())));
+        context.setPendingHumanInteraction(PendingHumanInteraction.builder()
+                .interactionType(InteractionType.TOOL_CONFIRMATION.name())
+                .toolCallId("call-1")
+                .invocationId("invocation-1")
+                .confirmationId("confirm-1")
+                .build());
+        context.setPendingToolExecution(PendingToolExecution.builder()
+                .toolCallId("call-1")
+                .toolName("meeting_tool")
+                .invocationId("invocation-1")
+                .resolvedArguments(Map.of("room", "A1001"))
+                .editableFieldKeys(List.of())
+                .confirmationId("confirm-1")
+                .executedPreHookBeans(List.of("toolConfirmHook"))
+                .build());
+        context.setPendingToolResult(Map.of("call-1", Map.of("decision", "APPROVE")));
+
+        ToolCallback tool = org.mockito.Mockito.mock(ToolCallback.class);
+        when(tool.getToolDefinition()).thenReturn(DefaultToolDefinition.builder()
+                .name("meeting_tool")
+                .description("meeting description")
+                .inputSchema("{}")
+                .build());
+        AtomicReference<String> preInvocationId = new AtomicReference<>();
+        AtomicReference<String> postInvocationId = new AtomicReference<>();
+        AgentLifecycleHookRuntime hooks = (point, runtime, skipped) -> {
+            if (point == HookPoint.PRE_TOOL_CALL) {
+                preInvocationId.set(runtime.getCurrentInvocationId());
+            }
+            if (point == HookPoint.POST_TOOL_CALL) {
+                postInvocationId.set(runtime.getCurrentInvocationId());
+            }
+            return HookDispatchResult.continued();
+        };
+        AgentRuntimeContext runtime = AgentRuntimeContext.builder()
+                .sessionContext(context)
+                .turn(AgentTurn.builder().turnNo(1L).build())
+                .trace(AgentTrace.builder().turnNo(1L).traceNo(1).build())
+                .availableTools(new ArrayList<>(List.of(tool)))
+                .enabledTools(new ArrayList<>(List.of(tool)))
+                .workingMessages(new ArrayList<>())
+                .build();
+        HumanInLoopResumer resumer =
+                new HumanInLoopResumer(conversationMemoryManager, agentToolExecutor, agentPromptAssembler, hooks);
+        Prompt prompt = new Prompt(List.of());
+        when(agentPromptAssembler.assembleToolExecutionPrompt(eq(context), anyMap())).thenReturn(prompt);
+        when(agentToolExecutor.execute(eq(prompt), any(AssistantMessage.class))).thenReturn(
+                ToolResponseMessage.builder()
+                        .responses(List.of(new ToolResponseMessage.ToolResponse(
+                                "call-1", "meeting_tool", "approved")))
+                        .build());
+
+        resumer.resume(context, runtime);
+
+        assertEquals("invocation-1", preInvocationId.get());
+        assertEquals("invocation-1", postInvocationId.get());
+        assertEquals("invocation-1", runtime.getTrace().getToolCalls().getFirst().getInvocationId());
     }
 }

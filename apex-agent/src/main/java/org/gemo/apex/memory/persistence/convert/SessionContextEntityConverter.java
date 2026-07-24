@@ -52,6 +52,9 @@ public final class SessionContextEntityConverter {
         snapshot.setActiveSkillNames(context.getActiveSkillNames() != null
                 ? new ArrayList<>(context.getActiveSkillNames())
                 : new ArrayList<>());
+        snapshot.setEnabledToolNames(context.getEnabledToolNames() != null
+                ? new ArrayList<>(context.getEnabledToolNames())
+                : new ArrayList<>());
         return snapshot;
     }
 
@@ -157,6 +160,9 @@ public final class SessionContextEntityConverter {
             context.setWorkingMessages(MessageEntityConverter.fromPayloadList(snapshot.getWorkingMessagesPayload()));
             context.setActiveSkillNames(snapshot.getActiveSkillNames() != null
                     ? new ArrayList<>(snapshot.getActiveSkillNames())
+                    : new ArrayList<>());
+            context.setEnabledToolNames(snapshot.getEnabledToolNames() != null
+                    ? new ArrayList<>(snapshot.getEnabledToolNames())
                     : new ArrayList<>());
         }
         if (summaryEntity != null) {

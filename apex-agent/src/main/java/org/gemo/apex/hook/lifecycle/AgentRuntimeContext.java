@@ -24,6 +24,8 @@ public class AgentRuntimeContext {
     private AgentTrace trace;
     @Builder.Default
     private List<Message> workingMessages = new ArrayList<>();
+    private boolean workingMessagesInitialized;
+    private int fixedMessageCount;
     @Builder.Default
     private List<ToolCallback> availableTools = new ArrayList<>();
     @Builder.Default
@@ -35,6 +37,10 @@ public class AgentRuntimeContext {
     private ChatResponse originalModelOutput;
     private AssistantMessage finalModelOutput;
     private AssistantMessage.ToolCall currentToolCall;
+    private String currentInvocationId;
+    private String currentToolDescription;
+    private String currentToolType;
+    private boolean currentToolExecutionSucceeded;
     @Builder.Default
     private Map<String, Object> currentToolArguments = new LinkedHashMap<>();
     private String currentToolOriginalResult;

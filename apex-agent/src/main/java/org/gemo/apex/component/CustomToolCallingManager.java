@@ -8,6 +8,7 @@ import org.gemo.apex.constant.ExecutionStatus;
 import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.constant.ToolContextKeys;
 import org.gemo.apex.context.SuperAgentContext;
+import org.gemo.apex.core.engine.ToolExecutionOutcome;
 import org.gemo.apex.domain.interaction.InteractionType;
 import org.gemo.apex.domain.interaction.PendingHumanInteraction;
 import org.gemo.apex.domain.interaction.PendingToolExecution;
@@ -444,7 +445,10 @@ public class CustomToolCallingManager implements ToolCallingManager {
             SuperAgentContext sessionContext = (SuperAgentContext) toolContext.getContext()
                     .get(ToolContextKeys.SESSION_CONTEXT);
             // 生成唯一的 invocation_id
-            String invocationId = "invocationId_" + IdUtil.fastSimpleUUID();
+            Object propagatedInvocationId = toolContext.getContext().get(ToolContextKeys.INVOCATION_ID);
+            String invocationId = propagatedInvocationId != null
+                    ? String.valueOf(propagatedInvocationId)
+                    : "invocationId_" + IdUtil.fastSimpleUUID();
             Map<String, Object> parsedArguments = parseArguments(finalToolInputArguments);
             toolInvocationNotifier.beforeExecution(toolCallback, sessionContext, invocationId);
 
@@ -461,6 +465,10 @@ public class CustomToolCallingManager implements ToolCallingManager {
                         try {
                             toolResult = toolCallback.call(resolvedToolInputArguments, finalToolContext);
                         } catch (ToolExecutionException ex) {
+                            Object outcome = finalToolContext.getContext().get(ToolContextKeys.EXECUTION_OUTCOME);
+                            if (outcome instanceof ToolExecutionOutcome executionOutcome) {
+                                executionOutcome.markFailed(ex.getMessage());
+                            }
                             toolResult = this.toolExecutionExceptionProcessor.process(ex);
                         }
                         observationContext.setToolCallResult(toolResult);

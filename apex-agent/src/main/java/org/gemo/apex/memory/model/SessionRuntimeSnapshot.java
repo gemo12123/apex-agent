@@ -41,4 +41,6 @@ public class SessionRuntimeSnapshot {
     private String workingMessagesPayload;
 
     private List<String> activeSkillNames = new ArrayList<>();
+
+    private List<String> enabledToolNames = new ArrayList<>();
 }

@@ -129,10 +129,12 @@ public class SuperAgent {
             boolean resumingSuspendedTrace = context.getExecutionStatus() == ExecutionStatus.HUMAN_IN_THE_LOOP
                     && context.getTraceNo() != null
                     && context.getTraceNo() > 0;
-            if (context.getTraceNo() == null || context.getTraceNo() == 0) {
-                StageToolPlan initialToolPlan = stageToolResolver.resolve(context);
+            StageToolPlan initialToolPlan = stageToolResolver.resolve(context);
+            if (!resumingSuspendedTrace) {
                 ensureWorkingMessages(initialToolPlan);
                 runtimeContext.setEnabledTools(new ArrayList<>(initialToolPlan.callableTools()));
+            } else {
+                runtimeContext.setEnabledTools(resolveRestoredEnabledTools(initialToolPlan));
             }
             humanInLoopResumer.resume(context, runtimeContext);
             if (resumingSuspendedTrace && runtimeContext.getTrace() != null) {
@@ -189,7 +191,7 @@ public class SuperAgent {
         while (loopCount < MAX_ITERATIONS) {
             loopCount++;
             StageToolPlan toolPlan = stageToolResolver.resolve(context);
-            ensureWorkingMessages(toolPlan);
+            refreshWorkingMessages(toolPlan);
             runtimeContext.setEnabledTools(new ArrayList<>(toolPlan.callableTools()));
             AgentTrace trace = beginTrace();
             boolean traceSuspended = false;
@@ -198,8 +200,11 @@ public class SuperAgent {
                 lifecycleHookRuntime.run(HookPoint.TRACE_START, runtimeContext);
                 lifecycleHookRuntime.run(HookPoint.PRE_MODEL_CALL, runtimeContext);
 
-                Prompt promptToLlm = agentPromptAssembler.assemble(context, toolPlan,
-                        runtimeContext.getWorkingMessages());
+                Prompt promptToLlm = agentPromptAssembler.assemble(
+                        context,
+                        toolPlan,
+                        runtimeContext.getWorkingMessages(),
+                        runtimeContext.getEnabledTools());
                 if (promptToLlm == null) {
                     // 兼容只实现旧 assemble 重载的扩展和测试替身。
                     promptToLlm = agentPromptAssembler.assemble(context, toolPlan);
@@ -220,7 +225,9 @@ public class SuperAgent {
                 AssistantMessage assistantMessage = resolveFinalAssistantMessage(rawAssistantMessage);
                 runtimeContext.setFinalModelOutput(assistantMessage);
                 trace.setFinalModelOutput(assistantMessage);
-                conversationMemoryManager.appendDialogueMessage(context, rawAssistantMessage);
+                if (assistantMessage != null) {
+                    conversationMemoryManager.appendDialogueMessage(context, assistantMessage);
+                }
 
                 if (hasToolCalls(assistantMessage)) {
                     ToolResponseMessage interceptResponse = toolInterceptor.interceptIllegalToolCalls(context,
@@ -295,6 +302,10 @@ public class SuperAgent {
                 .workingMessages(context.getWorkingMessages() != null
                         ? new ArrayList<>(context.getWorkingMessages())
                         : new ArrayList<>())
+                .workingMessagesInitialized((context.getWorkingMessages() != null
+                        && !context.getWorkingMessages().isEmpty())
+                        || (context.getTraceNo() != null && context.getTraceNo() > 0))
+                .fixedMessageCount(context.getFixedMessages() != null ? context.getFixedMessages().size() : 0)
                 .availableTools(new ArrayList<>(context.getAvailableTools()))
                 .activeSkillNames(context.getActiveSkillNames() != null
                         ? new ArrayList<>(context.getActiveSkillNames())
@@ -362,11 +373,38 @@ public class SuperAgent {
     }
 
     private void ensureWorkingMessages(StageToolPlan toolPlan) {
-        if (runtimeContext.getWorkingMessages().isEmpty()) {
+        if (!runtimeContext.isWorkingMessagesInitialized()) {
             List<Message> prepared = agentPromptAssembler.prepareWorkingMessages(context, toolPlan);
             runtimeContext.setWorkingMessages(prepared != null ? prepared : new ArrayList<>());
+            runtimeContext.setWorkingMessagesInitialized(true);
+            runtimeContext.setFixedMessageCount(context.getFixedMessages() != null
+                    ? context.getFixedMessages().size()
+                    : 0);
         }
         context.setWorkingMessages(runtimeContext.getWorkingMessages());
+    }
+
+    private void refreshWorkingMessages(StageToolPlan toolPlan) {
+        ensureWorkingMessages(toolPlan);
+        int fixedCount = Math.min(runtimeContext.getFixedMessageCount(), runtimeContext.getWorkingMessages().size());
+        List<Message> retainedMessages = new ArrayList<>(
+                runtimeContext.getWorkingMessages().subList(fixedCount, runtimeContext.getWorkingMessages().size()));
+        agentPromptAssembler.refreshFixedMessages(context, toolPlan);
+        List<Message> refreshedMessages = new ArrayList<>(context.getFixedMessages());
+        refreshedMessages.addAll(retainedMessages);
+        runtimeContext.setWorkingMessages(refreshedMessages);
+        runtimeContext.setFixedMessageCount(context.getFixedMessages().size());
+        context.setWorkingMessages(refreshedMessages);
+    }
+
+    private List<org.springframework.ai.tool.ToolCallback> resolveRestoredEnabledTools(StageToolPlan toolPlan) {
+        if (context.getEnabledToolNames() == null || context.getEnabledToolNames().isEmpty()) {
+            return new ArrayList<>(toolPlan.callableTools());
+        }
+        Set<String> enabledNames = Set.copyOf(context.getEnabledToolNames());
+        return toolPlan.callableTools().stream()
+                .filter(tool -> enabledNames.contains(tool.getToolDefinition().name()))
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
     }
 
     private AgentTrace beginTrace() {
@@ -432,8 +470,14 @@ public class SuperAgent {
         context.setActiveSkillNames(runtimeContext != null
                 ? new ArrayList<>(runtimeContext.getActiveSkillNames())
                 : context.getActiveSkillNames());
+        context.setEnabledToolNames(runtimeContext != null
+                ? runtimeContext.getEnabledTools().stream()
+                        .map(tool -> tool.getToolDefinition().name())
+                        .toList()
+                : context.getEnabledToolNames());
         if (turnCompleted) {
             context.setActiveSkillNames(new ArrayList<>());
+            context.setEnabledToolNames(new ArrayList<>());
             if (runtimeContext != null) {
                 runtimeContext.getActiveSkillNames().clear();
             }
