@@ -22,7 +22,7 @@
 
 - `apex-agent/`：Java 后端源码、资源、测试
 - `apex-frontend/`：Vue 前端源码、测试、Vite 配置
-- `docs/`：项目概览、快速开始、架构说明、消息协议
+- `docs/`：当前态文档；`overview/` 项目背景与启动、`spec/` 协议与交互规范、`reference/` 按任务路由的专题参考、`superpowers/` 历史设计记录
 - `front_outdate/`：旧前端遗留目录，不是当前主前端
 - `want_learn/`：学习/试验目录，不属于主运行链路
 
@@ -175,8 +175,9 @@ npm run dev
 
 ## 文档导航
 
-- [项目概览](docs/项目概览.md)
-- [快速开始](docs/快速开始.md)
-- [架构与执行流程](docs/架构与执行流程.md)
-- [消息标准](docs/消息标准.md)
+- [项目概览](docs/overview/项目概览.md)
+- [快速开始](docs/overview/快速开始.md)
+- [架构与执行流程](docs/overview/架构与执行流程.md)
+- [消息标准](docs/spec/消息标准.md)
+- [前端交互规范](docs/spec/前端交互规范.md)
 - [前端说明](apex-frontend/README.md)

@@ -6,7 +6,7 @@
 
 1. 任何任务先只读本文件，并用 `rg` 定位相关代码。
 2. 确认任务类型后，从“开始任务前”的路由中只读与当前任务匹配的 `docs/reference/` 专题。
-3. 只有需要项目背景、启动方式、完整执行流、消息协议或交互规范时，才读取 `docs/` 下对应的当前态文档。
+3. 只有需要项目背景、启动方式或完整执行流时读取 `docs/overview/`；需要消息协议或前端交互规范时读取 `docs/spec/`。
 4. 仅当专题文件明确引用，或任务涉及对应历史方案时，才读取 `docs/superpowers/`。其中内容是设计与实施记录，不是当前行为的最终依据。
 5. 文档与代码冲突时，以当前源码、测试和构建配置为准；修复代码后同步更新相关文档。
 
@@ -14,7 +14,9 @@
 
 - `apex-agent/`：JDK 25、Spring Boot、Spring AI 后端；包含 Agent 执行、工具、Hook、记忆和 SSE 接口。
 - `apex-frontend/`：Vue 3、TypeScript、Pinia、Vite 工作台；消费 SSE 并维护会话视图状态。
-- `docs/`：当前项目说明、开发导航和专题参考。
+- `docs/reference/`：按任务路由的专题参考，是本文之后的第一层细化。
+- `docs/overview/`：项目背景、快速开始与架构执行流的当前态说明。
+- `docs/spec/`：SSE 消息协议与前端交互规范的当前态标准。
 - `docs/superpowers/`：历史设计、计划与示例，只用于追溯背景。
 - `front_outdate/`：旧前端，不属于当前产品链路；除非任务明确要求，否则不要修改。
 - `.worktrees/`：历史分支残留的 worktree，内含已废弃的类（如 `SessionExecutionGuard`）和旧版文档。检索代码时必须限定在 `apex-agent/src/` 与 `apex-frontend/src/`，不要把其中内容当作当前实现。
@@ -39,13 +41,13 @@
    - Vue 页面、状态、SSE 消费、交互：读 [前端开发参考](docs/reference/前端开发.md)。
    - API、SSE、人在回路或前后端联动：读 [跨端契约参考](docs/reference/跨端契约.md)，并按需再读前后端专题。
    - 选择测试范围或交付前检查：读 [验证与交付参考](docs/reference/验证与交付.md)。
-4. 只有当代码事实仍不足以解释背景时，再按需读取 [项目概览](docs/项目概览.md)、[快速开始](docs/快速开始.md)、[架构与执行流程](docs/架构与执行流程.md)、[消息标准](docs/消息标准.md) 或 [前端交互规范](docs/前端交互规范.md)。
+4. 只有当代码事实仍不足以解释背景时，再按需读取 [项目概览](docs/overview/项目概览.md)、[快速开始](docs/overview/快速开始.md)、[架构与执行流程](docs/overview/架构与执行流程.md)、[消息标准](docs/spec/消息标准.md) 或 [前端交互规范](docs/spec/前端交互规范.md)。
 
 ## 核心不变量
 
 - 当前主后端入口是 `POST /api/sse/chat`，Agent 列表入口是 `GET /api/sse/agents`；请求依赖 `X-User-Id`。
 - 会话请求以 `sessionId`、`agentKey` 和 `type` 维持身份与恢复语义；不要单边改变字段或默认值。
-- SSE 使用 `event_type`、`context`、`messages` 信封。新增或修改事件时，后端消息模型、发送逻辑、前端类型、reducer/store、测试与 `docs/消息标准.md` 必须一起检查。
+- SSE 使用 `event_type`、`context`、`messages` 信封。新增或修改事件时，后端消息模型、发送逻辑、前端类型、reducer/store、测试与 `docs/spec/消息标准.md` 必须一起检查。
 - `ASK_HUMAN` 与 `TOOL_CONFIRMATION` 会把执行切到人在回路状态；恢复请求使用 `HUMAN_RESPONSE`，不能按普通新消息处理。
 - `react` 与 `plan-executor` 的工具可见性不同；涉及计划工具时必须检查 `StageToolResolver` 和 `ToolInterceptor`。
 - 当前前端源目录是 `apex-frontend/src/`；协议状态集中在 `types/apex.ts`、`stores/session/reducer.ts` 和 `stores/session/store.ts`。
