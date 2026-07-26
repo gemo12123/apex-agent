@@ -17,6 +17,7 @@
 - `docs/`：当前项目说明、开发导航和专题参考。
 - `docs/superpowers/`：历史设计、计划与示例，只用于追溯背景。
 - `front_outdate/`：旧前端，不属于当前产品链路；除非任务明确要求，否则不要修改。
+- `.worktrees/`：历史分支残留的 worktree，内含已废弃的类（如 `SessionExecutionGuard`）和旧版文档。检索代码时必须限定在 `apex-agent/src/` 与 `apex-frontend/src/`，不要把其中内容当作当前实现。
 - `target/`、`apex-frontend/.vite/`、`apex-frontend/dist/`、`node_modules/`：生成物或缓存，不作为源代码编辑。
 
 ## 全局约束
@@ -48,6 +49,8 @@
 - `ASK_HUMAN` 与 `TOOL_CONFIRMATION` 会把执行切到人在回路状态；恢复请求使用 `HUMAN_RESPONSE`，不能按普通新消息处理。
 - `react` 与 `plan-executor` 的工具可见性不同；涉及计划工具时必须检查 `StageToolResolver` 和 `ToolInterceptor`。
 - 当前前端源目录是 `apex-frontend/src/`；协议状态集中在 `types/apex.ts`、`stores/session/reducer.ts` 和 `stores/session/store.ts`。
+- 后端当前发送的 `END` 不携带 `execution_status`，前端终止判断实际走缺失字段的兼容分支；`TASK_THINK_CHANGE` 是 plan-executor 模式的主文本通道，但前端 reducer 尚未处理。改动这两处契约前先读 [跨端契约参考](docs/reference/跨端契约.md)。
+- 后端默认激活 `dev` profile（`application-dev.yml`）：数据源为 MySQL 且 `apex.memory.enabled: false`；PostgreSQL/pgvector 相关能力默认不生效。
 
 ## 常用命令
 
