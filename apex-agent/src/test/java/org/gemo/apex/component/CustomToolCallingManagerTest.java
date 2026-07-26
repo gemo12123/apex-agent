@@ -5,10 +5,6 @@ import org.gemo.apex.constant.ToolContextKeys;
 import org.gemo.apex.context.SuperAgentContext;
 import org.gemo.apex.core.engine.ToolExecutionOutcome;
 import org.gemo.apex.exception.HumanInTheLoopException;
-import org.gemo.apex.hook.AgentHookRuntime;
-import org.gemo.apex.hook.tool.PostToolCallHookResult;
-import org.gemo.apex.hook.tool.PreToolCallHookResult;
-import org.gemo.apex.hook.tool.ToolConfirmationSpec;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -38,7 +34,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -89,10 +84,8 @@ class CustomToolCallingManagerTest {
     @Test
     void executeToolCallsShouldLeaveLifecycleHooksToAgentLoop() {
         ToolInvocationNotifier notifier = Mockito.mock(ToolInvocationNotifier.class);
-        AgentHookRuntime hookRuntime = Mockito.mock(AgentHookRuntime.class);
         CustomToolCallingManager manager = CustomToolCallingManager.builder()
                 .toolInvocationNotifier(notifier)
-                .agentHookRuntime(hookRuntime)
                 .build();
 
         ToolCallback toolCallback = Mockito.mock(ToolCallback.class);
@@ -104,18 +97,6 @@ class CustomToolCallingManagerTest {
         when(toolCallback.getToolDefinition()).thenReturn(definition);
         when(toolCallback.getToolMetadata()).thenReturn(ToolMetadata.builder().returnDirect(false).build());
         when(toolCallback.call(any(String.class), any())).thenReturn("should-not-run");
-
-        when(hookRuntime.runPreHooks(any())).thenReturn(PreToolCallHookResult.builder()
-                .outcome(PreToolCallHookResult.Outcome.REQUEST_CONFIRMATION)
-                .updatedArgs(Map.of("room", "B2001"))
-                .confirmationSpec(ToolConfirmationSpec.builder()
-                        .confirmationId("confirm-1")
-                        .title("预订会议室前确认")
-                        .toolName("meeting_tool")
-                        .toolDisplayName("会议室助手")
-                        .build())
-                .executedHookBeans(List.of("mutateRoomHook", "toolConfirmHook"))
-                .build());
 
         SuperAgentContext sessionContext = new SuperAgentContext();
         sessionContext.setAgentKey("default_agent");
@@ -138,7 +119,6 @@ class CustomToolCallingManagerTest {
                 new ChatResponse(List.of(new Generation(assistantMessage))));
 
         verify(toolCallback).call(any(String.class), any());
-        verify(hookRuntime, never()).runPreHooks(any());
         ToolResponseMessage response = (ToolResponseMessage) result.conversationHistory().get(2);
         assertEquals("should-not-run", response.getResponses().getFirst().responseData());
     }
@@ -184,10 +164,8 @@ class CustomToolCallingManagerTest {
     @Test
     void executeToolCallsShouldReturnRawResultWithoutLifecyclePostProcessing() {
         ToolInvocationNotifier notifier = Mockito.mock(ToolInvocationNotifier.class);
-        AgentHookRuntime hookRuntime = Mockito.mock(AgentHookRuntime.class);
         CustomToolCallingManager manager = CustomToolCallingManager.builder()
                 .toolInvocationNotifier(notifier)
-                .agentHookRuntime(hookRuntime)
                 .build();
 
         ToolCallback toolCallback = Mockito.mock(ToolCallback.class);
@@ -205,17 +183,6 @@ class CustomToolCallingManagerTest {
                   </instructions>
                 </activated_skill>
                 """);
-        when(hookRuntime.runPreHooks(any())).thenReturn(PreToolCallHookResult.proceed());
-        when(hookRuntime.runPostHooks(any())).thenReturn(PostToolCallHookResult.replaceResult("""
-                <activated_skill name="writing-plans">
-                  <instructions>
-                    body
-
-                    # Skill经验
-                    以下经验来自该 Skill 在当前 Agent 下的历史使用总结，仅供参考。
-                  </instructions>
-                </activated_skill>
-                """));
 
         SuperAgentContext sessionContext = new SuperAgentContext();
         sessionContext.setAgentKey("default_agent");
@@ -236,7 +203,6 @@ class CustomToolCallingManagerTest {
 
         ToolResponseMessage response = (ToolResponseMessage) result.conversationHistory().get(2);
         assertTrue(response.getResponses().getFirst().responseData().contains("<activated_skill"));
-        verify(hookRuntime, never()).runPostHooks(any());
     }
 
     private static class CapturingSseEmitter extends SseEmitter {

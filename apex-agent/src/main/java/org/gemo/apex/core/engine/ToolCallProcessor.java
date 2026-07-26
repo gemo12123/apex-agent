@@ -229,9 +229,30 @@ public class ToolCallProcessor {
             AssistantMessage.ToolCall call = calls.get(index);
             if (respondedCallIds.add(call.id())) {
                 appendToolResponse(context, runtimeContext, call, reason);
-                recordToolCall(runtimeContext, call, false, runtimeContext.getTrace().getFlowAction(), reason, null);
+                recordUnexecutedToolCall(runtimeContext, call, reason);
             }
         }
+    }
+
+    private void recordUnexecutedToolCall(AgentRuntimeContext runtimeContext, AssistantMessage.ToolCall call,
+            String reason) {
+        // 未执行的工具不能复用 runtimeContext 里当前工具的参数与结果，需按各自的调用请求记录。
+        boolean isCurrentCall = runtimeContext.getCurrentToolCall() != null
+                && call.id().equals(runtimeContext.getCurrentToolCall().id());
+        ToolCallRecord record = ToolCallRecord.builder()
+                .toolCallId(call.id())
+                .invocationId(isCurrentCall ? runtimeContext.getCurrentInvocationId() : null)
+                .toolName(call.name())
+                .arguments(isCurrentCall
+                        ? new LinkedHashMap<>(runtimeContext.getCurrentToolArguments())
+                        : parseArguments(call.arguments()))
+                .finalResult(reason)
+                .succeeded(false)
+                .action(runtimeContext.getTrace().getFlowAction())
+                .error(reason)
+                .build();
+        runtimeContext.getTrace().getToolCalls().add(record);
+        runtimeContext.getTurnToolCalls().add(record);
     }
 
     private void recordToolCall(AgentRuntimeContext runtimeContext, AssistantMessage.ToolCall call,
