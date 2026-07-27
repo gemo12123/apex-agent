@@ -8,11 +8,11 @@ public interface AgentExecutionStore {
 
     void saveTurn(AgentTurn turn);
 
-    void saveTrace(AgentTrace trace);
+    void saveIteration(AgentIteration iteration);
 
     Optional<AgentTurn> findTurn(long turnNo);
 
-    Optional<AgentTrace> findTrace(long turnNo, int traceNo);
+    Optional<AgentIteration> findIteration(long turnNo, int iterationNo);
 
-    List<AgentTrace> findTraces(long turnNo);
+    List<AgentIteration> findIterations(long turnNo);
 }

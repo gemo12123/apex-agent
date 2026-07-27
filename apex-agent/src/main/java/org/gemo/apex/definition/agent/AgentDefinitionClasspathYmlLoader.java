@@ -178,12 +178,12 @@ public class AgentDefinitionClasspathYmlLoader implements IAgentDefinitionLoader
         }
         return AgentHooksConfig.builder()
                 .turnStart(parseHookBindings(hookMap.get("turn-start")))
-                .traceStart(parseHookBindings(hookMap.get("trace-start")))
+                .iterationStart(parseHookBindings(hookMap.get("iteration-start")))
                 .preModelCall(parseHookBindings(hookMap.get("pre-model-call")))
                 .postModelCall(parseHookBindings(hookMap.get("post-model-call")))
                 .preToolCall(parseHookBindings(hookMap.get("pre-tool-call")))
                 .postToolCall(parseHookBindings(hookMap.get("post-tool-call")))
-                .traceEnd(parseHookBindings(hookMap.get("trace-end")))
+                .iterationEnd(parseHookBindings(hookMap.get("iteration-end")))
                 .turnEnd(parseHookBindings(hookMap.get("turn-end")))
                 .disabled(false)
                 .build();

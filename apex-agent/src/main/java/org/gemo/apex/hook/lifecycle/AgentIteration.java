@@ -13,7 +13,7 @@ import java.util.List;
 @Data
 @Builder
 @Jacksonized
-public class AgentTrace {
+public class AgentIteration {
 
     public enum Status {
         IN_PROGRESS,
@@ -24,7 +24,7 @@ public class AgentTrace {
     }
 
     private long turnNo;
-    private int traceNo;
+    private int iterationNo;
     @Builder.Default
     private Status status = Status.IN_PROGRESS;
     @Builder.Default

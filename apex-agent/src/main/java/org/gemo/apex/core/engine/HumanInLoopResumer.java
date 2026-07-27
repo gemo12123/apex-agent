@@ -179,7 +179,7 @@ public class HumanInLoopResumer {
                                 : Set.of());
                 AgentHookResult preResult = remainingPreHooks.getResult();
                 if (preResult.getAction() == HookFlowAction.BLOCK_TOOL
-                        || preResult.getAction() == HookFlowAction.SKIP_TRACE
+                        || preResult.getAction() == HookFlowAction.SKIP_ITERATION
                         || preResult.getAction() == HookFlowAction.END_TURN) {
                     String reason = preResult.getBlockReason() != null
                             ? preResult.getBlockReason()
@@ -190,7 +190,7 @@ public class HumanInLoopResumer {
                             .build();
                     conversationMemoryManager.appendDialogueMessage(context, stoppedResponse);
                     runtimeContext.getWorkingMessages().add(stoppedResponse);
-                    runtimeContext.getTrace().setFlowAction(preResult.getAction());
+                    runtimeContext.getIteration().setFlowAction(preResult.getAction());
                     recordToolCall(runtimeContext, pendingExecution, false, preResult.getAction(), reason);
                     clearPendingState(context);
                     return;
@@ -269,10 +269,10 @@ public class HumanInLoopResumer {
                         .action(postDispatch.getResult().getAction())
                         .error(error)
                         .build();
-                runtimeContext.getTrace().getToolCalls().add(record);
+                runtimeContext.getIteration().getToolCalls().add(record);
                 runtimeContext.getTurnToolCalls().add(record);
                 runtimeContext.getWorkingMessages().add(responseMessage);
-                runtimeContext.getTrace().setFlowAction(postDispatch.getResult().getAction());
+                runtimeContext.getIteration().setFlowAction(postDispatch.getResult().getAction());
             }
             conversationMemoryManager.appendDialogueMessage(context, responseMessage);
         } else {
@@ -296,7 +296,7 @@ public class HumanInLoopResumer {
                         .succeeded(false)
                         .action(HookFlowAction.BLOCK_TOOL)
                         .build();
-                runtimeContext.getTrace().getToolCalls().add(record);
+                runtimeContext.getIteration().getToolCalls().add(record);
                 runtimeContext.getTurnToolCalls().add(record);
             }
         }
@@ -336,7 +336,7 @@ public class HumanInLoopResumer {
                 .action(action)
                 .error(error)
                 .build();
-        runtimeContext.getTrace().getToolCalls().add(record);
+        runtimeContext.getIteration().getToolCalls().add(record);
         runtimeContext.getTurnToolCalls().add(record);
     }
 

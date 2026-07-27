@@ -18,7 +18,7 @@ public class AgentHooksConfig {
     private List<HookBindingConfig> turnStart = new ArrayList<>();
 
     @Builder.Default
-    private List<HookBindingConfig> traceStart = new ArrayList<>();
+    private List<HookBindingConfig> iterationStart = new ArrayList<>();
 
     @Builder.Default
     private List<HookBindingConfig> preModelCall = new ArrayList<>();
@@ -33,7 +33,7 @@ public class AgentHooksConfig {
     private List<HookBindingConfig> postToolCall = new ArrayList<>();
 
     @Builder.Default
-    private List<HookBindingConfig> traceEnd = new ArrayList<>();
+    private List<HookBindingConfig> iterationEnd = new ArrayList<>();
 
     @Builder.Default
     private List<HookBindingConfig> turnEnd = new ArrayList<>();

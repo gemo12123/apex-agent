@@ -140,9 +140,9 @@ public class SuperAgentContext {
     private Long turnNo = 0L;
 
     /**
-     * 当前 Turn 内的 Trace 序号。挂起时保留，正常新建 Turn 时重置。
+     * 当前 Turn 内的 Iteration 序号。挂起时保留，正常新建 Turn 时重置。
      */
-    private Integer traceNo = 0;
+    private Integer iterationNo = 0;
 
     /**
      * 当前 Turn 已激活的 Skill。
@@ -150,7 +150,7 @@ public class SuperAgentContext {
     private List<String> activeSkillNames = new ArrayList<>();
 
     /**
-     * 当前 Trace 经 Hook 调整后的启用工具名称，用于挂起恢复。
+     * 当前 Iteration 经 Hook 调整后的启用工具名称，用于挂起恢复。
      */
     private List<String> enabledToolNames = new ArrayList<>();
 

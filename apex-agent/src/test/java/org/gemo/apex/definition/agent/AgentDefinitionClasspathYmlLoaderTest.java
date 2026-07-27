@@ -194,12 +194,12 @@ class AgentDefinitionClasspathYmlLoaderTest {
                 .thenReturn(resource("""
                         hooks:
                           turn-start: [{bean: turnStart}]
-                          trace-start: [{bean: traceStart}]
+                          iteration-start: [{bean: iterationStart}]
                           pre-model-call: [{bean: preModel}]
                           post-model-call: [{bean: postModel}]
                           pre-tool-call: [{bean: preTool}]
                           post-tool-call: [{bean: postTool}]
-                          trace-end: [{bean: traceEnd}]
+                          iteration-end: [{bean: iterationEnd}]
                           turn-end: [{bean: turnEnd}]
                         """));
         stubCommonPromptAndRulesMissing("classpath:agents/agent-lifecycle-hooks/");
@@ -208,13 +208,34 @@ class AgentDefinitionClasspathYmlLoaderTest {
         AgentHooksConfig hooks = loader.load("agent-lifecycle-hooks").hooks();
 
         assertEquals("turnStart", hooks.getTurnStart().getFirst().getBean());
-        assertEquals("traceStart", hooks.getTraceStart().getFirst().getBean());
+        assertEquals("iterationStart", hooks.getIterationStart().getFirst().getBean());
         assertEquals("preModel", hooks.getPreModelCall().getFirst().getBean());
         assertEquals("postModel", hooks.getPostModelCall().getFirst().getBean());
         assertEquals("preTool", hooks.getPreToolCall().getFirst().getBean());
         assertEquals("postTool", hooks.getPostToolCall().getFirst().getBean());
-        assertEquals("traceEnd", hooks.getTraceEnd().getFirst().getBean());
+        assertEquals("iterationEnd", hooks.getIterationEnd().getFirst().getBean());
         assertEquals("turnEnd", hooks.getTurnEnd().getFirst().getBean());
+    }
+
+    @Test
+    void loadShouldNotTreatLegacyTraceKeysAsIterationHooks() {
+        AgentConfig global = new AgentConfig();
+        global.setAgentKey("agent-legacy-trace-hooks");
+        global.setDefaultExecutionMode(ModeEnum.REACT);
+        apexGlobalProperties.setAgents(Map.of("agent-legacy-trace-hooks", global));
+        when(resourceLoader.getResource("classpath:agents/agent-legacy-trace-hooks/config.yml"))
+                .thenReturn(resource("""
+                        hooks:
+                          trace-start: [{bean: legacyStart}]
+                          trace-end: [{bean: legacyEnd}]
+                        """));
+        stubCommonPromptAndRulesMissing("classpath:agents/agent-legacy-trace-hooks/");
+        stubCommonDefaultsMissing();
+
+        AgentHooksConfig hooks = loader.load("agent-legacy-trace-hooks").hooks();
+
+        assertTrue(hooks.getIterationStart().isEmpty());
+        assertTrue(hooks.getIterationEnd().isEmpty());
     }
 
     @Test

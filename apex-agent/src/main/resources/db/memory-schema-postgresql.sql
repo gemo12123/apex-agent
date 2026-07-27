@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS agent_turn (
     user_id VARCHAR(64),
     agent_key VARCHAR(64) NOT NULL,
     status VARCHAR(32) NOT NULL,
-    last_trace_no INT NOT NULL DEFAULT 0,
+    last_iteration_no INT NOT NULL DEFAULT 0,
     hook_executions TEXT,
     message_mutations TEXT,
     start_time TIMESTAMP NOT NULL,
@@ -22,19 +22,19 @@ CREATE INDEX IF NOT EXISTS idx_agent_turn_session
 ALTER TABLE agent_turn
     ADD COLUMN IF NOT EXISTS message_mutations TEXT;
 
-CREATE TABLE IF NOT EXISTS agent_trace (
+CREATE TABLE IF NOT EXISTS agent_iteration (
     turn_no BIGINT NOT NULL,
-    trace_no INT NOT NULL,
+    iteration_no INT NOT NULL,
     status VARCHAR(32) NOT NULL,
-    trace_payload TEXT NOT NULL,
+    iteration_payload TEXT NOT NULL,
     start_time TIMESTAMP NOT NULL,
     end_time TIMESTAMP,
     update_time TIMESTAMP NOT NULL,
-    PRIMARY KEY (turn_no, trace_no)
+    PRIMARY KEY (turn_no, iteration_no)
 );
 
-CREATE INDEX IF NOT EXISTS idx_agent_trace_turn
-    ON agent_trace(turn_no, trace_no);
+CREATE INDEX IF NOT EXISTS idx_agent_iteration_turn
+    ON agent_iteration(turn_no, iteration_no);
 
 CREATE TABLE IF NOT EXISTS agent_session (
     session_id VARCHAR(64) PRIMARY KEY,

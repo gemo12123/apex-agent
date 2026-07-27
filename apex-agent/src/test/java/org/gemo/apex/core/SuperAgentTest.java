@@ -179,7 +179,7 @@ class SuperAgentTest {
     }
 
     @Test
-    void runShouldResumeOutstandingToolCallsInSameTrace() {
+    void runShouldResumeOutstandingToolCallsInSameIteration() {
         AssistantMessage toolCallingMessage = AssistantMessage.builder()
                 .toolCalls(List.of(
                         new AssistantMessage.ToolCall("call-1", "function", "meeting_tool", "{}"),
@@ -190,7 +190,7 @@ class SuperAgentTest {
                         "call-1", "meeting_tool", "approved")))
                 .build();
         context.setTurnNo(1L);
-        context.setTraceNo(1);
+        context.setIterationNo(1);
         context.setExecutionStatus(ExecutionStatus.HUMAN_IN_THE_LOOP);
         context.setWorkingMessages(new java.util.ArrayList<>(List.of(toolCallingMessage)));
         context.setDialogueMessages(new java.util.ArrayList<>());

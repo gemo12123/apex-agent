@@ -8,7 +8,7 @@ import org.gemo.apex.domain.interaction.PendingHumanInteraction;
 import org.gemo.apex.domain.interaction.PendingToolExecution;
 import org.gemo.apex.hook.lifecycle.AgentLifecycleHookRuntime;
 import org.gemo.apex.hook.lifecycle.AgentRuntimeContext;
-import org.gemo.apex.hook.lifecycle.AgentTrace;
+import org.gemo.apex.hook.lifecycle.AgentIteration;
 import org.gemo.apex.hook.lifecycle.AgentTurn;
 import org.gemo.apex.hook.lifecycle.HookDispatchResult;
 import org.gemo.apex.hook.lifecycle.HookPoint;
@@ -193,7 +193,7 @@ class HumanInLoopResumerTest {
         AgentRuntimeContext runtime = AgentRuntimeContext.builder()
                 .sessionContext(context)
                 .turn(AgentTurn.builder().turnNo(1L).build())
-                .trace(AgentTrace.builder().turnNo(1L).traceNo(1).build())
+                .iteration(AgentIteration.builder().turnNo(1L).iterationNo(1).build())
                 .availableTools(new ArrayList<>(List.of(tool)))
                 .enabledTools(new ArrayList<>(List.of(tool)))
                 .workingMessages(new ArrayList<>())
@@ -212,6 +212,6 @@ class HumanInLoopResumerTest {
 
         assertEquals("invocation-1", preInvocationId.get());
         assertEquals("invocation-1", postInvocationId.get());
-        assertEquals("invocation-1", runtime.getTrace().getToolCalls().getFirst().getInvocationId());
+        assertEquals("invocation-1", runtime.getIteration().getToolCalls().getFirst().getInvocationId());
     }
 }

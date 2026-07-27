@@ -14,7 +14,7 @@ public class InMemoryAgentExecutionStore implements AgentExecutionStore {
 
     private static final AtomicLong TURN_SEQUENCE = new AtomicLong();
     private final Map<Long, AgentTurn> turns = new ConcurrentHashMap<>();
-    private final Map<String, AgentTrace> traces = new ConcurrentHashMap<>();
+    private final Map<String, AgentIteration> iterations = new ConcurrentHashMap<>();
 
     @Override
     public long nextTurnNo() {
@@ -29,9 +29,9 @@ public class InMemoryAgentExecutionStore implements AgentExecutionStore {
     }
 
     @Override
-    public void saveTrace(AgentTrace trace) {
-        if (trace != null) {
-            traces.put(key(trace.getTurnNo(), trace.getTraceNo()), trace);
+    public void saveIteration(AgentIteration iteration) {
+        if (iteration != null) {
+            iterations.put(key(iteration.getTurnNo(), iteration.getIterationNo()), iteration);
         }
     }
 
@@ -41,19 +41,19 @@ public class InMemoryAgentExecutionStore implements AgentExecutionStore {
     }
 
     @Override
-    public Optional<AgentTrace> findTrace(long turnNo, int traceNo) {
-        return Optional.ofNullable(traces.get(key(turnNo, traceNo)));
+    public Optional<AgentIteration> findIteration(long turnNo, int iterationNo) {
+        return Optional.ofNullable(iterations.get(key(turnNo, iterationNo)));
     }
 
     @Override
-    public List<AgentTrace> findTraces(long turnNo) {
-        return traces.values().stream()
-                .filter(trace -> trace.getTurnNo() == turnNo)
-                .sorted(Comparator.comparingInt(AgentTrace::getTraceNo))
+    public List<AgentIteration> findIterations(long turnNo) {
+        return iterations.values().stream()
+                .filter(iteration -> iteration.getTurnNo() == turnNo)
+                .sorted(Comparator.comparingInt(AgentIteration::getIterationNo))
                 .toList();
     }
 
-    private String key(long turnNo, int traceNo) {
-        return turnNo + ":" + traceNo;
+    private String key(long turnNo, int iterationNo) {
+        return turnNo + ":" + iterationNo;
     }
 }

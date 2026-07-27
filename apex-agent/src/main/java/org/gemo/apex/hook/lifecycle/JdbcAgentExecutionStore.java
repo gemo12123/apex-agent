@@ -34,12 +34,12 @@ public class JdbcAgentExecutionStore implements AgentExecutionStore {
     public void saveTurn(AgentTurn turn) {
         jdbcTemplate.update("""
                 INSERT INTO agent_turn
-                    (turn_no, session_id, agent_key, user_id, status, last_trace_no,
+                    (turn_no, session_id, agent_key, user_id, status, last_iteration_no,
                      hook_executions, message_mutations, start_time, end_time, update_time)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT (turn_no) DO UPDATE SET
                     status = EXCLUDED.status,
-                    last_trace_no = EXCLUDED.last_trace_no,
+                    last_iteration_no = EXCLUDED.last_iteration_no,
                     hook_executions = EXCLUDED.hook_executions,
                     message_mutations = EXCLUDED.message_mutations,
                     end_time = EXCLUDED.end_time,
@@ -50,7 +50,7 @@ public class JdbcAgentExecutionStore implements AgentExecutionStore {
                 turn.getAgentKey(),
                 turn.getUserId(),
                 turn.getStatus() != null ? turn.getStatus().name() : null,
-                turn.getLastTraceNo(),
+                turn.getLastIterationNo(),
                 JacksonUtils.toJson(turn.getHookExecutions()),
                 JacksonUtils.toJson(turn.getMessageMutations()),
                 turn.getStartedAt() != null ? Timestamp.valueOf(turn.getStartedAt()) : null,
@@ -58,29 +58,29 @@ public class JdbcAgentExecutionStore implements AgentExecutionStore {
     }
 
     @Override
-    public void saveTrace(AgentTrace trace) {
+    public void saveIteration(AgentIteration iteration) {
         jdbcTemplate.update("""
-                INSERT INTO agent_trace
-                    (turn_no, trace_no, status, trace_payload, start_time, end_time, update_time)
+                INSERT INTO agent_iteration
+                    (turn_no, iteration_no, status, iteration_payload, start_time, end_time, update_time)
                 VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT (turn_no, trace_no) DO UPDATE SET
+                ON CONFLICT (turn_no, iteration_no) DO UPDATE SET
                     status = EXCLUDED.status,
-                    trace_payload = EXCLUDED.trace_payload,
+                    iteration_payload = EXCLUDED.iteration_payload,
                     end_time = EXCLUDED.end_time,
                     update_time = CURRENT_TIMESTAMP
                 """,
-                trace.getTurnNo(),
-                trace.getTraceNo(),
-                trace.getStatus() != null ? trace.getStatus().name() : null,
-                JacksonUtils.toJson(trace),
-                trace.getStartedAt() != null ? Timestamp.valueOf(trace.getStartedAt()) : null,
-                trace.getEndedAt() != null ? Timestamp.valueOf(trace.getEndedAt()) : null);
+                iteration.getTurnNo(),
+                iteration.getIterationNo(),
+                iteration.getStatus() != null ? iteration.getStatus().name() : null,
+                JacksonUtils.toJson(iteration),
+                iteration.getStartedAt() != null ? Timestamp.valueOf(iteration.getStartedAt()) : null,
+                iteration.getEndedAt() != null ? Timestamp.valueOf(iteration.getEndedAt()) : null);
     }
 
     @Override
     public Optional<AgentTurn> findTurn(long turnNo) {
         List<AgentTurn> results = jdbcTemplate.query(
-                "SELECT turn_no, session_id, agent_key, user_id, status, last_trace_no, "
+                "SELECT turn_no, session_id, agent_key, user_id, status, last_iteration_no, "
                         + "hook_executions, message_mutations, start_time, end_time "
                         + "FROM agent_turn WHERE turn_no = ?",
                 (rs, rowNum) -> AgentTurn.builder()
@@ -89,7 +89,7 @@ public class JdbcAgentExecutionStore implements AgentExecutionStore {
                         .agentKey(rs.getString("agent_key"))
                         .userId(rs.getString("user_id"))
                         .status(AgentTurn.Status.valueOf(rs.getString("status")))
-                        .lastTraceNo(rs.getInt("last_trace_no"))
+                        .lastIterationNo(rs.getInt("last_iteration_no"))
                         .hookExecutions(readHookExecutions(rs.getString("hook_executions")))
                         .messageMutations(readMessageMutations(rs.getString("message_mutations")))
                         .startedAt(rs.getTimestamp("start_time") != null
@@ -118,20 +118,20 @@ public class JdbcAgentExecutionStore implements AgentExecutionStore {
     }
 
     @Override
-    public Optional<AgentTrace> findTrace(long turnNo, int traceNo) {
-        List<AgentTrace> results = jdbcTemplate.query(
-                "SELECT trace_payload FROM agent_trace WHERE turn_no = ? AND trace_no = ?",
-                (rs, rowNum) -> JacksonUtils.fromJson(rs.getString("trace_payload"), AgentTrace.class),
+    public Optional<AgentIteration> findIteration(long turnNo, int iterationNo) {
+        List<AgentIteration> results = jdbcTemplate.query(
+                "SELECT iteration_payload FROM agent_iteration WHERE turn_no = ? AND iteration_no = ?",
+                (rs, rowNum) -> JacksonUtils.fromJson(rs.getString("iteration_payload"), AgentIteration.class),
                 turnNo,
-                traceNo);
+                iterationNo);
         return results.stream().findFirst();
     }
 
     @Override
-    public List<AgentTrace> findTraces(long turnNo) {
+    public List<AgentIteration> findIterations(long turnNo) {
         return jdbcTemplate.query(
-                "SELECT trace_payload FROM agent_trace WHERE turn_no = ? ORDER BY trace_no",
-                (rs, rowNum) -> JacksonUtils.fromJson(rs.getString("trace_payload"), AgentTrace.class),
+                "SELECT iteration_payload FROM agent_iteration WHERE turn_no = ? ORDER BY iteration_no",
+                (rs, rowNum) -> JacksonUtils.fromJson(rs.getString("iteration_payload"), AgentIteration.class),
                 turnNo);
     }
 }

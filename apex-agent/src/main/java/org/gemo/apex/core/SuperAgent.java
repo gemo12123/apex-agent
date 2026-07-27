@@ -16,7 +16,7 @@ import org.gemo.apex.exception.HumanInTheLoopException;
 import org.gemo.apex.hook.lifecycle.AgentExecutionStore;
 import org.gemo.apex.hook.lifecycle.AgentLifecycleHookRuntime;
 import org.gemo.apex.hook.lifecycle.AgentRuntimeContext;
-import org.gemo.apex.hook.lifecycle.AgentTrace;
+import org.gemo.apex.hook.lifecycle.AgentIteration;
 import org.gemo.apex.hook.lifecycle.AgentTurn;
 import org.gemo.apex.hook.lifecycle.HookFlowAction;
 import org.gemo.apex.hook.lifecycle.HookPoint;
@@ -126,33 +126,33 @@ public class SuperAgent {
         boolean suspended = false;
         try {
             initializeRuntimeContext();
-            boolean resumingSuspendedTrace = context.getExecutionStatus() == ExecutionStatus.HUMAN_IN_THE_LOOP
-                    && context.getTraceNo() != null
-                    && context.getTraceNo() > 0;
+            boolean resumingSuspendedIteration = context.getExecutionStatus() == ExecutionStatus.HUMAN_IN_THE_LOOP
+                    && context.getIterationNo() != null
+                    && context.getIterationNo() > 0;
             StageToolPlan initialToolPlan = stageToolResolver.resolve(context);
-            if (!resumingSuspendedTrace) {
+            if (!resumingSuspendedIteration) {
                 ensureWorkingMessages(initialToolPlan);
                 runtimeContext.setEnabledTools(new ArrayList<>(initialToolPlan.callableTools()));
             } else {
                 runtimeContext.setEnabledTools(resolveRestoredEnabledTools(initialToolPlan));
             }
             humanInLoopResumer.resume(context, runtimeContext);
-            if (resumingSuspendedTrace && runtimeContext.getTrace() != null) {
+            if (resumingSuspendedIteration && runtimeContext.getIteration() != null) {
                 synchronizeResumedMessages();
-                runtimeContext.getTrace().setStatus(AgentTrace.Status.IN_PROGRESS);
-                if (runtimeContext.getTrace().getFlowAction() != HookFlowAction.SKIP_TRACE
-                        && runtimeContext.getTrace().getFlowAction() != HookFlowAction.END_TURN) {
+                runtimeContext.getIteration().setStatus(AgentIteration.Status.IN_PROGRESS);
+                if (runtimeContext.getIteration().getFlowAction() != HookFlowAction.SKIP_ITERATION
+                        && runtimeContext.getIteration().getFlowAction() != HookFlowAction.END_TURN) {
                     resumeOutstandingToolCalls();
                 }
-                finishTrace(runtimeContext.getTrace());
-                if (runtimeContext.getTrace().getFlowAction() == HookFlowAction.END_TURN) {
+                finishIteration(runtimeContext.getIteration());
+                if (runtimeContext.getIteration().getFlowAction() == HookFlowAction.END_TURN) {
                     context.setExecutionStatus(ExecutionStatus.COMPLETED);
                     runtimeContext.getTurn().setStatus(AgentTurn.Status.ENDED_BY_HOOK);
                     completeTurn(AgentTurn.Status.ENDED_BY_HOOK);
                     return;
                 }
             }
-            if (context.getTraceNo() == null || context.getTraceNo() == 0) {
+            if (context.getIterationNo() == null || context.getIterationNo() == 0) {
                 lifecycleHookRuntime.run(HookPoint.TURN_START, runtimeContext);
                 agentExecutionStore.saveTurn(runtimeContext.getTurn());
             }
@@ -161,12 +161,12 @@ public class SuperAgent {
             suspended = true;
             runtimeContext.getTurn().setStatus(AgentTurn.Status.SUSPENDED);
             agentExecutionStore.saveTurn(runtimeContext.getTurn());
-            if (runtimeContext.getTrace() != null) {
-                runtimeContext.getTrace().setStatus(AgentTrace.Status.SUSPENDED);
-                agentExecutionStore.saveTrace(runtimeContext.getTrace());
+            if (runtimeContext.getIteration() != null) {
+                runtimeContext.getIteration().setStatus(AgentIteration.Status.SUSPENDED);
+                agentExecutionStore.saveIteration(runtimeContext.getIteration());
             }
-            log.info("会话挂起等待用户回复，sessionId={}, turnNo={}, traceNo={}",
-                    context.getSessionId(), context.getTurnNo(), context.getTraceNo());
+            log.info("会话挂起等待用户回复，sessionId={}, turnNo={}, iterationNo={}",
+                    context.getSessionId(), context.getTurnNo(), context.getIterationNo());
         } catch (RuntimeException ex) {
             if (context.getExecutionStatus() == ExecutionStatus.IN_PROGRESS) {
                 context.setExecutionStatus(ExecutionStatus.FAILED);
@@ -193,11 +193,11 @@ public class SuperAgent {
             StageToolPlan toolPlan = stageToolResolver.resolve(context);
             refreshWorkingMessages(toolPlan);
             runtimeContext.setEnabledTools(new ArrayList<>(toolPlan.callableTools()));
-            AgentTrace trace = beginTrace();
-            boolean traceSuspended = false;
+            AgentIteration iteration = beginIteration();
+            boolean iterationSuspended = false;
 
             try {
-                lifecycleHookRuntime.run(HookPoint.TRACE_START, runtimeContext);
+                lifecycleHookRuntime.run(HookPoint.ITERATION_START, runtimeContext);
                 lifecycleHookRuntime.run(HookPoint.PRE_MODEL_CALL, runtimeContext);
 
                 Prompt promptToLlm = agentPromptAssembler.assemble(
@@ -209,14 +209,14 @@ public class SuperAgent {
                     // 兼容只实现旧 assemble 重载的扩展和测试替身。
                     promptToLlm = agentPromptAssembler.assemble(context, toolPlan);
                 }
-                trace.setModelInput(new ArrayList<>(promptToLlm.getInstructions()));
-                agentExecutionStore.saveTrace(trace);
+                iteration.setModelInput(new ArrayList<>(promptToLlm.getInstructions()));
+                agentExecutionStore.saveIteration(iteration);
 
-                log.info("核心引擎 Trace 启动，turnNo={}, traceNo={}, 当前阶段={}",
-                        context.getTurnNo(), context.getTraceNo(), context.getCurrentStage());
+                log.info("核心引擎 Iteration 启动，turnNo={}, iterationNo={}, 当前阶段={}",
+                        context.getTurnNo(), context.getIterationNo(), context.getCurrentStage());
                 ChatResponse response = modelResponseStreamer.stream(promptToLlm, context);
                 AssistantMessage rawAssistantMessage = response.getResult().getOutput();
-                trace.setOriginalModelOutput(response);
+                iteration.setOriginalModelOutput(response);
                 runtimeContext.setOriginalModelOutput(response);
                 runtimeContext.getWorkingMessages().add(rawAssistantMessage);
                 runtimeContext.setFinalModelOutput(rawAssistantMessage);
@@ -224,7 +224,7 @@ public class SuperAgent {
                 lifecycleHookRuntime.run(HookPoint.POST_MODEL_CALL, runtimeContext);
                 AssistantMessage assistantMessage = resolveFinalAssistantMessage(rawAssistantMessage);
                 runtimeContext.setFinalModelOutput(assistantMessage);
-                trace.setFinalModelOutput(assistantMessage);
+                iteration.setFinalModelOutput(assistantMessage);
                 if (assistantMessage != null) {
                     conversationMemoryManager.appendDialogueMessage(context, assistantMessage);
                 }
@@ -244,7 +244,7 @@ public class SuperAgent {
                             context.getCurrentStage(),
                             runtimeContext);
                     if (result.directAnswerTriggered()) {
-                        trace.setFlowAction(HookFlowAction.END_TURN);
+                        iteration.setFlowAction(HookFlowAction.END_TURN);
                         runtimeContext.getTurn().setStatus(AgentTurn.Status.ENDED_BY_HOOK);
                         break;
                     }
@@ -252,17 +252,17 @@ public class SuperAgent {
                 }
                 break;
             } catch (HumanInTheLoopException ex) {
-                traceSuspended = true;
-                trace.setStatus(AgentTrace.Status.SUSPENDED);
-                agentExecutionStore.saveTrace(trace);
+                iterationSuspended = true;
+                iteration.setStatus(AgentIteration.Status.SUSPENDED);
+                agentExecutionStore.saveIteration(iteration);
                 throw ex;
             } catch (RuntimeException ex) {
-                trace.setStatus(AgentTrace.Status.FAILED);
-                trace.setError(ex.getMessage());
+                iteration.setStatus(AgentIteration.Status.FAILED);
+                iteration.setError(ex.getMessage());
                 throw ex;
             } finally {
-                if (!traceSuspended) {
-                    finishTrace(trace);
+                if (!iterationSuspended) {
+                    finishIteration(iteration);
                 }
             }
         }
@@ -291,8 +291,8 @@ public class SuperAgent {
                 .userId(context.getUserId())
                 .startedAt(LocalDateTime.now())
                 .build());
-        List<ToolCallRecord> persistedTurnToolCalls = agentExecutionStore.findTraces(context.getTurnNo()).stream()
-                .flatMap(trace -> trace.getToolCalls().stream())
+        List<ToolCallRecord> persistedTurnToolCalls = agentExecutionStore.findIterations(context.getTurnNo()).stream()
+                .flatMap(iteration -> iteration.getToolCalls().stream())
                 .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
         runtimeContext = AgentRuntimeContext.builder()
                 .executionStore(agentExecutionStore)
@@ -304,7 +304,7 @@ public class SuperAgent {
                         : new ArrayList<>())
                 .workingMessagesInitialized((context.getWorkingMessages() != null
                         && !context.getWorkingMessages().isEmpty())
-                        || (context.getTraceNo() != null && context.getTraceNo() > 0))
+                        || (context.getIterationNo() != null && context.getIterationNo() > 0))
                 .fixedMessageCount(context.getFixedMessages() != null ? context.getFixedMessages().size() : 0)
                 .availableTools(new ArrayList<>(context.getAvailableTools()))
                 .activeSkillNames(context.getActiveSkillNames() != null
@@ -312,15 +312,15 @@ public class SuperAgent {
                         : new ArrayList<>())
                 .turnToolCalls(persistedTurnToolCalls)
                 .build();
-        if (context.getTraceNo() != null && context.getTraceNo() > 0) {
-            AgentTrace suspendedTrace = agentExecutionStore.findTrace(context.getTurnNo(), context.getTraceNo())
-                    .orElseGet(() -> AgentTrace.builder()
+        if (context.getIterationNo() != null && context.getIterationNo() > 0) {
+            AgentIteration suspendedIteration = agentExecutionStore.findIteration(context.getTurnNo(), context.getIterationNo())
+                    .orElseGet(() -> AgentIteration.builder()
                             .turnNo(context.getTurnNo())
-                            .traceNo(context.getTraceNo())
-                            .status(AgentTrace.Status.SUSPENDED)
+                            .iterationNo(context.getIterationNo())
+                            .status(AgentIteration.Status.SUSPENDED)
                             .startedAt(LocalDateTime.now())
                             .build());
-            runtimeContext.setTrace(suspendedTrace);
+            runtimeContext.setIteration(suspendedIteration);
         }
     }
 
@@ -407,19 +407,19 @@ public class SuperAgent {
                 .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
     }
 
-    private AgentTrace beginTrace() {
-        int traceNo = context.getTraceNo() != null ? context.getTraceNo() + 1 : 1;
-        context.setTraceNo(traceNo);
-        AgentTrace trace = AgentTrace.builder()
+    private AgentIteration beginIteration() {
+        int iterationNo = context.getIterationNo() != null ? context.getIterationNo() + 1 : 1;
+        context.setIterationNo(iterationNo);
+        AgentIteration iteration = AgentIteration.builder()
                 .turnNo(context.getTurnNo())
-                .traceNo(traceNo)
+                .iterationNo(iterationNo)
                 .startedAt(LocalDateTime.now())
                 .build();
-        runtimeContext.setTrace(trace);
-        runtimeContext.getTurn().setLastTraceNo(traceNo);
-        agentExecutionStore.saveTrace(trace);
+        runtimeContext.setIteration(iteration);
+        runtimeContext.getTurn().setLastIterationNo(iterationNo);
+        agentExecutionStore.saveIteration(iteration);
         agentExecutionStore.saveTurn(runtimeContext.getTurn());
-        return trace;
+        return iteration;
     }
 
     private AssistantMessage resolveFinalAssistantMessage(AssistantMessage fallback) {
@@ -429,7 +429,7 @@ public class SuperAgent {
             if (message == fallback) {
                 return fallback;
             }
-            for (MessageMutationRecord mutation : runtimeContext.getTrace().getMessageMutations()) {
+            for (MessageMutationRecord mutation : runtimeContext.getIteration().getMessageMutations()) {
                 if (mutation.isApplied()
                         && mutation.getHookPoint() == HookPoint.POST_MODEL_CALL
                         && mutation.getAfterMessage() == message
@@ -441,15 +441,15 @@ public class SuperAgent {
         return null;
     }
 
-    private void finishTrace(AgentTrace trace) {
-        if (trace.getStatus() == AgentTrace.Status.IN_PROGRESS) {
-            trace.setStatus(trace.getFlowAction() == HookFlowAction.SKIP_TRACE
-                    ? AgentTrace.Status.SKIPPED
-                    : AgentTrace.Status.COMPLETED);
+    private void finishIteration(AgentIteration iteration) {
+        if (iteration.getStatus() == AgentIteration.Status.IN_PROGRESS) {
+            iteration.setStatus(iteration.getFlowAction() == HookFlowAction.SKIP_ITERATION
+                    ? AgentIteration.Status.SKIPPED
+                    : AgentIteration.Status.COMPLETED);
         }
-        lifecycleHookRuntime.run(HookPoint.TRACE_END, runtimeContext);
-        trace.setEndedAt(LocalDateTime.now());
-        agentExecutionStore.saveTrace(trace);
+        lifecycleHookRuntime.run(HookPoint.ITERATION_END, runtimeContext);
+        iteration.setEndedAt(LocalDateTime.now());
+        agentExecutionStore.saveIteration(iteration);
     }
 
     private void completeTurn(AgentTurn.Status status) {

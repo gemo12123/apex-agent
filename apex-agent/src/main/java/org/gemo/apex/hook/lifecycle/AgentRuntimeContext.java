@@ -21,7 +21,7 @@ public class AgentRuntimeContext {
     private SuperAgentContext sessionContext;
     private AgentDefinition agentDefinition;
     private AgentTurn turn;
-    private AgentTrace trace;
+    private AgentIteration iteration;
     @Builder.Default
     private List<Message> workingMessages = new ArrayList<>();
     private boolean workingMessagesInitialized;

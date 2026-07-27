@@ -27,7 +27,7 @@ public class AgentTurn {
     private String userId;
     @Builder.Default
     private Status status = Status.IN_PROGRESS;
-    private int lastTraceNo;
+    private int lastIterationNo;
     @Builder.Default
     private List<HookExecutionRecord> hookExecutions = new ArrayList<>();
     @Builder.Default

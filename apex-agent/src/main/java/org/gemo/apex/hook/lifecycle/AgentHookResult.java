@@ -38,8 +38,8 @@ public class AgentHookResult {
         return builder().updatedToolResult(result).build();
     }
 
-    public static AgentHookResult skipTrace(List<MessageOperation> operations) {
-        return builder().action(HookFlowAction.SKIP_TRACE)
+    public static AgentHookResult skipIteration(List<MessageOperation> operations) {
+        return builder().action(HookFlowAction.SKIP_ITERATION)
                 .messageOperations(operations != null ? List.copyOf(operations) : List.of())
                 .build();
     }

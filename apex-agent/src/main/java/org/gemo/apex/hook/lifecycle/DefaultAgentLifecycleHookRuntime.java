@@ -79,13 +79,13 @@ public class DefaultAgentLifecycleHookRuntime implements AgentLifecycleHookRunti
                 record.setEndedAt(LocalDateTime.now());
                 addExecutionRecord(context, record);
                 persistBoundary(context);
-                log.warn("生命周期 Hook 执行失败，已忽略并继续主流程: point={}, bean={}, agentKey={}, sessionId={}, turnNo={}, traceNo={}",
+                log.warn("生命周期 Hook 执行失败，已忽略并继续主流程: point={}, bean={}, agentKey={}, sessionId={}, turnNo={}, iterationNo={}",
                         point,
                         binding.getBean(),
                         context.getSessionContext() != null ? context.getSessionContext().getAgentKey() : null,
                         context.getSessionContext() != null ? context.getSessionContext().getSessionId() : null,
                         context.getTurn() != null ? context.getTurn().getTurnNo() : null,
-                        context.getTrace() != null ? context.getTrace().getTraceNo() : null,
+                        context.getIteration() != null ? context.getIteration().getIterationNo() : null,
                         ex);
             }
         }
@@ -245,8 +245,8 @@ public class DefaultAgentLifecycleHookRuntime implements AgentLifecycleHookRunti
             record.setError(ex.getMessage());
             throw ex;
         } finally {
-            if (context.getTrace() != null) {
-                context.getTrace().getMessageMutations().add(record);
+            if (context.getIteration() != null) {
+                context.getIteration().getMessageMutations().add(record);
             } else if (context.getTurn() != null) {
                 context.getTurn().getMessageMutations().add(record);
             }
@@ -264,8 +264,8 @@ public class DefaultAgentLifecycleHookRuntime implements AgentLifecycleHookRunti
             if (context.getTurn() != null) {
                 context.getTurn().getHookExecutions().add(record);
             }
-        } else if (context.getTrace() != null) {
-            context.getTrace().getHookExecutions().add(record);
+        } else if (context.getIteration() != null) {
+            context.getIteration().getHookExecutions().add(record);
         }
     }
 
@@ -273,12 +273,12 @@ public class DefaultAgentLifecycleHookRuntime implements AgentLifecycleHookRunti
             AgentRuntimeContext context) {
         List<HookBindingConfig> bindings = switch (point) {
             case TURN_START -> hooks.getTurnStart();
-            case TRACE_START -> hooks.getTraceStart();
+            case ITERATION_START -> hooks.getIterationStart();
             case PRE_MODEL_CALL -> hooks.getPreModelCall();
             case POST_MODEL_CALL -> hooks.getPostModelCall();
             case PRE_TOOL_CALL -> hooks.getPreToolCall();
             case POST_TOOL_CALL -> hooks.getPostToolCall();
-            case TRACE_END -> hooks.getTraceEnd();
+            case ITERATION_END -> hooks.getIterationEnd();
             case TURN_END -> hooks.getTurnEnd();
         };
         if (bindings == null || bindings.isEmpty()) {
@@ -303,16 +303,16 @@ public class DefaultAgentLifecycleHookRuntime implements AgentLifecycleHookRunti
             return;
         }
         try {
-            if (context.getTrace() != null) {
-                context.getExecutionStore().saveTrace(context.getTrace());
+            if (context.getIteration() != null) {
+                context.getExecutionStore().saveIteration(context.getIteration());
             }
             if (context.getTurn() != null) {
                 context.getExecutionStore().saveTurn(context.getTurn());
             }
         } catch (RuntimeException ex) {
-            log.warn("Hook 边界 Trace 持久化失败，主流程继续: turnNo={}, traceNo={}",
+            log.warn("Hook 边界 Iteration 持久化失败，主流程继续: turnNo={}, iterationNo={}",
                     context.getTurn() != null ? context.getTurn().getTurnNo() : null,
-                    context.getTrace() != null ? context.getTrace().getTraceNo() : null,
+                    context.getIteration() != null ? context.getIteration().getIterationNo() : null,
                     ex);
         }
     }

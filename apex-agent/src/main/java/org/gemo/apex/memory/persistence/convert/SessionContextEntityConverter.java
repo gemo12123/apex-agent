@@ -47,7 +47,7 @@ public final class SessionContextEntityConverter {
         snapshot.setPendingHumanInteraction(context.getPendingHumanInteraction());
         snapshot.setPendingToolExecution(context.getPendingToolExecution());
         snapshot.setTurnNo(context.getTurnNo());
-        snapshot.setTraceNo(context.getTraceNo());
+        snapshot.setIterationNo(context.getIterationNo());
         snapshot.setWorkingMessagesPayload(MessageEntityConverter.toPayloadList(context.getWorkingMessages()));
         snapshot.setActiveSkillNames(context.getActiveSkillNames() != null
                 ? new ArrayList<>(context.getActiveSkillNames())
@@ -156,7 +156,7 @@ public final class SessionContextEntityConverter {
             context.setPendingToolResult(snapshot.getPendingToolResult());
             context.setPendingHumanInteraction(snapshot.getPendingHumanInteraction());
             context.setPendingToolExecution(snapshot.getPendingToolExecution());
-            context.setTraceNo(snapshot.getTraceNo() != null ? snapshot.getTraceNo() : 0);
+            context.setIterationNo(snapshot.getIterationNo() != null ? snapshot.getIterationNo() : 0);
             context.setWorkingMessages(MessageEntityConverter.fromPayloadList(snapshot.getWorkingMessagesPayload()));
             context.setActiveSkillNames(snapshot.getActiveSkillNames() != null
                     ? new ArrayList<>(snapshot.getActiveSkillNames())

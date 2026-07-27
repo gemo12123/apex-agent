@@ -9,7 +9,7 @@ import org.gemo.apex.exception.HumanInTheLoopException;
 import org.gemo.apex.hook.ToolMatcher;
 import org.gemo.apex.hook.lifecycle.AgentLifecycleHookRuntime;
 import org.gemo.apex.hook.lifecycle.AgentRuntimeContext;
-import org.gemo.apex.hook.lifecycle.AgentTrace;
+import org.gemo.apex.hook.lifecycle.AgentIteration;
 import org.gemo.apex.hook.lifecycle.AgentTurn;
 import org.gemo.apex.hook.lifecycle.DefaultAgentLifecycleHookRuntime;
 import org.gemo.apex.hook.lifecycle.HookDispatchResult;
@@ -166,7 +166,7 @@ class ToolCallProcessorTest {
                 SuperAgentContext.Stage.EXECUTION, runtime);
 
         verify(agentToolExecutor, never()).execute(any(), any());
-        assertEquals(HookFlowAction.BLOCK_TOOL, runtime.getTrace().getToolCalls().getFirst().getAction());
+        assertEquals(HookFlowAction.BLOCK_TOOL, runtime.getIteration().getToolCalls().getFirst().getAction());
         verify(conversationMemoryManager).appendDialogueMessage(any(), argThat((ToolResponseMessage response) ->
                 response.getResponses().getFirst().responseData().contains("tool disabled by lifecycle hook")));
     }
@@ -205,8 +205,8 @@ class ToolCallProcessorTest {
         assertEquals("MCP", hookContext.getToolType());
         assertFalse(hookContext.isToolExecutionSucceeded());
         assertEquals(hookContext.getInvocationId(),
-                runtime.getTrace().getToolCalls().getFirst().getInvocationId());
-        assertFalse(runtime.getTrace().getToolCalls().getFirst().isSucceeded());
+                runtime.getIteration().getToolCalls().getFirst().getInvocationId());
+        assertFalse(runtime.getIteration().getToolCalls().getFirst().isSucceeded());
         verify(conversationMemoryManager).appendDialogueMessage(any(), argThat((ToolResponseMessage response) ->
                 "handled failure".equals(response.getResponses().getFirst().responseData())));
     }
@@ -224,7 +224,7 @@ class ToolCallProcessorTest {
                         "agent-1", ModeEnum.REACT, List.of(), List.of(), List.of(),
                         hooks, "", "", "", ""))
                 .turn(AgentTurn.builder().turnNo(1L).build())
-                .trace(AgentTrace.builder().turnNo(1L).traceNo(1).build())
+                .iteration(AgentIteration.builder().turnNo(1L).iterationNo(1).build())
                 .availableTools(new ArrayList<>(availableTools))
                 .enabledTools(new ArrayList<>(enabledTools))
                 .workingMessages(new ArrayList<>())

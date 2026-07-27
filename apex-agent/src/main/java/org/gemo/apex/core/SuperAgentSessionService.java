@@ -133,7 +133,7 @@ public class SuperAgentSessionService {
         context.setExecutionStatus(ExecutionStatus.IN_PROGRESS);
         context.setPendingToolResult(null);
         context.setTurnNo(agentExecutionStore.nextTurnNo());
-        context.setTraceNo(0);
+        context.setIterationNo(0);
         context.setActiveSkillNames(new java.util.ArrayList<>());
         context.setEnabledToolNames(new java.util.ArrayList<>());
         context.setWorkingMessages(new java.util.ArrayList<>());

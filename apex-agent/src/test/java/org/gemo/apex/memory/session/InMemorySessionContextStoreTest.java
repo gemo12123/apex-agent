@@ -71,6 +71,8 @@ class InMemorySessionContextStoreTest {
         assertFalse(runtimeSnapshot.containsKey("persistedDialogueMessageIndex"));
         assertFalse(runtimeSnapshot.containsKey("nextMessageSortNo"));
         assertEquals(2, ((Number) runtimeSnapshot.get("turnNo")).longValue());
+        assertEquals(3, ((Number) runtimeSnapshot.get("iterationNo")).intValue());
+        assertFalse(runtimeSnapshot.containsKey("traceNo"));
         assertEquals(List.of("meeting_tool"), runtimeSnapshot.get("enabledToolNames"));
 
         context.setAgentKey("agent-mutated");
@@ -93,6 +95,7 @@ class InMemorySessionContextStoreTest {
         assertEquals(ExecutionStatus.IN_PROGRESS, loaded.getExecutionStatus());
         assertEquals("stage-runtime-1", loaded.getCurrentStageId());
         assertEquals(2, loaded.getTurnNo());
+        assertEquals(3, loaded.getIterationNo());
         assertEquals(2L, loaded.getLatestCompressedSortNo());
         assertEquals(2L, loaded.getTurnStartSortNo());
         assertEquals(2, loaded.getPersistedDialogueMessageIndex());
@@ -278,6 +281,7 @@ class InMemorySessionContextStoreTest {
         context.setPersistedDialogueMessageIndex(2);
         context.setNextMessageSortNo(5L);
         context.setTurnNo(2);
+        context.setIterationNo(3);
         context.setLastActiveTime(LocalDateTime.of(2026, 3, 17, 10, 30, 0));
         context.setPendingToolResult(Map.of("approved", true));
         context.setPlan(buildPlan());

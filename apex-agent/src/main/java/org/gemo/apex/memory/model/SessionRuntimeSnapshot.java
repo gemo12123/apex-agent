@@ -36,7 +36,7 @@ public class SessionRuntimeSnapshot {
 
     private Long turnNo;
 
-    private Integer traceNo;
+    private Integer iterationNo;
 
     private String workingMessagesPayload;
 

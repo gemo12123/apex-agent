@@ -21,6 +21,6 @@ public class PendingToolExecution {
     private String confirmationId;
     private List<String> executedPreHookBeans;
     private Long turnNo;
-    private Integer traceNo;
+    private Integer iterationNo;
     private Integer toolIndex;
 }

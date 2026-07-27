@@ -61,8 +61,8 @@ class DefaultAgentLifecycleHookRuntimeTest {
         assertEquals(List.of("earlier", "later"), result.getExecutedHookBeans());
         assertEquals(List.of("initial", "earlier", "later"),
                 runtime.getWorkingMessages().stream().map(message -> message.getText()).toList());
-        assertEquals(2, runtime.getTrace().getMessageMutations().size());
-        assertTrue(runtime.getTrace().getMessageMutations().stream().allMatch(MessageMutationRecord::isApplied));
+        assertEquals(2, runtime.getIteration().getMessageMutations().size());
+        assertTrue(runtime.getIteration().getMessageMutations().stream().allMatch(MessageMutationRecord::isApplied));
     }
 
     @Test
@@ -92,9 +92,9 @@ class DefaultAgentLifecycleHookRuntimeTest {
         assertEquals(List.of("good"), result.getExecutedHookBeans());
         assertEquals("replaced", runtime.getWorkingMessages().getFirst().getText());
         assertEquals("after-invalid", runtime.getWorkingMessages().getLast().getText());
-        assertFalse(runtime.getTrace().getMessageMutations().getFirst().isApplied());
-        assertEquals(3, runtime.getTrace().getHookExecutions().size());
-        assertEquals(2, runtime.getTrace().getHookExecutions().stream()
+        assertFalse(runtime.getIteration().getMessageMutations().getFirst().isApplied());
+        assertEquals(3, runtime.getIteration().getHookExecutions().size());
+        assertEquals(2, runtime.getIteration().getHookExecutions().stream()
                 .filter(record -> !record.isSucceeded())
                 .count());
     }
@@ -107,25 +107,25 @@ class DefaultAgentLifecycleHookRuntimeTest {
         when(applicationContext.getBean("invalid")).thenReturn(invalid);
         when(applicationContext.getBean("good")).thenReturn(good);
         AgentRuntimeContext runtime = runtime(AgentHooksConfig.builder()
-                .traceStart(List.of(binding("invalid", 1), binding("good", 2)))
+                .iterationStart(List.of(binding("invalid", 1), binding("good", 2)))
                 .build());
 
-        HookDispatchResult result = hookRuntime.run(HookPoint.TRACE_START, runtime);
+        HookDispatchResult result = hookRuntime.run(HookPoint.ITERATION_START, runtime);
 
         assertEquals(HookFlowAction.CONTINUE, result.getResult().getAction());
         assertEquals("continued", runtime.getWorkingMessages().getLast().getText());
-        assertFalse(runtime.getTrace().getHookExecutions().getFirst().isSucceeded());
+        assertFalse(runtime.getIteration().getHookExecutions().getFirst().isSucceeded());
     }
 
     @Test
-    void shouldAuditTurnStartMessageOperationsBeforeFirstTrace() {
+    void shouldAuditTurnStartMessageOperationsBeforeFirstIteration() {
         AgentLifecycleHook hook = context -> AgentHookResult.continueWithMessages(
                 List.of(MessageOperation.append(new UserMessage("turn-start"))));
         when(applicationContext.getBean("turnStart")).thenReturn(hook);
         AgentRuntimeContext runtime = runtime(AgentHooksConfig.builder()
                 .turnStart(List.of(binding("turnStart", 1)))
                 .build());
-        runtime.setTrace(null);
+        runtime.setIteration(null);
 
         hookRuntime.run(HookPoint.TURN_START, runtime);
 
@@ -135,10 +135,10 @@ class DefaultAgentLifecycleHookRuntimeTest {
     }
 
     @Test
-    void traceAuditPayloadShouldRoundTrip() {
-        AgentTrace trace = AgentTrace.builder()
+    void iterationAuditPayloadShouldRoundTrip() {
+        AgentIteration iteration = AgentIteration.builder()
                 .turnNo(10L)
-                .traceNo(2)
+                .iterationNo(2)
                 .modelInput(new ArrayList<>(List.of(new UserMessage("input"))))
                 .originalModelOutput(new ChatResponse(List.of(
                         new Generation(new AssistantMessage("raw-output")))))
@@ -151,10 +151,14 @@ class DefaultAgentLifecycleHookRuntimeTest {
                 .startedAt(LocalDateTime.now())
                 .build();
 
-        AgentTrace restored = JacksonUtils.fromJson(JacksonUtils.toJson(trace), AgentTrace.class);
+        String payload = JacksonUtils.toJson(iteration);
+        AgentIteration restored = JacksonUtils.fromJson(payload, AgentIteration.class);
 
         assertNotNull(restored);
+        assertTrue(payload.contains("\"iterationNo\":2"));
+        assertFalse(payload.contains("traceNo"));
         assertEquals(10L, restored.getTurnNo());
+        assertEquals(2, restored.getIterationNo());
         assertEquals("input", restored.getModelInput().getFirst().getText());
         assertEquals("raw-output", restored.getOriginalModelOutput().getResult().getOutput().getText());
         assertEquals("final-output", restored.getFinalModelOutput().getText());
@@ -172,9 +176,9 @@ class DefaultAgentLifecycleHookRuntimeTest {
                 .agentKey("agent-1")
                 .startedAt(LocalDateTime.now())
                 .build();
-        AgentTrace trace = AgentTrace.builder()
+        AgentIteration iteration = AgentIteration.builder()
                 .turnNo(10L)
-                .traceNo(1)
+                .iterationNo(1)
                 .startedAt(LocalDateTime.now())
                 .build();
         return AgentRuntimeContext.builder()
@@ -182,7 +186,7 @@ class DefaultAgentLifecycleHookRuntimeTest {
                 .agentDefinition(new AgentDefinition("agent-1", ModeEnum.REACT, List.of(), List.of(), List.of(),
                         hooks, "", "", "", ""))
                 .turn(turn)
-                .trace(trace)
+                .iteration(iteration)
                 .workingMessages(new ArrayList<>(List.of(new UserMessage("initial"))))
                 .build();
     }

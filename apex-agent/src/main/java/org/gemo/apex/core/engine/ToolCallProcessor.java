@@ -125,10 +125,10 @@ public class ToolCallProcessor {
                 recordToolCall(runtimeContext, toolCall, false, preAction, reason, invocationId);
                 continue;
             }
-            if (preAction == HookFlowAction.SKIP_TRACE || preAction == HookFlowAction.END_TURN) {
+            if (preAction == HookFlowAction.SKIP_ITERATION || preAction == HookFlowAction.END_TURN) {
                 markFlow(runtimeContext, preAction);
                 appendMissingResponses(context, runtimeContext, calls, respondedCallIds, index,
-                        preAction == HookFlowAction.SKIP_TRACE ? "tool skipped by lifecycle hook"
+                        preAction == HookFlowAction.SKIP_ITERATION ? "tool skipped by lifecycle hook"
                                 : "turn ended by lifecycle hook");
                 return preAction == HookFlowAction.END_TURN
                         ? ToolCallProcessingResult.terminateLoop()
@@ -194,10 +194,10 @@ public class ToolCallProcessor {
             recordToolCall(runtimeContext, toolCall, succeeded, postDispatch.getResult().getAction(), error, invocationId);
 
             HookFlowAction postAction = postDispatch.getResult().getAction();
-            if (postAction == HookFlowAction.SKIP_TRACE || postAction == HookFlowAction.END_TURN) {
+            if (postAction == HookFlowAction.SKIP_ITERATION || postAction == HookFlowAction.END_TURN) {
                 markFlow(runtimeContext, postAction);
                 appendMissingResponses(context, runtimeContext, calls, respondedCallIds, index + 1,
-                        postAction == HookFlowAction.SKIP_TRACE ? "tool skipped by lifecycle hook"
+                        postAction == HookFlowAction.SKIP_ITERATION ? "tool skipped by lifecycle hook"
                                 : "turn ended by lifecycle hook");
                 return postAction == HookFlowAction.END_TURN
                         ? ToolCallProcessingResult.terminateLoop()
@@ -248,10 +248,10 @@ public class ToolCallProcessor {
                         : parseArguments(call.arguments()))
                 .finalResult(reason)
                 .succeeded(false)
-                .action(runtimeContext.getTrace().getFlowAction())
+                .action(runtimeContext.getIteration().getFlowAction())
                 .error(reason)
                 .build();
-        runtimeContext.getTrace().getToolCalls().add(record);
+        runtimeContext.getIteration().getToolCalls().add(record);
         runtimeContext.getTurnToolCalls().add(record);
     }
 
@@ -268,14 +268,14 @@ public class ToolCallProcessor {
                 .action(action)
                 .error(error)
                 .build();
-        runtimeContext.getTrace().getToolCalls().add(record);
+        runtimeContext.getIteration().getToolCalls().add(record);
         runtimeContext.getTurnToolCalls().add(record);
     }
 
     private void markFlow(AgentRuntimeContext runtimeContext, HookFlowAction action) {
-        runtimeContext.getTrace().setFlowAction(action);
-        if (action == HookFlowAction.SKIP_TRACE) {
-            runtimeContext.getTrace().setStatus(org.gemo.apex.hook.lifecycle.AgentTrace.Status.SKIPPED);
+        runtimeContext.getIteration().setFlowAction(action);
+        if (action == HookFlowAction.SKIP_ITERATION) {
+            runtimeContext.getIteration().setStatus(org.gemo.apex.hook.lifecycle.AgentIteration.Status.SKIPPED);
         }
     }
 
@@ -314,12 +314,12 @@ public class ToolCallProcessor {
                 .confirmationId(spec.getConfirmationId())
                 .executedPreHookBeans(dispatchResult.getExecutedHookBeans())
                 .turnNo(context.getTurnNo())
-                .traceNo(context.getTraceNo())
+                .iterationNo(context.getIterationNo())
                 .toolIndex(toolIndex)
                 .build());
         context.setExecutionStatus(ExecutionStatus.HUMAN_IN_THE_LOOP);
-        runtimeContext.getTrace().setStatus(org.gemo.apex.hook.lifecycle.AgentTrace.Status.SUSPENDED);
-        runtimeContext.getTrace().setFlowAction(HookFlowAction.REQUEST_CONFIRMATION);
+        runtimeContext.getIteration().setStatus(org.gemo.apex.hook.lifecycle.AgentIteration.Status.SUSPENDED);
+        runtimeContext.getIteration().setFlowAction(HookFlowAction.REQUEST_CONFIRMATION);
         MessageUtils.sendMessage(context, ToolConfirmationMessage.from(context, toolCall, invocationId, spec));
         throw new HumanInLoopExceptionAdapter();
     }
