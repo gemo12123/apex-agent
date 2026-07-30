@@ -72,6 +72,8 @@ ChatController
 29. runtime 的 `newAgent`/`resumeAgent` 在返回执行句柄前同步获取 session execution lease；句柄从同步准备、异步执行到 finally/取消始终持有同一 lease，使 platform 能在返回 `SseEmitter` 前把冲突映射为 HTTP 409。
 30. Agent 定义构造语义属于 core。core 提供 `AgentDefinitionAssembler` 和 `ApexAgentFactory`；runtime 只负责提供端口实现、取得 lease、绑定请求级事件出口并调用 core 入口。
 31. 本期 platform 只支持单实例部署。`SessionExecutionCoordinator` 作为 runtime 可替换 SPI，默认使用进程内实现；在实现 PostgreSQL/分布式 lease 和续租前，不允许多个 platform 实例共同处理同一会话命名空间。
+32. Builder 只校验注册表和基础设施装配，不加载动态 AgentDefinition，也不执行定义级三层工具、Hook Binding 或 Skill 关系校验。所有请求的权威定义校验统一由 core `AgentDefinitionAssembler` 在 `AGENT_BUILD` 后执行；静态定义预检也必须复用同一 core 校验器。
+33. `TURN_START`、`ITERATION_START`、`ITERATION_END` 使用 `LoopHookResult`，允许 `CONTINUE`、`END_TURN`；`TURN_END` 单独使用 `TurnEndHookResult`，只允许 `CONTINUE`。
 
 ## 3. 目标与非目标
 
@@ -647,12 +649,14 @@ hooks:
 1. 从 Provider 加载原始定义。
 2. 创建可变构造草稿。
 3. 执行 `AGENT_BUILD` Hook。
-4. 校验工具、Skill、Hook 和 Prompt。
+4. 执行请求级权威校验：包括 `defaultEnabledTools ⊆ availableTools ⊆ registeredTools`、Skill/Hook 可解析性、HookPoint 与结果族匹配以及 Prompt 完整性。
 5. 冻结为不可变 `AgentDefinitionSnapshot`。
 6. 该快照作为当前 Turn 的运行定义。
 7. 在 SessionSnapshot 中保存当前活动 Turn 使用的恢复投影，挂起时只更新会话运行快照，不在挂起工具对象中重复保存。
 
 runtime 不直接执行上述步骤。它先取得 session execution lease、绑定请求级事件出口，再把 AgentRequest 和已经装配好的端口交给 core `ApexAgentFactory`。HUMAN_RESPONSE 则调用 `ApexAgentFactory.createResumed(...)`，直接加载定义快照恢复投影，不进入 `AgentDefinitionAssembler` 的 `AGENT_BUILD` 分支。
+
+动态 Provider 可以按请求的 `agentKey` 返回不同定义，runtime Builder 因此不得提前加载某个定义或复制第 4 步的规则。ProgrammaticAgentDefinition 等静态定义可以选择在启动时预检，但预检必须调用 Assembler 使用的同一 core 校验器；请求构造时仍再次执行权威校验。
 
 持久化快照是必要条件：HUMAN_RESPONSE 恢复不能重新执行 `AGENT_BUILD`，但必须继续使用挂起前由构造 Hook 产生的最终定义。
 
@@ -809,7 +813,7 @@ public record EndTurnFromPreToolCall(
 - 每个 record 只携带该生命周期和动作需要的数据，禁止依赖大量可空字段判断实际语义。
 - `HookMutations` 只封装多个运行生命周期真正共享的消息操作和 `ToolActivationDelta`；工具参数、工具结果、构造定义和压缩结果使用各自专用类型。
 - 所有集合在构造 record 时转为不可变副本；必填动作载荷不得为 null。
-- core 在注册 Hook 时校验 HookPoint、Context 类型和 Result 类型匹配，在运行时再次防御性校验。
+- runtime 注册表只校验 Hook 实现自身声明的类型元数据；core Assembler 在加载 AgentDefinition 后校验 Hook Binding 的 HookPoint、Context 与 Result 族匹配，core 分发器在运行时再次防御性校验。
 - core 先校验整个结果 record，再一次性应用；任一字段非法时不得留下部分修改。
 
 可修改项：
@@ -1353,9 +1357,18 @@ Builder 在 `build()` 时完成：
 
 - 必需依赖校验。
 - 工具、Hook、Skill 重名校验。
+- 注册表项自身的类型元数据与基础契约校验。
 - 默认 EventPublisherFactory 和 SessionExecutionCoordinator 校验。
 - 默认实现补齐。
 - 资源生命周期归属确认。
+
+Builder 明确不负责：
+
+- 调用动态 AgentDefinitionProvider 加载任一 `agentKey`。
+- 校验 `defaultEnabledTools`、`availableTools` 与 `registeredTools` 的定义级关系。
+- 校验 AgentDefinition 中的 Hook Binding、Skill 引用或 Prompt 完整性。
+
+静态定义的可选启动期预检只能调用 core 与 Assembler 共用的校验器，不能形成 runtime 私有规则，也不能替代请求时校验。
 
 ### 14.3 恢复
 
@@ -1783,9 +1796,12 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - 十一个生命周期点的完整顺序，以及不满足压缩条件时两个条件生命周期不执行。
 - Hook 排序和错误策略。
 - Hook 未配置错误策略时默认 `CONTINUE`。
-- HookPoint、Context、Result 类型不匹配时注册失败。
+- Hook 实现自身声明的类型元数据非法时注册表拒绝；AgentDefinition 的 Hook Binding 与 HookPoint、Context、Result 族不匹配时 Assembler 构造失败。
 - `AgentDefinitionAssembler` 按“加载定义、创建可变草稿、执行 `AGENT_BUILD`、校验、冻结”顺序构造定义。
 - `ApexAgentFactory.createNew` 每次 NEW 只执行一次 `AGENT_BUILD`；`createResumed` 只使用持久化快照且不执行 `AGENT_BUILD`。
+- Builder 不调用动态 AgentDefinitionProvider；不同 `agentKey` 的工具、Hook、Skill 和 Prompt 关系在请求时分别由 Assembler 校验。
+- 静态定义预检与请求期 Assembler 使用同一 core 校验器，且请求期仍重新校验。
+- `TURN_START`、`ITERATION_START`、`ITERATION_END` 只接受 `LoopHookResult`；`TURN_END` 只接受 `TurnEndHookResult`，并拒绝 `END_TURN` 或其他结果族。
 - 各生命周期和动作使用专用 record，不存在万能可空字段结果对象。
 - Hook 修改消息、工具集合、参数、结果。
 - 非法流控动作。
