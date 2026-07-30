@@ -68,6 +68,10 @@ ChatController
 25. runtime 自身保证同一 `sessionId` 只有一个活跃执行，内存存储通过不可变快照或深拷贝隔离运行对象。
 26. 项目 JSON 处理统一使用 Jackson，并彻底移除 Fastjson。
 27. PostgreSQL 不使用 JSONB；快照、集合和消息载荷由 Jackson 序列化后存入 `TEXT`。
+28. 事件出口按请求注入。platform 必须为每次 NEW/HUMAN_RESPONSE 创建独立 `SseEmitterAgentEventPublisher`，并通过 runtime API 显式传入；Builder 只配置无显式出口时使用的默认 `AgentEventPublisherFactory`，不共享带请求状态的 Publisher。
+29. runtime 的 `newAgent`/`resumeAgent` 在返回执行句柄前同步获取 session execution lease；句柄从同步准备、异步执行到 finally/取消始终持有同一 lease，使 platform 能在返回 `SseEmitter` 前把冲突映射为 HTTP 409。
+30. Agent 定义构造语义属于 core。core 提供 `AgentDefinitionAssembler` 和 `ApexAgentFactory`；runtime 只负责提供端口实现、取得 lease、绑定请求级事件出口并调用 core 入口。
+31. 本期 platform 只支持单实例部署。`SessionExecutionCoordinator` 作为 runtime 可替换 SPI，默认使用进程内实现；在实现 PostgreSQL/分布式 lease 和续租前，不允许多个 platform 实例共同处理同一会话命名空间。
 
 ## 3. 目标与非目标
 
@@ -220,7 +224,7 @@ artifactId: apex-agent-{module}
 建议包含：
 
 - `AgentDefinition`、`AgentDefinitionSnapshot`、`AgentMetadata`。
-- `AgentRequest`、`HumanResponseCommand`。
+- `AgentRequest`、`HumanResponseCommand`、`AgentExecutionDescriptor`。
 - `SessionContext`、`SessionStatus`。
 - `Turn`、`TurnStatus`。
 - `Iteration`、`IterationStatus`。
@@ -285,6 +289,10 @@ public interface AgentEventPublisher {
     void publish(AgentMessage message);
 }
 
+public interface AgentEventPublisherFactory {
+    AgentEventPublisher create(AgentExecutionDescriptor execution);
+}
+
 public interface SessionRepository {
     Optional<SessionSnapshot> load(String sessionId);
     void save(SessionSnapshot snapshot);
@@ -332,6 +340,8 @@ public interface ConversationCompactor {
 - `ApexAgent` 主循环。
 - `ApexAgentContext`。
 - `AgentRuntimeContext`。
+- `AgentDefinitionAssembler`：加载定义、创建草稿、分发 `AGENT_BUILD`、校验并冻结定义快照。
+- `ApexAgentFactory`：分别按 NEW 和 HUMAN_RESPONSE 创建 core `ApexAgent`，恢复路径禁止分发 `AGENT_BUILD`。
 - Turn/Iteration 创建、流转和结束。
 - 生命周期调度器。
 - Agent 定义构造和冻结。
@@ -385,6 +395,7 @@ kit 中的实现只通过 `core-extension` 接口和 common 上下文工作，�
 包含：
 
 - `ApexAgentRuntime` 和 Builder API。
+- `ApexAgentExecution` 请求级执行句柄，持有 core `ApexAgent`、请求级事件出口和 session execution lease。
 - 默认 Agent 定义。
 - 默认 ReAct Prompt。
 - Spring AI `ChatModel`/消息/ToolCallback 与 common 模型之间的适配。
@@ -399,6 +410,7 @@ kit 中的实现只通过 `core-extension` 接口和 common 上下文工作，�
 - HTTP SubAgent 工具和远程 SSE 消息解析。
 - 保留现有 `org.gemo.apex.skills` 中非 learning 的 Skill 加载、解析、资源读取和 `activate_skill` 逻辑。
 - session 级执行锁。
+- `SessionExecutionCoordinator`/`SessionExecutionLease` runtime SPI 及默认进程内实现。
 
 runtime 可以使用最小范围的 Spring AI 依赖，但不得要求 Spring IoC 容器。
 
@@ -418,10 +430,11 @@ MCP 和 SubAgent 是 runtime 的可选能力：
 - Spring Boot 自动装配。
 - `ChatController`、`ChatService`。
 - `ApexAgentCoordinator`。
-- 同 session 并发防护。
+- 通过 runtime 同步 execution lease 实现同 session 并发防护，不维护 platform 私有锁表。
 - 异步线程池和用户上下文传播。
 - `X-User-Id` Filter。
 - `SseEmitterAgentEventPublisher`。
+- 在 Controller 返回 emitter 前同步创建 `ApexAgentExecution`，使 lease 冲突仍可映射为 HTTP 409。
 - Spring YAML AgentDefinitionProvider。
 - Spring Bean/配置到 runtime Hook、Tool 注册表的适配。
 - PostgreSQL Session/Conversation 存储；Turn/Iteration 暂不单独建表。
@@ -629,7 +642,7 @@ hooks:
 
 ### 7.3 定义快照
 
-每次普通创建 `ApexAgent` 时：
+每次普通 NEW 执行由 core `ApexAgentFactory.createNew(...)` 调用 `AgentDefinitionAssembler` 完成：
 
 1. 从 Provider 加载原始定义。
 2. 创建可变构造草稿。
@@ -638,6 +651,8 @@ hooks:
 5. 冻结为不可变 `AgentDefinitionSnapshot`。
 6. 该快照作为当前 Turn 的运行定义。
 7. 在 SessionSnapshot 中保存当前活动 Turn 使用的恢复投影，挂起时只更新会话运行快照，不在挂起工具对象中重复保存。
+
+runtime 不直接执行上述步骤。它先取得 session execution lease、绑定请求级事件出口，再把 AgentRequest 和已经装配好的端口交给 core `ApexAgentFactory`。HUMAN_RESPONSE 则调用 `ApexAgentFactory.createResumed(...)`，直接加载定义快照恢复投影，不进入 `AgentDefinitionAssembler` 的 `AGENT_BUILD` 分支。
 
 持久化快照是必要条件：HUMAN_RESPONSE 恢复不能重新执行 `AGENT_BUILD`，但必须继续使用挂起前由构造 Hook 产生的最终定义。
 
@@ -678,16 +693,27 @@ hooks:
 sequenceDiagram
     participant Caller
     participant Runtime
+    participant Execution as ApexAgentExecution
+    participant Factory as core ApexAgentFactory
+    participant Assembler as core AgentDefinitionAssembler
     participant Agent as ApexAgent
     participant Hooks
     participant Compaction as Compaction Ports
     participant Model
     participant Tool
+    participant Store
     participant Events
 
-    Caller->>Runtime: NEW
-    Runtime->>Hooks: AGENT_BUILD
-    Runtime->>Agent: create(snapshot)
+    Caller->>Runtime: newAgent(request, requestPublisher)
+    Runtime->>Runtime: acquire session execution lease
+    Runtime->>Factory: createNew(request, port implementations)
+    Factory->>Assembler: assemble(agentKey)
+    Assembler->>Hooks: AGENT_BUILD
+    Assembler-->>Factory: AgentDefinitionSnapshot
+    Factory-->>Runtime: core ApexAgent
+    Runtime-->>Caller: Execution
+    Caller->>Execution: run()
+    Execution->>Agent: run()
     Agent->>Hooks: TURN_START
     loop ReAct Iteration
         Agent->>Hooks: ITERATION_START
@@ -697,7 +723,7 @@ sequenceDiagram
             Agent->>Compaction: compact(messages)
             Compaction-->>Agent: compressed messages + summary
             Agent->>Hooks: POST_MESSAGE_COMPRESSION
-            Agent->>Runtime: persist final compaction result
+            Agent->>Store: persist final compaction result
         end
         Agent->>Hooks: PRE_MODEL_CALL
         Agent->>Model: stream(enabled tools only)
@@ -718,6 +744,8 @@ sequenceDiagram
         end
     end
     Agent-->>Events: END
+    Agent-->>Execution: completed / failed / suspended
+    Execution->>Runtime: release session execution lease
 ```
 
 ### 8.3 Hook 能力
@@ -1018,20 +1046,57 @@ RequestHumanIntervention(
 sequenceDiagram
     participant Platform
     participant Runtime
+    participant Factory as core ApexAgentFactory
+    participant Execution as ApexAgentExecution
+    participant Agent as core ApexAgent
     participant Store
     participant Hooks
     participant Tool
+    participant Events
 
-    Platform->>Runtime: HUMAN_RESPONSE
-    Runtime->>Store: load SessionSnapshot + suspended tool
-    Runtime->>Runtime: locate ToolCall by toolCallId
-    Note over Runtime: skip AGENT_BUILD through POST_MODEL_CALL
-    Runtime->>Hooks: PRE_TOOL_CALL(skip executedPreToolHookIds)
-    Hooks-->>Runtime: remaining hook results
-    Runtime->>Tool: execute with human response when required
-    Tool-->>Runtime: result
-    Runtime->>Hooks: POST_TOOL_CALL
-    Runtime->>Runtime: continue remaining tool calls / finish iteration
+    Platform->>Runtime: resumeAgent(command, requestPublisher)
+    Runtime->>Runtime: synchronously acquire session execution lease
+    Runtime->>Factory: createResumed(command, port implementations)
+    Factory->>Store: load SessionSnapshot + suspended tool
+    Factory->>Factory: validate state and locate ToolCall by toolCallId
+    Note over Factory: skip AGENT_BUILD through POST_MODEL_CALL
+    Factory-->>Runtime: core ApexAgent
+    Runtime-->>Platform: Execution
+    Platform->>Execution: run asynchronously
+    Execution->>Agent: resume()
+    alt confirmation denied
+        Agent->>Agent: map to RETURN_TOOL_RESULT
+    else approval or QUESTION response
+        Agent->>Hooks: PRE_TOOL_CALL(skip executedPreToolHookIds)
+        Hooks-->>Agent: terminal result or all CONTINUE
+    end
+    alt REQUEST_HUMAN_INTERVENTION
+        Agent->>Store: replace suspended tool with cumulative executed IDs
+        Agent->>Events: ASK_HUMAN / TOOL_CONFIRMATION + END
+        Note over Agent: keep same Turn/Iteration; do not execute tool or POST hook
+    else END_TURN
+        Agent->>Agent: append standard results for current/remaining ToolCalls
+        Agent->>Store: clear suspension and finish Iteration/Turn
+        Agent->>Events: END
+    else BLOCK_TOOL
+        Agent->>Agent: build standard failed ToolResult
+        Agent->>Hooks: POST_TOOL_CALL
+        Agent->>Store: clear suspension and persist
+        Agent->>Agent: continue remaining ToolCalls / finish Iteration
+    else RETURN_TOOL_RESULT
+        Agent->>Agent: use supplied ToolResult
+        Agent->>Hooks: POST_TOOL_CALL
+        Agent->>Store: clear suspension and persist
+        Agent->>Agent: continue remaining ToolCalls / finish Iteration
+    else all CONTINUE
+        Agent->>Agent: verify tool remains enabled
+        Agent->>Tool: execute with human response when required
+        Tool-->>Agent: ToolResult
+        Agent->>Hooks: POST_TOOL_CALL
+        Agent->>Store: clear suspension and persist
+        Agent->>Agent: continue remaining ToolCalls / finish Iteration
+    end
+    Execution->>Runtime: release session execution lease in finally
 ```
 
 通用恢复步骤：
@@ -1041,10 +1106,12 @@ sequenceDiagram
 3. 通过 `toolCallId` 定位 ToolCall，不依赖数组索引。
 4. 重新解析 Hook/Tool 实例，并把人工回复放入只对本地工具可见的 `ToolExecutionContext`。
 5. PRE_TOOL_CALL 分发器跳过 `executedPreToolHookIds`，只执行尚未执行的 Hook。
-6. 新成功完成的 PRE Hook ID 继续追加；如果后续 Hook 再次请求人工介入，则更新唯一的挂起记录并再次挂起。
-7. 所有 PRE Hook 完成后再次校验工具仍在 session 的 `enabledTools` 中。
-8. 获得 ToolResult 后运行 `POST_TOOL_CALL`，清除挂起状态，并继续同一模型响应的剩余 ToolCall。
-9. 完成原 Iteration 后才进入下一次模型推理；原 Turn 最终收口时才运行 `TURN_END`。
+6. 新成功完成的 PRE Hook ID 继续追加。`CONTINUE` 执行下一个 PRE Hook；`REQUEST_HUMAN_INTERVENTION` 更新唯一挂起记录、发送新的人工介入消息和本次传输的 `END`，随后再次挂起，不执行工具或 `POST_TOOL_CALL`。
+7. `END_TURN` 清除旧挂起状态，为当前和剩余 ToolCall 补齐标准结果，并按 END_TURN 语义完成一次 `ITERATION_END`、`TURN_END` 和传输 `END`。
+8. `BLOCK_TOOL` 与 `RETURN_TOOL_RESULT` 均不执行真实工具，生成对应 ToolResult 后执行 `POST_TOOL_CALL`，再清除挂起状态。
+9. 只有全部 PRE Hook 返回 `CONTINUE` 时才再次校验工具仍在 session 的 `enabledTools` 中并执行真实工具。
+10. 获得 ToolResult 后运行 `POST_TOOL_CALL`，清除挂起状态，并继续同一模型响应的剩余 ToolCall。
+11. 完成原 Iteration 后才进入下一次模型推理；原 Turn 最终收口时才运行 `TURN_END`。
 
 ### 10.5 两类介入的差异
 
@@ -1179,10 +1246,18 @@ public interface AgentEventPublisher {
 
 实现：
 
-- runtime：`PrintAgentEventPublisher`，按现有 JSON 协议输出到 PrintStream。
-- platform：`SseEmitterAgentEventPublisher`，写入当前请求的 `SseEmitter`。
+- runtime：`PrintAgentEventPublisher`，按现有 JSON 协议输出到 PrintStream；默认由 `AgentEventPublisherFactory` 为每次执行创建。
+- platform：请求级 `SseEmitterAgentEventPublisher`，只写入当前请求的 `SseEmitter`。
 
 `ApexAgentContext` 不再持有 `SseEmitter`。
+
+事件出口绑定规则：
+
+- `runtime.newAgent(request, eventPublisher)` 与 `runtime.resumeAgent(command, eventPublisher)` 显式绑定当前请求的出口。
+- 不传 eventPublisher 的重载通过 Builder 配置的默认 `AgentEventPublisherFactory` 创建本次执行的出口；默认工厂创建 Print Publisher。
+- Builder 不接受一个带 emitter、结束标识或其他请求状态的共享 Publisher 实例。
+- runtime 为每次执行创建 `OnceAgentEventPublisher` 装饰器；`END` 的原子幂等状态属于该请求级装饰器，而不是共享 runtime。
+- NEW 与其后可能发生的每次 HUMAN_RESPONSE 都绑定各自新的 Publisher，因此恢复请求不会复用已经结束的 emitter。
 
 ### 13.2 事件构造
 
@@ -1207,9 +1282,9 @@ AgentEventFactory
 
 ### 13.3 END 的唯一发送
 
-- `ApexAgent` 正常完成、失败或挂起退出当前传输时，通过事件端口发送一次 `END`。
-- platform 在 Agent 尚未成功构造、任务被线程池拒绝等 core 无法接管的失败路径发送兜底 `END`。
-- platform 的事件出口必须有“只结束一次”保护，防止 core 和兜底逻辑重复发送。
+- `ApexAgent` 正常完成、失败或挂起退出当前传输时，通过事件端口请求发送一次 `END`。
+- Agent 尚未成功构造时由 runtime 使用已创建的请求级 Once Publisher 收口；线程池拒绝时由 platform 调用 `ApexAgentExecution.cancelBeforeStart()` 收口。
+- 请求级 `OnceAgentEventPublisher` 必须有“只结束一次”保护，防止 core、runtime 和 platform 触发的兜底路径重复发送。
 - `END` 只代表本次 SSE 结束，不改变人在回路业务语义。
 
 ## 14. runtime 公共 API
@@ -1226,21 +1301,23 @@ try (ApexAgentRuntime runtime = ApexAgentRuntime.builder()
         .agentDefinition(agentDefinition)
         .build()) {
 
-    ApexAgent agent = runtime.newAgent(AgentRequest.builder()
-            .sessionId("session-1")
-            .agentKey("default_agent")
-            .userId("user-1")
-            .query("请帮我处理这个任务")
-            .build());
+    AgentRequest request = AgentRequest.builder()
+        .sessionId("session-1")
+        .agentKey("default_agent")
+        .userId("user-1")
+        .query("请帮我处理这个任务")
+        .build();
 
-    agent.run();
+    try (ApexAgentExecution execution = runtime.newAgent(request)) {
+        execution.run();
+    }
 }
 ```
 
 默认值：
 
 - 内存 Session/Conversation Repository。
-- Print 事件出口。
+- 每次执行由默认 `AgentEventPublisherFactory` 创建独立 Print 事件出口。
 - 默认 ReAct Prompt。
 - 默认最大 Iteration 数 30。
 - kit 基础工具。
@@ -1255,47 +1332,63 @@ ApexAgentRuntime runtime = ApexAgentRuntime.builder()
         .agentDefinitionProvider(definitionProvider)
         .sessionRepository(sessionRepository)
         .conversationRepository(conversationRepository)
-        .eventPublisher(eventPublisher)
+        .defaultEventPublisherFactory(execution -> new PrintAgentEventPublisher(System.out))
+        .sessionExecutionCoordinator(sessionExecutionCoordinator)
         .registerTool(customTool)
         .registerHook("toolConfirmHook", toolConfirmHook)
         .registerSkill(skill)
         .build();
 ```
 
+请求调用方可以覆盖默认事件出口：
+
+```java
+AgentEventPublisher requestPublisher = ...;
+try (ApexAgentExecution execution = runtime.newAgent(request, requestPublisher)) {
+    execution.run();
+}
+```
+
 Builder 在 `build()` 时完成：
 
 - 必需依赖校验。
 - 工具、Hook、Skill 重名校验。
+- 默认 EventPublisherFactory 和 SessionExecutionCoordinator 校验。
 - 默认实现补齐。
 - 资源生命周期归属确认。
 
 ### 14.3 恢复
 
 ```java
-ApexAgent resumed = runtime.resumeAgent(HumanResponseCommand.builder()
+HumanResponseCommand command = HumanResponseCommand.builder()
         .sessionId("session-1")
         .agentKey("default_agent")
         .userId("user-1")
         .humanResponse(response)
-        .build());
+        .build();
 
-resumed.run();
+AgentEventPublisher responsePublisher = ...;
+try (ApexAgentExecution execution = runtime.resumeAgent(command, responsePublisher)) {
+    execution.run();
+}
 ```
 
-`resumeAgent` 会创建恢复执行对象，但明确不分发 `AGENT_BUILD`，而是加载持久化的 `AgentDefinitionSnapshot`。
+`resumeAgent` 为本次恢复绑定新的事件出口并创建恢复执行句柄，但明确不分发 `AGENT_BUILD`，而是调用 core `ApexAgentFactory.createResumed(...)` 加载持久化的 `AgentDefinitionSnapshot`。
 
 内存 runtime 只能在同一 runtime 实例存活期间恢复；platform 的 PostgreSQL 实现支持进程重启后恢复。
 
-### 14.4 session 并发保护
+### 14.4 session execution lease
 
-runtime 必须独立保证同一 `sessionId` 只能有一个活跃执行，不能把正确性依赖于 platform：
+runtime 必须独立保证同一 `sessionId` 只能有一个活跃执行，不能把正确性依赖于异步 worker 内部的迟到检查：
 
-- `ApexAgent.run()` 进入时通过 `SessionExecutionCoordinator` 获取 session 级内存锁，`NEW` 与 `HUMAN_RESPONSE` 使用同一锁空间。
-- 从加载 SessionSnapshot、修改运行态到最终保存的整个执行区间都在锁内。
-- 第二个并发执行立即抛出中立的 `SessionBusyException`，不排队、不覆盖第一个执行的状态。
-- 锁在 `finally` 中释放；获取失败、构造失败和事件发送异常都不得泄漏锁。
+- `runtime.newAgent(...)` 与 `runtime.resumeAgent(...)` 在返回 `ApexAgentExecution` 前同步调用 `SessionExecutionCoordinator.acquire(sessionId)`；NEW 与 HUMAN_RESPONSE 使用同一租约空间。
+- 获取租约失败时同步抛出中立 `SessionBusyException`。platform 必须在 Controller 返回 `SseEmitter` 前调用上述 API，因此仍能映射为 HTTP 409。
+- 取得租约后才允许调用 core `ApexAgentFactory`；由该 core 入口通过存储端口加载 SessionSnapshot、解释恢复状态并构造 Agent。从取得租约到执行最终保存、挂起、失败或取消都持有同一 `SessionExecutionLease`。
+- `ApexAgentExecution` 是租约所有者。`run()` 的 `finally` 释放租约；线程池拒绝或执行尚未启动时由 `cancelBeforeStart()` 发布幂等 END 并释放；`close()` 作为最后的幂等兜底。
+- 创建 core Agent 失败、Publisher 异常和所有取消路径都必须释放租约。
 - 锁表使用稳定 LockEntry 或引用计数清理，禁止在仍有等待者/持有者时从 Map 删除并创建第二把同 key 锁。
-- platform 可以保留入口级快速拒绝，但 runtime 的检查是最终一致性保障。
+- platform 不再维护第二套 `runningAgents/sessionLocks` 正确性状态；同步调用 runtime API 就是入口快速拒绝与 runtime 最终保护共享的同一租约语义。
+- runtime 默认提供进程内 `SessionExecutionCoordinator`。本期 platform 明确只支持单实例部署；水平多实例必须先提供带 owner token、过期与续租语义的 PostgreSQL/分布式实现，本期不以本地锁宣称跨实例安全。
 
 ### 14.5 内存存储的对象隔离
 
@@ -1354,11 +1447,11 @@ platform 处理：
 
 - 参数校验。
 - 用户身份提取。
-- session 并发防护。
 - 创建请求级 SSE Publisher。
-- `NEW` 调用 `runtime.newAgent`。
-- `HUMAN_RESPONSE` 调用 `runtime.resumeAgent`。
+- 在 Controller 返回 emitter 前同步调用 `runtime.newAgent(request, requestPublisher)` 或 `runtime.resumeAgent(command, requestPublisher)`，取得持有 session lease 的 `ApexAgentExecution`。
+- 同步捕获 `SessionBusyException` 并映射为 HTTP 409。
 - 异步执行。
+- 线程池拒绝时调用 `execution.cancelBeforeStart()`，保证 END 和 lease 都只收口一次。
 - Emitter 完成和异常兜底。
 
 ### 15.2 Agent 列表
@@ -1383,9 +1476,10 @@ platform 处理：
 ### 15.3 并发
 
 - 保留同一 `sessionId` 只允许一个活跃执行。
-- runtime 的 `SessionExecutionCoordinator` 是最终并发保护。
-- platform 可保留当前基于内存的入口锁用于更早拒绝，但不得形成与 runtime 不同的 session 锁语义。
-- core 不依赖 HTTP 409；runtime 通过 `SessionBusyException` 表达冲突，platform 将其映射为 409。
+- runtime 的 `SessionExecutionCoordinator` 是唯一并发保护；platform 不再维护独立的 `runningAgents/sessionLocks` 状态。
+- runtime API 在同步准备阶段取得 lease，platform 在返回 SSE 响应前把 `SessionBusyException` 映射为 409。
+- core 不依赖 HTTP 409，也不感知 execution lease。
+- 本期 platform 只支持单实例部署。若要水平扩展，必须先替换为带 owner token、过期和续租的 PostgreSQL/分布式 SessionExecutionCoordinator；仅配置共享 PostgreSQL SessionRepository 不代表并发安全。
 - 用户上下文不再位于 memory 包，移动到 platform。
 - 异步 TaskDecorator 继续传播并清理用户上下文。
 
@@ -1565,7 +1659,7 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 | `SubAgentToolCallback`、消息 Handler | runtime |
 | `org.gemo.apex.skills` 非 learning 部分 | runtime，保留现有加载和使用行为 |
 | 内存 Session/Conversation Store | runtime |
-| 当前 session 内存锁 | runtime `SessionExecutionCoordinator` |
+| 当前 session 内存锁 | runtime `SessionExecutionCoordinator`/`SessionExecutionLease` 与请求级 `ApexAgentExecution` |
 | 对话摘要压缩 | core 压缩门与生命周期编排 + runtime 默认 Policy/Compactor |
 | Web、SSE、线程池、用户 Filter | platform |
 | PostgreSQL Session/Conversation Store | platform |
@@ -1607,6 +1701,7 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 ### 阶段 3：core
 
 - 实现 `ApexAgent`。
+- 实现 core `AgentDefinitionAssembler` 与 `ApexAgentFactory`，由前者独占 AGENT_BUILD、校验和定义冻结语义。
 - 实现十一个生命周期点。
 - 实现按生命周期/动作分型的结果 record、流控语义和默认 `CONTINUE` 错误策略。
 - 实现 ReAct 循环每个 Iteration、`PRE_MODEL_CALL` 之前的压缩判断门、压缩 Hook 编排和结果提交。
@@ -1626,6 +1721,7 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 ### 阶段 5：runtime
 
 - 实现 Builder 和无 Spring 容器启动。
+- 实现请求级 `ApexAgentExecution`、EventPublisherFactory、Once Publisher 与同步 session execution lease。
 - 实现 Spring AI Adapter。
 - 实现内存 Store、Print Publisher、默认压缩策略和摘要 Compactor。
 - 实现 session 执行锁和内存 Store 深拷贝隔离。
@@ -1638,6 +1734,7 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - 迁移 Spring Boot 应用。
 - 接入 runtime。
 - 实现 SSE Publisher、Coordinator 和用户上下文。
+- 在返回 emitter 前同步取得 runtime execution lease，并删除 platform 独立的 session 锁状态。
 - 切换 PostgreSQL。
 - 增加不含 JSONB、独立 Turn/Iteration 表的 Flyway schema，长内容与序列化快照使用 TEXT。
 - 删除 MySQL 依赖。
@@ -1670,6 +1767,7 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - common 不导入 `org.springframework.*`。
 - core-extension 下所有顶级类型均为 interface。
 - core 不依赖 runtime/platform/memory。
+- `AGENT_BUILD`、定义校验和冻结只由 core 的 `AgentDefinitionAssembler`/`ApexAgentFactory` 编排，runtime 不复制这组生命周期语义。
 - kit 不依赖 core 具体实现。
 - runtime 不依赖 platform/memory。
 - 没有任何模块依赖 memory。
@@ -1686,6 +1784,8 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - Hook 排序和错误策略。
 - Hook 未配置错误策略时默认 `CONTINUE`。
 - HookPoint、Context、Result 类型不匹配时注册失败。
+- `AgentDefinitionAssembler` 按“加载定义、创建可变草稿、执行 `AGENT_BUILD`、校验、冻结”顺序构造定义。
+- `ApexAgentFactory.createNew` 每次 NEW 只执行一次 `AGENT_BUILD`；`createResumed` 只使用持久化快照且不执行 `AGENT_BUILD`。
 - 各生命周期和动作使用专用 record，不存在万能可空字段结果对象。
 - Hook 修改消息、工具集合、参数、结果。
 - 非法流控动作。
@@ -1709,7 +1809,11 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - 恢复同一 Turn/Iteration。
 - 已执行 PRE_TOOL_CALL Hook 不重复。
 - 未执行 PRE_TOOL_CALL Hook 继续按顺序执行。
-- 后续 Hook 再次确认时更新唯一允许保存的 Hook ID 列表。
+- 剩余 PRE_TOOL_CALL Hook 再次返回 `REQUEST_HUMAN_INTERVENTION` 时，不执行工具和 POST Hook，替换唯一挂起对象，累计已执行 Hook ID，再次发送交互事件与 END。
+- 剩余 PRE_TOOL_CALL Hook 返回 `END_TURN` 时补齐标准 ToolResult、清除挂起状态并结束原 Turn。
+- 剩余 PRE_TOOL_CALL Hook 返回 `BLOCK_TOOL` 时生成失败 ToolResult，执行 POST_TOOL_CALL，清除挂起状态并继续原 Iteration。
+- 剩余 PRE_TOOL_CALL Hook 返回 `RETURN_TOOL_RESULT` 时使用指定 ToolResult，跳过真实工具，执行 POST_TOOL_CALL，清除挂起状态并继续原 Iteration。
+- 剩余 PRE_TOOL_CALL Hook 全部 `CONTINUE` 时重新校验工具启用状态，执行真实工具与 POST_TOOL_CALL，清除挂起状态并继续原 Iteration。
 - 挂起数据不包含 ToolCall index、`enabledToolNames` 或 AgentDefinitionSnapshot。
 - 工具确认拒绝映射为 `RETURN_TOOL_RESULT`，不执行剩余 pre-hook/真实工具，但执行 post-hook。
 - 批准时参数只合并可编辑字段。
@@ -1723,12 +1827,17 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - 不创建 Spring ApplicationContext，直接 `new` 并完成一次 Agent 执行。
 - 默认内存存储。
 - Print Publisher 输出协议 JSON。
+- 显式传入的请求级 Publisher 分别绑定 NEW 与 HUMAN_RESPONSE；并发请求、不同恢复请求之间不串写事件。
+- Builder 的默认 `AgentEventPublisherFactory` 每次执行创建独立 Publisher，不复用带 END 状态的 Publisher 实例。
+- 请求级 `OnceAgentEventPublisher` 在 core、构造失败和 `cancelBeforeStart` 竞争时仍只发送一次 END。
 - 文件 Agent 配置。
 - 多配置源同时出现时失败，不执行全局/workspace 叠加。
 - 摘要压缩。
 - MCP stdio/SSE 资源关闭，调用只传工具参数且不泄露上下文。
 - 任意 Agent 作为 HTTP SubAgent 的协议解析、独立子 session 和调用深度限制。
-- 同一 session 并发执行被 runtime 拒绝，NEW 与 HUMAN_RESPONSE 使用同一锁。
+- `newAgent`/`resumeAgent` 在返回 `ApexAgentExecution` 前同步取得 session lease；同一 session 的第二个 NEW 或 HUMAN_RESPONSE 在方法返回前抛出 `SessionBusyException`。
+- NEW 与 HUMAN_RESPONSE 使用同一个 `SessionExecutionCoordinator`，不形成两套互不一致的锁状态。
+- 正常完成、再次挂起、构造失败、Publisher 异常和 `cancelBeforeStart` 均只释放一次 lease；未调用 `run` 时 `close` 也能兜底释放。
 - 内存 Store 的 save/load 双向深拷贝隔离。
 - `JsonUtils` 的泛型反序列化、时间类型、record 和 deepCopy。
 - Skill 激活跨 Turn 保留。
@@ -1754,7 +1863,10 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 
 - Controller 路径、请求和响应不变。
 - `X-User-Id` 校验和传播。
-- session 并发返回 409。
+- Controller 在返回 `SseEmitter` 前同步准备 `ApexAgentExecution`；session 冲突在响应提交前返回 HTTP 409。
+- 线程池拒绝执行时调用 `cancelBeforeStart`，精确发送一次 END 并释放 lease。
+- 并发请求分别使用独立 emitter；任一请求的事件和 END 不会写入其他请求。
+- 每次 HUMAN_RESPONSE 都绑定本次 HTTP 请求新建的 emitter，不复用挂起前 emitter。
 - SSE 事件与 Golden Files 一致。
 - END 只发送一次。
 - NEW 与 HUMAN_RESPONSE 路由。
@@ -1806,7 +1918,9 @@ PostgreSQL 集成测试建议使用 Testcontainers；纯规则测试不得依赖
 - 提供 ChatModel/ModelGateway 和 Agent 定义后，可通过普通 Java `new`/Builder 运行。
 - 无需 Spring ApplicationContext。
 - 默认使用内存存储和 Print Publisher。
+- 显式 API 支持为每次 NEW/HUMAN_RESPONSE 注入独立 `AgentEventPublisher`；默认 Publisher 也由 Factory 按执行创建。
 - 同一 session 只允许一个活跃执行。
+- `newAgent`/`resumeAgent` 在返回执行句柄前同步取得 session lease，句柄负责执行、取消与幂等释放。
 - 内存存储不暴露或持有运行态可变对象引用。
 
 ### 执行
@@ -1827,6 +1941,7 @@ PostgreSQL 集成测试建议使用 Testcontainers；纯规则测试不得依赖
 - HUMAN_RESPONSE 不执行 AGENT_BUILD 或模型调用前生命周期。
 - 只保存已执行 PRE_TOOL_CALL Hook ID。
 - 已执行 pre-hook 不重复，未执行 pre-hook 能继续。
+- 剩余 pre-hook 的 `REQUEST_HUMAN_INTERVENTION`、`END_TURN`、`BLOCK_TOOL`、`RETURN_TOOL_RESULT` 和全部 `CONTINUE` 分支均具有明确且可测试的状态迁移。
 - 工具确认和 `ask_human` 共享人工介入恢复管线。
 - Agent 构造快照可以在恢复时重建同一运行定义。
 
@@ -1842,6 +1957,9 @@ PostgreSQL 集成测试建议使用 Testcontainers；纯规则测试不得依赖
 
 - 前端零修改。
 - HTTP/SSE 协议零变化。
+- session 冲突在 SSE 响应提交前同步映射为 HTTP 409。
+- 每个请求拥有独立 EventPublisher 和 END 幂等状态。
+- 本期 platform 明确只支持单实例部署；水平扩展前必须替换分布式 SessionExecutionCoordinator。
 - `context.mode` 固定为 react。
 - PostgreSQL 为唯一 platform 数据库。
 - 不保留 MySQL 兼容逻辑。
@@ -1930,8 +2048,9 @@ core 发送 END，platform 又需要覆盖构造失败和线程池拒绝路径�
 
 控制：
 
-- runtime 以 `SessionExecutionCoordinator` 包围完整执行。
-- 锁项采用安全的生命周期管理，所有退出路径在 `finally` 释放。
+- runtime 在 `newAgent`/`resumeAgent` 返回前通过 `SessionExecutionCoordinator` 同步取得 lease，并由 `ApexAgentExecution` 覆盖从 HTTP 同步准备到异步执行结束的完整生命周期。
+- lease 采用幂等释放；正常完成、异常、再次挂起、线程池拒绝和未启动关闭均有明确释放路径。
+- 本期默认协调器是 runtime 实例内的内存实现，platform 因此明确限制为单实例；水平扩展必须替换为带 owner token、过期和续租语义的 PostgreSQL/分布式实现。
 - 内存 Repository 在 save/load 两侧深拷贝，并用别名污染回归测试锁定。
 
 ### 23.9 压缩门递归与持久化顺序
@@ -1957,6 +2076,28 @@ TEXT 避免数据库 JSON 类型耦合并适合长内容，但数据库不能可
 - DTO 演进提供版本化反序列化 Adapter；本期仍不承担旧 MySQL 历史数据兼容。
 - 使用超长内容和多版本样本做 PostgreSQL 往返测试，禁止改回 JSONB。
 
+### 23.11 请求级事件出口串写
+
+如果 Builder 持有一个有状态 Publisher，多个并发 SSE 请求会共享 emitter 和 END 标志；恢复请求也可能继续写入已经结束的旧连接。
+
+控制：
+
+- `newAgent`/`resumeAgent` 显式接受请求级 `AgentEventPublisher`。
+- 未显式传入时由 `AgentEventPublisherFactory` 为每次执行创建新实例，禁止缓存有状态 Publisher。
+- runtime 为每次执行创建独立 `OnceAgentEventPublisher`，END 幂等状态不进入共享 runtime。
+- 使用并发 NEW、并发不同 session 和连续 HUMAN_RESPONSE 的事件隔离测试锁定。
+
+### 23.12 同步拒绝与异步执行之间的所有权
+
+HTTP 409 必须在响应提交前产生，但实际执行在线程池中进行。若 lease 由 Controller 与异步任务分别管理，线程池拒绝、异常或取消容易泄漏 lease 或重复 END。
+
+控制：
+
+- 同步 runtime API 返回同时持有请求 Publisher 与 `SessionExecutionLease` 的 `ApexAgentExecution`。
+- platform 只负责调用 `run` 或在派发失败时调用 `cancelBeforeStart`，不维护第二套 session 占用表。
+- `run`、`cancelBeforeStart` 和 `close` 使用原子状态保证执行、END 与 lease 释放幂等。
+- 多实例部署不是本期能力；分布式协调器完成前禁止水平扩展 platform。
+
 ## 24. 最终目标形态
 
 重构完成后，系统的核心关系应收敛为：
@@ -1964,14 +2105,22 @@ TEXT 避免数据库 JSON 类型耦合并适合长内容，但数据库不能可
 ```mermaid
 flowchart LR
     Request["AgentRequest"] --> Runtime["ApexAgentRuntime"]
-    Definition["AgentDefinitionProvider"] --> Runtime
-    Runtime --> Agent["ApexAgent"]
+    RequestPublisher["请求级 AgentEventPublisher"] --> Runtime
+    Runtime --> Execution["ApexAgentExecution"]
+    Runtime --> Lease["SessionExecutionLease"]
+    Definition["AgentDefinitionProvider"] --> Assembler["core AgentDefinitionAssembler"]
+    Runtime --> Factory["core ApexAgentFactory"]
+    Factory --> Assembler
+    Factory --> Agent["ApexAgent"]
+    Execution --> Agent
+    Execution --> Lease
+    Execution --> Events["请求级 OnceAgentEventPublisher"]
     Agent --> Hooks["LifecycleHook 接口"]
     Agent --> Compaction["Compaction Policy / Compactor 接口"]
     Agent --> Model["ModelGateway 接口"]
     Agent --> Tools["AgentTool 接口"]
     Agent --> Stores["Session / Conversation 接口"]
-    Agent --> Events["AgentEventPublisher 接口"]
+    Agent --> Events
 
     RuntimeImpl["runtime 默认实现"] -.-> Hooks
     RuntimeImpl -.-> Compaction
@@ -1981,14 +2130,14 @@ flowchart LR
     RuntimeImpl -.-> Events
 
     Platform["platform"] --> Runtime
-    Platform -. "SSE" .-> Events
+    Platform -. "每个 HTTP 请求的新 SSE Publisher" .-> RequestPublisher
     Platform -. "PostgreSQL" .-> Stores
 ```
 
 core 只负责一件事：按照 Turn/Iteration/ReAct 和生命周期契约推进 Agent。
 
-runtime 负责提供开箱即用的默认实现。
+runtime 负责提供开箱即用的端口实现、请求级事件绑定和 session execution lease，并调用 core 工厂，不接管 `AGENT_BUILD` 生命周期。
 
-platform 负责把 runtime 接入当前 Web 产品。
+platform 负责把 runtime 接入当前 Web 产品，在返回 SSE 响应前同步取得执行句柄；本期部署边界为单实例。
 
 memory 保持封存，不再反向塑造核心框架。
