@@ -54,7 +54,7 @@ ChatController
 11. 工具配置分为可用全集和默认启用集合；`enabledTools` 是 session 级状态，只在新 session 的首个 Turn 使用 `defaultEnabledTools` 初始化，后续 Turn 直接沿用。
 12. Agent 定义只配置 `enabledSkills`，不再配置 `availableSkills`；`activatedSkills` 是其 session 级子集，在同一 session 内跨 Turn 保留。
 13. Skill 集合不由生命周期 Hook 动态增删；`activate_skill` 是改变激活状态的唯一默认入口，Skill instructions 只作为普通对话消息存在。
-14. 对话摘要压缩保留在 runtime。
+14. 对话摘要压缩保留在 runtime；只在 ReAct 循环即将调用业务模型时判断和执行，并且位于 `PRE_MODEL_CALL` 之前。
 15. 长期记忆、会话搜索和 Skill Learning 封存在 `memory`，其他模块不依赖 `memory`。
 16. runtime 提供内存存储、Print 消息出口和默认 Agent，使外部项目只依赖 runtime、通过 `new` 对象即可运行。
 17. MCP 进程管理和 HTTP SubAgent 都属于 runtime。
@@ -63,10 +63,11 @@ ChatController
 20. platform 正式切换到 PostgreSQL，不考虑现有 MySQL 或历史表数据兼容。
 21. HTTP、SSE 和人在回路协议保持不变，不修改前端。
 22. Agent 定义只允许来自一个完整配置源，不保留全局配置与 workspace 配置叠加。
-23. Hook 返回 `HookResult` record；流控枚举只是其中一个字段，默认错误策略为 `CONTINUE`。
+23. Hook 返回值按生命周期能力分型；涉及多个动作的生命周期再按动作定义不同 record，不使用一个包含全部可选字段的万能 `HookResult`。
 24. 工具确认与 `ask_human` 统一由 `PRE_TOOL_CALL` Hook 请求人工介入。
 25. runtime 自身保证同一 `sessionId` 只有一个活跃执行，内存存储通过不可变快照或深拷贝隔离运行对象。
 26. 项目 JSON 处理统一使用 Jackson，并彻底移除 Fastjson。
+27. PostgreSQL 不使用 JSONB；快照、集合和消息载荷由 Jackson 序列化后存入 `TEXT`。
 
 ## 3. 目标与非目标
 
@@ -227,10 +228,13 @@ artifactId: apex-agent-{module}
 - `ToolDefinition`、`ToolCall`、`ToolResult`、`ToolExecutionStatus`。
 - `ToolSetDefinition`：工具全集、默认启用集合。
 - `SkillDefinition`、`SkillSetDefinition`。
-- `HookPoint`、`HookBinding`、`HookFlowAction`、`HookErrorPolicy`。
-- `HookContext` 的各类数据视图和 `HookResult`。
+- `HookPoint`、`HookBinding`、`HookErrorPolicy`。
+- 各生命周期专用的 HookContext 数据视图。
+- `LifecycleHookResult` 标记接口，以及按生命周期、按动作定义的结果 record。
+- `ConversationCompactionCheck`、`ConversationCompactionRequest`、`ConversationCompactionResult`。
 - `HumanInterventionRequest`、`SuspendedToolCall`、`SuspensionPoint`。
-- `MessageOperation`、`AgentDefinitionOperation`。
+- `MessageOperation`、`AgentDefinitionOperation`、`HookMutations`、`ToolActivationDelta`。
+- ToolCall、ModelRequest 和 ConversationCompaction 的专用 Patch record。
 - `ExecutionStatus`。
 - 运行时不可变快照及持久化所需的中立数据结构。
 - 基于 Jackson 的 `JsonUtils`。
@@ -269,12 +273,12 @@ public interface ToolProvider {
     List<AgentTool> loadTools(AgentDefinitionSnapshot definition);
 }
 
-public interface LifecycleHook {
-    HookResult apply(HookContext context);
+public interface LifecycleHook<C extends HookContextView, R extends LifecycleHookResult> {
+    R apply(C context);
 }
 
 public interface HookResolver {
-    LifecycleHook resolve(String name);
+    LifecycleHook<?, ?> resolve(HookPoint point, String name);
 }
 
 public interface AgentEventPublisher {
@@ -294,6 +298,14 @@ public interface ConversationRepository {
 
 public interface ConversationWindowManager {
     List<AgentMessageEntry> prepare(...);
+}
+
+public interface ConversationCompactionPolicy {
+    boolean shouldCompact(ConversationCompactionCheck check);
+}
+
+public interface ConversationCompactor {
+    ConversationCompactionResult compact(ConversationCompactionRequest request);
 }
 ```
 
@@ -324,6 +336,7 @@ public interface ConversationWindowManager {
 - 生命周期调度器。
 - Agent 定义构造和冻结。
 - Prompt/模型请求的中立编排。
+- ReAct 循环内、`PRE_MODEL_CALL` 之前的消息压缩判断、压缩生命周期调度和结果提交。
 - 工具调用编排。
 - 工具启用状态管理和执行前二次校验。
 - 人在回路挂起状态生成。
@@ -378,7 +391,7 @@ kit 中的实现只通过 `core-extension` 接口和 common 上下文工作，�
 - 默认模型网关。
 - 默认工具执行器。
 - 内存 Session/Conversation 存储；当前 Turn/Iteration 作为 SessionSnapshot 的一部分保存。
-- 对话窗口管理和摘要压缩。
+- 对话窗口管理、默认 `ConversationCompactionPolicy` 和摘要 `ConversationCompactor`。
 - Print 消息出口。
 - Java 对象和文件版 AgentDefinitionProvider。
 - 默认 HookResolver/ToolProvider 注册表。
@@ -518,6 +531,11 @@ description: 通用智能体
 prompt:
   system: classpath:agents/default_agent/REACT_PROMPT.md
 
+message-compression:
+  enabled: true
+  trigger-estimated-tokens: 24000
+  retain-latest-messages: 20
+
 tools:
   available:
     - ask_human
@@ -548,6 +566,14 @@ hooks:
     - id: normalize-agent-definition
       name: normalizeAgentDefinition
       order: 10
+  pre-message-compression:
+    - id: redact-before-compression
+      name: redactBeforeCompressionHook
+      order: 50
+  post-message-compression:
+    - id: normalize-compression-result
+      name: normalizeCompressionResultHook
+      order: 50
   pre-tool-call:
     - id: confirm-contact-detail
       name: toolConfirmHook
@@ -567,10 +593,12 @@ hooks:
 
 - 每个 Hook Binding 必须有稳定且在当前生命周期点内唯一的 `id`。
 - `name` 是 Hook 注册表中的解析名，不等于 Spring Bean 名。
+- `pre-message-compression` 和 `post-message-compression` 只在压缩策略判定需要压缩时执行。
 - `default-enabled` 必须是 `available` 的子集。
 - `default-enabled` 只属于 Agent 定义，不写入 session；session 只保存实际的 `enabledTools`。
 - `skills.enabled` 是该 Agent 允许激活的 Skill 集合，不再提供 `skills.available` 配置。
 - `subagents` 把任意目标 Agent 声明为 HTTP 工具；生成的工具名仍需出现在 `tools.available`，是否默认启用仍由 `tools.default-enabled` 决定。
+- `message-compression` 只配置压缩策略参数；即使关闭压缩，ReAct 循环每次准备调用业务模型时仍经过策略判断并得到 false。
 - 本期 Prompt 只实现 `prompt.system`，不解析或合并 `prompt.rules`。
 - 重复工具名、Skill 名、Hook ID 在构造阶段直接失败。
 - runtime Builder 可以直接传同构 Java 对象，不要求 YAML。
@@ -616,6 +644,7 @@ hooks:
 快照只保存可序列化定义：
 
 - `prompt.system` 文本或稳定资源版本。
+- 消息压缩策略参数。
 - 可用工具名；`defaultEnabledTools` 是 session 初始化参数，不进入 SessionSnapshot 的恢复投影。
 - Skill 定义或稳定引用。
 - Hook Binding ID、name、顺序、匹配规则和 options。
@@ -632,14 +661,16 @@ hooks:
 1. `AGENT_BUILD`
 2. `TURN_START`
 3. `ITERATION_START`
-4. `PRE_MODEL_CALL`
-5. `POST_MODEL_CALL`
-6. `PRE_TOOL_CALL`
-7. `POST_TOOL_CALL`
-8. `ITERATION_END`
-9. `TURN_END`
+4. `PRE_MESSAGE_COMPRESSION`，仅本次循环模型调用需要压缩时执行
+5. `POST_MESSAGE_COMPRESSION`，仅压缩成功后执行
+6. `PRE_MODEL_CALL`
+7. `POST_MODEL_CALL`
+8. `PRE_TOOL_CALL`
+9. `POST_TOOL_CALL`
+10. `ITERATION_END`
+11. `TURN_END`
 
-`AGENT_BUILD` 是新增点，其余复用现有概念。
+`AGENT_BUILD` 是构造生命周期；`PRE_MESSAGE_COMPRESSION`、`POST_MESSAGE_COMPRESSION` 是新增的条件生命周期；其余复用现有概念。
 
 ### 8.2 正常执行顺序
 
@@ -649,6 +680,7 @@ sequenceDiagram
     participant Runtime
     participant Agent as ApexAgent
     participant Hooks
+    participant Compaction as Compaction Ports
     participant Model
     participant Tool
     participant Events
@@ -659,6 +691,14 @@ sequenceDiagram
     Agent->>Hooks: TURN_START
     loop ReAct Iteration
         Agent->>Hooks: ITERATION_START
+        Agent->>Compaction: shouldCompact(base model request)
+        alt compression required
+            Agent->>Hooks: PRE_MESSAGE_COMPRESSION
+            Agent->>Compaction: compact(messages)
+            Compaction-->>Agent: compressed messages + summary
+            Agent->>Hooks: POST_MESSAGE_COMPRESSION
+            Agent->>Runtime: persist final compaction result
+        end
         Agent->>Hooks: PRE_MODEL_CALL
         Agent->>Model: stream(enabled tools only)
         Model-->>Events: STREAM_CONTENT
@@ -682,30 +722,67 @@ sequenceDiagram
 
 ### 8.3 Hook 能力
 
-Hook 通过显式 `HookResult` 修改运行时，不直接持有 core 实现对象。返回值必须是 common 中的 record，不能把返回类型简化为流控枚举：
+Hook 通过显式结果对象修改运行时，不直接持有 core 实现对象。结果模型采用“生命周期结果接口 + 动作 record”，不定义包含所有场景字段的万能 `HookResult`。
 
 ```java
-public record HookResult(
-        HookFlowAction action,
-        List<MessageOperation> messageOperations,
-        List<AgentDefinitionOperation> definitionOperations,
-        Set<String> enableToolNames,
-        Set<String> disableToolNames,
-        Map<String, Object> toolArguments,
-        ToolResult toolResult,
-        HumanInterventionRequest humanIntervention,
-        String reason) {
+public sealed interface PreToolCallHookResult extends LifecycleHookResult
+        permits ContinuePreToolCall,
+                BlockTool,
+                ReturnToolResult,
+                RequestHumanIntervention,
+                EndTurnFromPreToolCall {
 }
+
+public record ContinuePreToolCall(
+        HookMutations mutations,
+        ToolCallPatch toolCallPatch) implements PreToolCallHookResult {}
+
+public record BlockTool(
+        HookMutations mutations,
+        String reason) implements PreToolCallHookResult {}
+
+public record ReturnToolResult(
+        HookMutations mutations,
+        ToolResult toolResult) implements PreToolCallHookResult {}
+
+public record RequestHumanIntervention(
+        HookMutations mutations,
+        HumanInterventionRequest request) implements PreToolCallHookResult {}
+
+public record EndTurnFromPreToolCall(
+        HookMutations mutations,
+        String reason) implements PreToolCallHookResult {}
 ```
 
-约定：
+其他生命周期按能力定义独立结果族：
 
-- `action` 只表达控制流，其余字段表达同一个 Hook 原子提交的状态变化。
-- 未使用的字段使用空集合或 `null`/`Optional` 的统一约定，具体 Java 风格在实现阶段固定，禁止各 Hook 自行解释。
-- `PRE_TOOL_CALL` 可以同时改写参数、改变 session 的工具启用集合、请求人工介入，或者通过 `toolResult` 直接返回结果。
-- `POST_TOOL_CALL` 可以通过 `toolResult` 替换工具结果。
-- `AGENT_BUILD` 通过 `definitionOperations` 修改构造草稿。
-- core 先校验整个 record，再一次性应用；任一字段非法时不得留下部分修改。
+| 生命周期 | 返回接口 | 主要 record |
+| --- | --- | --- |
+| `AGENT_BUILD` | `AgentBuildHookResult` | `ContinueAgentBuild`，只携带 `AgentDefinitionOperation` |
+| `TURN_START`、`ITERATION_START`、`ITERATION_END` | `LoopHookResult` | `ContinueLoop`、`EndTurnFromLoop` |
+| `PRE_MESSAGE_COMPRESSION` | `PreMessageCompressionHookResult` | `ContinueMessageCompression`、`EndTurnBeforeCompression` |
+| `POST_MESSAGE_COMPRESSION` | `PostMessageCompressionHookResult` | `ContinueAfterMessageCompression`、`EndTurnAfterCompression` |
+| `PRE_MODEL_CALL` | `PreModelCallHookResult` | `ContinueModelCall`、`EndTurnBeforeModelCall` |
+| `POST_MODEL_CALL` | `PostModelCallHookResult` | `ContinueAfterModelCall`、`EndTurnAfterModelCall` |
+| `PRE_TOOL_CALL` | `PreToolCallHookResult` | 上述五种动作 record |
+| `POST_TOOL_CALL` | `PostToolCallHookResult` | `ContinueAfterToolCall`、`EndTurnAfterToolCall` |
+| `TURN_END` | `TurnEndHookResult` | `ContinueTurnEnd` |
+
+压缩生命周期的专用数据：
+
+- `PreMessageCompressionContext` 提供尚未经过 `PRE_MODEL_CALL` 的基础 ModelRequest、压缩前消息、system/tool token 估算、总 token/字符统计、阈值、保留窗口和触发原因。
+- `ContinueMessageCompression` 可以返回 `ConversationCompactionRequestPatch`，但不能伪造压缩结果。
+- `PostMessageCompressionContext` 同时提供原消息和 `ConversationCompactionResult`。
+- `ContinueAfterMessageCompression` 可以返回 `ConversationCompactionResultPatch`，用于修订摘要、保留消息或 metadata。
+
+通用约定：
+
+- record 类型本身表达动作，不再返回独立流控枚举。
+- 每个 record 只携带该生命周期和动作需要的数据，禁止依赖大量可空字段判断实际语义。
+- `HookMutations` 只封装多个运行生命周期真正共享的消息操作和 `ToolActivationDelta`；工具参数、工具结果、构造定义和压缩结果使用各自专用类型。
+- 所有集合在构造 record 时转为不可变副本；必填动作载荷不得为 null。
+- core 在注册 Hook 时校验 HookPoint、Context 类型和 Result 类型匹配，在运行时再次防御性校验。
+- core 先校验整个结果 record，再一次性应用；任一字段非法时不得留下部分修改。
 
 可修改项：
 
@@ -726,11 +803,15 @@ public record HookResult(
 
 ### 8.4 流控动作
 
+下表中的大写名称用于描述统一语义，不要求实现为一个 `HookFlowAction` 枚举；实际控制流由当前生命周期结果族中的具体 record 类型表达。
+
 | 生命周期点 | 允许动作 |
 | --- | --- |
 | `AGENT_BUILD` | `CONTINUE` |
 | `TURN_START` | `CONTINUE`、`END_TURN` |
 | `ITERATION_START` | `CONTINUE`、`END_TURN` |
+| `PRE_MESSAGE_COMPRESSION` | `CONTINUE`、`END_TURN` |
+| `POST_MESSAGE_COMPRESSION` | `CONTINUE`、`END_TURN` |
 | `PRE_MODEL_CALL` | `CONTINUE`、`END_TURN` |
 | `POST_MODEL_CALL` | `CONTINUE`、`END_TURN` |
 | `PRE_TOOL_CALL` | `CONTINUE`、`BLOCK_TOOL`、`RETURN_TOOL_RESULT`、`REQUEST_HUMAN_INTERVENTION`、`END_TURN` |
@@ -742,17 +823,17 @@ public record HookResult(
 
 | 动作 | 对当前 Hook 链、工具与循环的影响 |
 | --- | --- |
-| `CONTINUE` | 原子应用 `HookResult` 中的修改，然后执行当前生命周期点的下一个 Hook；Hook 链结束后继续正常流程。 |
+| `CONTINUE` | 原子应用当前生命周期专用 record 中的修改，然后执行当前生命周期点的下一个 Hook；Hook 链结束后继续正常流程。 |
 | `BLOCK_TOOL` | 仅允许在 `PRE_TOOL_CALL` 返回。停止当前工具剩余的 PRE Hook，不调用真实工具，以标准失败 `ToolResult` 表示拦截，再执行该结果的 `POST_TOOL_CALL`，之后继续剩余 ToolCall。 |
 | `RETURN_TOOL_RESULT` | 仅允许在 `PRE_TOOL_CALL` 返回。停止当前工具剩余的 PRE Hook，不调用真实工具，把 record 中的 `toolResult` 当作工具结果，再执行 `POST_TOOL_CALL`，之后继续剩余 ToolCall。该动作可用于缓存、Mock、权限代理和人工拒绝。 |
 | `REQUEST_HUMAN_INTERVENTION` | 仅允许在 `PRE_TOOL_CALL` 返回。当前 Hook 记为已执行，停止当前 Hook 链并保存人工介入状态；不执行工具、`POST_TOOL_CALL`、`ITERATION_END` 或 `TURN_END`。HUMAN_RESPONSE 到达后恢复同一 Turn/Iteration，并从尚未执行的 PRE Hook 继续。 |
-| `END_TURN` | 先原子应用当前 record，再停止当前生命周期点剩余 Hook、剩余 ToolCall 和后续模型循环。若 Iteration 已创建且尚未结束，则只执行一次 `ITERATION_END`；随后只执行一次 `TURN_END`。处于两种结束 Hook 内时不递归重入：`ITERATION_END` 返回该动作只停止其剩余 Hook 后转入 `TURN_END`。被跳过的普通 Hook 不补跑。 |
+| `END_TURN` | 先原子应用当前 record，再停止当前生命周期点剩余 Hook、剩余 ToolCall 和后续模型循环。若发生在 `PRE_MESSAGE_COMPRESSION`，不执行压缩及其 POST Hook；若发生在 `POST_MESSAGE_COMPRESSION`，提交已经生成并经 Hook 修订的压缩结果。若 Iteration 已创建且尚未结束，则只执行一次 `ITERATION_END`；随后只执行一次 `TURN_END`。处于两种结束 Hook 内时不递归重入：`ITERATION_END` 返回该动作只停止其剩余 Hook 后转入 `TURN_END`。被跳过的普通 Hook 不补跑。 |
 
 `END_TURN` 若发生在尚有未处理 ToolCall 的位置，core 为当前及剩余 ToolCall 追加标准“Turn 已终止”结果以维持 Assistant ToolCall 与 ToolResult 一一匹配，但不执行这些工具的 PRE/POST Hook。
 
 本方案不存在 `SKIP_ITERATION`。需要终止当前处理时使用定义明确的工具级动作，或使用 `END_TURN` 结束整个 Turn，避免产生没有模型/工具结果的半完成 Iteration。
 
-非法动作视为 Hook 执行失败，并按错误策略处理。
+返回不属于当前生命周期结果族的 record，或 record 缺少该动作必填载荷，均视为 Hook 执行失败并按错误策略处理。
 
 ### 8.5 Hook 错误策略
 
@@ -760,9 +841,11 @@ public record HookResult(
 - 其他 Hook 支持 `FAIL_FAST` 和 `CONTINUE`。
 - 默认策略为 `CONTINUE`；只有显式配置 `FAIL_FAST` 时才终止执行。
 - `CONTINUE` 必须记录结构化日志和指标，但不在持久化快照中保存“已执行 Hook 列表”。
-- Hook 对消息、参数、结果或工具集合的修改以单个 Hook 为原子边界：失败时不得留下部分修改。
+- Hook 对消息、工具参数/结果、工具集合或压缩请求/结果的修改以单个 Hook 为原子边界：失败时不得留下部分修改。
 
 ## 9. ReAct 主循环
+
+### 9.1 循环定义
 
 core 中只保留一个循环：
 
@@ -771,8 +854,21 @@ prepare turn
 while iteration < maxIterations:
     begin iteration
     run ITERATION_START
-    run PRE_MODEL_CALL
-    call model with current messages and enabled tools
+
+    baseModelRequest = prepare model request
+    compressionCheck = build compression check(baseModelRequest)
+    if compactionPolicy.shouldCompact(compressionCheck):
+        preCompression = run PRE_MESSAGE_COMPRESSION
+        handle end turn
+        compactionResult = compactor.compact(preCompression.request)
+        postCompression = run POST_MESSAGE_COMPRESSION
+        handle end turn
+        persist final compaction result
+        baseModelRequest.messages = final compacted messages
+
+    candidateModelRequest = run PRE_MODEL_CALL(baseModelRequest)
+    validate final model request hard limit
+    call model with candidateModelRequest
     run POST_MODEL_CALL
 
     if no tool call:
@@ -805,6 +901,32 @@ fail when maxIterations exceeded
 - `ask_human` 是普通可配置工具：首次调用在 PRE Hook 被挂起，HUMAN_RESPONSE 后真实执行该工具，由工具读取用户回复并返回 `ToolResult`。
 - 不存在 Stage、Plan、PlanExecutor Prompt 或模式切换。
 
+### 9.2 ReAct 循环模型调用前压缩门
+
+压缩门只存在于 ReAct 循环内部：每个 Iteration 在即将调用一次业务模型时判断一次，位置固定在 `PRE_MODEL_CALL` 之前。
+
+1. `ConversationWindowManager` 组装基础消息，core 结合 `prompt.system` 和当前启用工具定义生成基础 `ModelRequest`。
+2. core 基于基础请求构造 `ConversationCompactionCheck`，交给 `ConversationCompactionPolicy.shouldCompact`。
+3. 不满足条件时直接跳过两个压缩生命周期。
+4. 满足条件时执行全部 `PRE_MESSAGE_COMPRESSION` Hook。
+5. 使用 Hook 修订后的 `ConversationCompactionRequest` 调用 `ConversationCompactor`。
+6. 压缩成功后执行全部 `POST_MESSAGE_COMPRESSION` Hook。
+7. 校验最终压缩结果并原子保存摘要、压缩边界和保留消息，再替换基础 `ModelRequest.messages`。
+8. 执行 `PRE_MODEL_CALL`，生成最终 `ModelRequest`。
+9. 校验最终请求的硬上限后调用一次业务模型。
+
+规则：
+
+- 只在主循环到达“本 Iteration 调用业务模型”这一位置时判断；Turn 创建、消息追加、工具执行、人工介入挂起/恢复、事件发送和持久化阶段都不触发压缩。
+- 每个 Iteration 的逻辑模型调用只判断一次。ModelGateway 内部重试复用已经准备好的最终请求，不重复判断，也不重复执行压缩生命周期。
+- 是否压缩由接口策略决定，runtime 默认可综合 token 估算、消息数、字符数和保留窗口配置。
+- 判断必须覆盖消息、system prompt 和启用工具定义对模型上下文的共同占用，不能只统计历史消息。
+- `PRE_MODEL_CALL` 位于压缩之后，可以继续修改最终请求，但不会再次触发压缩；core 必须在调用模型前执行硬上限校验，超限时失败而不是二次压缩。
+- `PRE_MESSAGE_COMPRESSION` 返回 `END_TURN` 时不执行压缩、POST 压缩 Hook 或模型调用。
+- `ConversationCompactor` 成功后才执行 `POST_MESSAGE_COMPRESSION`；压缩器失败不伪造 POST 生命周期。
+- POST Hook 修订后的压缩结果必须先持久化，再执行 `PRE_MODEL_CALL`；即使后续 Hook 或模型失败，也不能恢复为压缩前窗口。
+- 如果默认摘要实现内部也调用模型，该调用属于 compactor 的基础设施实现，不再次进入 ApexAgent 的业务模型压缩门，防止递归压缩；Compactor 必须自行构造有硬上限的分片输入并校验长度。
+
 ## 10. HUMAN_RESPONSE 恢复
 
 ### 10.1 总体原则
@@ -816,6 +938,8 @@ HUMAN_RESPONSE 是原执行的延续，不是新消息 Turn，也不是新的模
 - 不执行 `AGENT_BUILD`。
 - 不执行 `TURN_START`。
 - 不执行 `ITERATION_START`。
+- 不执行 `PRE_MESSAGE_COMPRESSION`。
+- 不执行 `POST_MESSAGE_COMPRESSION`。
 - 不执行 `PRE_MODEL_CALL`。
 - 不再次调用模型。
 - 不执行 `POST_MODEL_CALL`。
@@ -852,11 +976,13 @@ Turn、Iteration 和挂起阶段由明确状态字段表达，而不是通过 Ho
 
 工具确认与 `ask_human` 不再使用两套 core 恢复逻辑，二者都由 kit 中的 `PRE_TOOL_CALL` Hook 返回：
 
-```text
-HookFlowAction.REQUEST_HUMAN_INTERVENTION
+```java
+RequestHumanIntervention(
+        HookMutations mutations,
+        HumanInterventionRequest request)
 ```
 
-`HookResult.humanIntervention` 区分：
+`RequestHumanIntervention.request()` 区分：
 
 - `QUESTION`：向用户提问，对外发送现有 `ASK_HUMAN` 消息。
 - `TOOL_CONFIRMATION`：请求确认或编辑工具参数，对外发送现有 `TOOL_CONFIRMATION` 消息。
@@ -1199,6 +1325,7 @@ SessionSnapshot copy = JsonUtils.deepCopy(snapshot, SessionSnapshot.class);
 - `JsonUtils` 内部集中配置 `ObjectMapper`、Java Time、record、枚举及 snake_case 所需模块。
 - protocol 中用于保持既有字段名的 Jackson 注解继续有效。
 - runtime/platform 的 Spring AI 或数据库特殊类型通过各自 Adapter 先转为 common DTO，再调用 `JsonUtils`，不把项目依赖模块注册进 common。
+- PostgreSQL Repository 使用 `toJson` 写入 TEXT、使用带明确目标类型的 `fromJson` 读取；不得把数据库 TEXT 直接作为未校验 Map 传给 core。
 - 删除 Fastjson/fastjson2 依赖、import 和工具调用；禁止双 JSON 栈并存。
 
 ## 15. platform
@@ -1269,7 +1396,9 @@ platform 处理：
 - platform 只支持 PostgreSQL。
 - 移除 MySQL 驱动和 dev profile 的 MySQL 配置。
 - 不兼容旧表数据。
-- 使用 PostgreSQL JSONB 保存运行快照和中立消息载荷。
+- 不使用 JSONB。结构化快照、集合和消息载荷由 common `JsonUtils` 序列化为 JSON 字符串后保存到 PostgreSQL `TEXT`。
+- Prompt、消息正文、摘要、工具参数/结果和其他可能较长的字段统一使用 `TEXT`，不设置容易截断内容的 `VARCHAR(n)`。
+- 需要检索、排序或建立索引的属性必须提升为独立标量列；本期不依赖数据库解析快照 TEXT 内部的 JSON。
 - 建议引入 Flyway 管理 platform schema。
 - JDBC/MyBatis Plus 只存在于 platform。
 - 时间字段统一使用 `*_time`，例如 `created_time`、`updated_time`、`start_time`、`end_time`，不再使用 `*_at`。
@@ -1284,11 +1413,11 @@ platform 处理：
 - `agent_key`。
 - `status`。
 - `current_turn_no`。
-- `agent_definition_snapshot JSONB`：当前活动 Turn 的恢复投影，不包含初始化专用的 `defaultEnabledTools`。
-- `enabled_tool_names JSONB`。
-- `activated_skill_names JSONB`。
-- `runtime_snapshot JSONB`：保存当前活动 Turn/Iteration、模型响应、已完成 ToolResult 等恢复所需状态。
-- `suspended_tool_call JSONB`。
+- `agent_definition_snapshot TEXT`：Jackson JSON 字符串，表示当前活动 Turn 的恢复投影，不包含初始化专用的 `defaultEnabledTools`。
+- `enabled_tool_names TEXT`：Jackson JSON 字符串数组。
+- `activated_skill_names TEXT`：Jackson JSON 字符串数组。
+- `runtime_snapshot TEXT`：Jackson JSON 字符串，保存当前活动 Turn/Iteration、模型响应、已完成 ToolResult 等恢复所需状态。
+- `suspended_tool_call TEXT`：Jackson JSON 字符串。
 - `last_active_time`。
 - `created_time`、`updated_time`。
 
@@ -1309,8 +1438,8 @@ platform 处理：
 - `sort_no`。
 - `role`。
 - `message_type`。
-- `content`。
-- `payload JSONB`。
+- `content TEXT`。
+- `payload TEXT`：Jackson JSON 字符串；没有扩展载荷时使用 null，不使用空对象占位。
 - `compacted`。
 - `created_time`。
 - 唯一约束 `(session_id, sort_no)`。
@@ -1318,8 +1447,8 @@ platform 处理：
 #### `apex_agent_dialogue_summary`
 
 - `session_id`。
-- `content`。
-- `payload JSONB`。
+- `content TEXT`。
+- `payload TEXT`：Jackson JSON 字符串。
 - `compacted_to_sort_no`。
 - `source_turn_no`。
 - `created_time`、`updated_time`。
@@ -1340,6 +1469,7 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 
 - 新 Turn 创建、用户消息追加和 Session 快照保存为一个事务。
 - 任一人工介入挂起、SuspendedToolCall 和 Session 状态切换为一个事务。
+- 消息压缩结果、摘要、`compacted` 标记、压缩边界和 SessionSnapshot 更新为一个事务，并在业务模型调用前提交。
 - HUMAN_RESPONSE 参数合并和恢复占用同一 session 执行锁。
 - 每个 ToolResult 追加后及时提交，保证多工具调用中途挂起时前序结果可恢复。
 - Turn/Iteration 嵌套状态结束与 Session 状态更新保持一致。
@@ -1436,7 +1566,7 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 | `org.gemo.apex.skills` 非 learning 部分 | runtime，保留现有加载和使用行为 |
 | 内存 Session/Conversation Store | runtime |
 | 当前 session 内存锁 | runtime `SessionExecutionCoordinator` |
-| 对话摘要压缩 | runtime |
+| 对话摘要压缩 | core 压缩门与生命周期编排 + runtime 默认 Policy/Compactor |
 | Web、SSE、线程池、用户 Filter | platform |
 | PostgreSQL Session/Conversation Store | platform |
 | 长期 Memory、搜索、管理接口 | memory |
@@ -1470,15 +1600,16 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 
 ### 阶段 2：core-extension
 
-- 定义 Model、Tool、Hook、Message、Storage、Definition 接口。
+- 定义 Model、Tool、Hook、Message、Storage、Definition、Compaction 接口。
 - 增加架构测试，保证模块只有接口。
 - 为现有实现编写临时 Adapter，避免一次性重写全部功能。
 
 ### 阶段 3：core
 
 - 实现 `ApexAgent`。
-- 实现九个生命周期点。
-- 实现 HookResult record、流控动作和默认 `CONTINUE` 错误策略。
+- 实现十一个生命周期点。
+- 实现按生命周期/动作分型的结果 record、流控语义和默认 `CONTINUE` 错误策略。
+- 实现 ReAct 循环每个 Iteration、`PRE_MODEL_CALL` 之前的压缩判断门、压缩 Hook 编排和结果提交。
 - 实现 session 级工具启用状态。
 - 实现 Turn/Iteration。
 - 实现统一人工介入、挂起快照和 HUMAN_RESPONSE 恢复。
@@ -1496,7 +1627,7 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 
 - 实现 Builder 和无 Spring 容器启动。
 - 实现 Spring AI Adapter。
-- 实现内存 Store、Print Publisher 和摘要压缩。
+- 实现内存 Store、Print Publisher、默认压缩策略和摘要 Compactor。
 - 实现 session 执行锁和内存 Store 深拷贝隔离。
 - 保留并迁移 `org.gemo.apex.skills` 非 learning 逻辑。
 - 迁移 MCP stdio/SSE 和 HTTP SubAgent。
@@ -1508,7 +1639,7 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - 接入 runtime。
 - 实现 SSE Publisher、Coordinator 和用户上下文。
 - 切换 PostgreSQL。
-- 增加不含独立 Turn/Iteration 表的 Flyway schema。
+- 增加不含 JSONB、独立 Turn/Iteration 表的 Flyway schema，长内容与序列化快照使用 TEXT。
 - 删除 MySQL 依赖。
 - 验证现有前端无缝连接。
 
@@ -1551,9 +1682,11 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 
 使用 Fake 接口测试，不启动 Spring：
 
-- 九个生命周期点的完整顺序。
+- 十一个生命周期点的完整顺序，以及不满足压缩条件时两个条件生命周期不执行。
 - Hook 排序和错误策略。
 - Hook 未配置错误策略时默认 `CONTINUE`。
+- HookPoint、Context、Result 类型不匹配时注册失败。
+- 各生命周期和动作使用专用 record，不存在万能可空字段结果对象。
 - Hook 修改消息、工具集合、参数、结果。
 - 非法流控动作。
 - `BLOCK_TOOL`、`RETURN_TOOL_RESULT`、`REQUEST_HUMAN_INTERVENTION` 和 `END_TURN` 对剩余 Hook、工具和结束 Hook 的精确影响。
@@ -1571,7 +1704,7 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 必须覆盖：
 
 - HUMAN_RESPONSE 不执行 `AGENT_BUILD`。
-- 恢复不执行 `TURN_START`、`ITERATION_START`、模型调用前后 Hook。
+- 恢复不执行 `TURN_START`、`ITERATION_START`、`PRE_MODEL_CALL`、两个消息压缩 Hook 或 `POST_MODEL_CALL`。
 - 恢复不再次调用模型。
 - 恢复同一 Turn/Iteration。
 - 已执行 PRE_TOOL_CALL Hook 不重复。
@@ -1603,7 +1736,21 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - Skill instructions 只由 `activate_skill` ToolResult 进入消息列表，不作为固定前缀重复注入。
 - `org.gemo.apex.skills` 现有非 learning 加载与资源读取回归测试。
 
-### 21.5 platform 测试
+### 21.5 模型调用前压缩测试
+
+- ReAct 循环每个 Iteration 在 `PRE_MODEL_CALL` 之前调用一次 `ConversationCompactionPolicy.shouldCompact`，覆盖首次和工具执行后的下一 Iteration。
+- Turn 创建、工具执行、HUMAN_RESPONSE 恢复和 ModelGateway 内部重试不触发额外压缩判断或压缩 Hook。
+- 判定为 false 时不执行 PRE/POST 压缩 Hook，也不调用 Compactor。
+- 判定为 true 时顺序严格为压缩判断、PRE 压缩 Hook、Compactor、POST 压缩 Hook、持久化、PRE_MODEL_CALL、模型调用。
+- `PRE_MESSAGE_COMPRESSION` 返回 `END_TURN` 时不执行 Compactor、POST Hook 或模型。
+- Compactor 失败时不执行 `POST_MESSAGE_COMPRESSION` 或业务模型。
+- POST Hook 可以修订压缩结果；`PRE_MODEL_CALL` 接收修订后的消息。
+- `PRE_MODEL_CALL` 修改请求后不二次压缩，超过硬上限时模型不执行。
+- 压缩结果在业务模型调用前提交；后续模型失败时仍可从压缩后状态恢复。
+- HUMAN_RESPONSE 恢复工具阶段不执行压缩 Hook；进入下一次模型调用时重新通过压缩门。
+- 摘要 Compactor 内部模型调用不会递归触发业务模型压缩门。
+
+### 21.6 platform 测试
 
 - Controller 路径、请求和响应不变。
 - `X-User-Id` 校验和传播。
@@ -1614,12 +1761,14 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - PostgreSQL Repository。
 - 事务和进程重启恢复。
 - schema 不包含 `current_iteration_no`、`apex_agent_turn` 或 `apex_agent_iteration`。
+- schema 不包含 JSONB，快照、集合和 payload 使用 TEXT。
+- 超长消息、摘要、工具结果和 SessionSnapshot 的 TEXT 往返不截断。
 - 时间列统一为 `*_time`。
 - Agent 列表。
 
 PostgreSQL 集成测试建议使用 Testcontainers；纯规则测试不得依赖外部数据库。
 
-### 21.6 协议兼容测试
+### 21.7 协议兼容测试
 
 对以下事件执行精确 JSON 快照测试：
 
@@ -1668,8 +1817,9 @@ PostgreSQL 集成测试建议使用 Testcontainers；纯规则测试不得依赖
 - 工具全集、默认启用集合和当前启用集合边界清晰。
 - `enabledTools` 是 session 级状态，默认集合只用于新 session 首个 Turn。
 - 只有启用工具进入模型并允许执行。
-- 九个生命周期点工作正常。
-- Hook 返回 record，默认错误策略为 `CONTINUE`，且不存在 `SKIP_ITERATION`。
+- 十一个生命周期点工作正常；压缩前后生命周期只在实际压缩时执行。
+- ReAct 循环每个 Iteration 只在 `PRE_MODEL_CALL` 之前判断一次压缩，其他阶段不触发。
+- Hook 返回值按生命周期和动作分型，默认错误策略为 `CONTINUE`，且不存在 `SKIP_ITERATION`。
 
 ### 恢复
 
@@ -1695,6 +1845,7 @@ PostgreSQL 集成测试建议使用 Testcontainers；纯规则测试不得依赖
 - `context.mode` 固定为 react。
 - PostgreSQL 为唯一 platform 数据库。
 - 不保留 MySQL 兼容逻辑。
+- 不使用 JSONB，长内容和 Jackson 序列化数据使用 TEXT。
 - Turn/Iteration 暂不单独建表，session 不保存 `current_iteration_no`。
 
 ## 23. 风险与控制
@@ -1783,6 +1934,29 @@ core 发送 END，platform 又需要覆盖构造失败和线程池拒绝路径�
 - 锁项采用安全的生命周期管理，所有退出路径在 `finally` 释放。
 - 内存 Repository 在 save/load 两侧深拷贝，并用别名污染回归测试锁定。
 
+### 23.9 压缩门递归与持久化顺序
+
+如果摘要 Compactor 也调用模型，复用业务模型入口会递归触发压缩；如果压缩结果在模型调用后才保存，模型异常会让内存和存储窗口不一致。
+
+控制：
+
+- 业务模型入口和 Compactor 基础设施模型入口分离，只有前者经过压缩门。
+- 每个 Iteration 的业务模型调用只判定一次，下一 Iteration 再重新判定；ModelGateway 内部重试不重复触发。
+- 固定执行顺序为压缩判断、PRE 压缩 Hook、Compactor、POST 压缩 Hook、事务提交、PRE_MODEL_CALL、模型。
+- `PRE_MODEL_CALL` 修改后的最终请求只做硬上限校验，不回跳到压缩门。
+- 用顺序测试覆盖 false、成功、Hook 终止和 Compactor 失败路径。
+
+### 23.10 TEXT 快照的查询与演进
+
+TEXT 避免数据库 JSON 类型耦合并适合长内容，但数据库不能可靠索引或校验其中的 JSON 字段，DTO 演进也可能导致旧快照反序列化失败。
+
+控制：
+
+- 所有需要查询、排序和唯一约束的属性使用独立列，不查询 TEXT 内部结构。
+- TEXT 内容统一通过 `JsonUtils` 和显式目标类型读写，保存快照版本。
+- DTO 演进提供版本化反序列化 Adapter；本期仍不承担旧 MySQL 历史数据兼容。
+- 使用超长内容和多版本样本做 PostgreSQL 往返测试，禁止改回 JSONB。
+
 ## 24. 最终目标形态
 
 重构完成后，系统的核心关系应收敛为：
@@ -1793,12 +1967,14 @@ flowchart LR
     Definition["AgentDefinitionProvider"] --> Runtime
     Runtime --> Agent["ApexAgent"]
     Agent --> Hooks["LifecycleHook 接口"]
+    Agent --> Compaction["Compaction Policy / Compactor 接口"]
     Agent --> Model["ModelGateway 接口"]
     Agent --> Tools["AgentTool 接口"]
     Agent --> Stores["Session / Conversation 接口"]
     Agent --> Events["AgentEventPublisher 接口"]
 
     RuntimeImpl["runtime 默认实现"] -.-> Hooks
+    RuntimeImpl -.-> Compaction
     RuntimeImpl -.-> Model
     RuntimeImpl -.-> Tools
     RuntimeImpl -.-> Stores
