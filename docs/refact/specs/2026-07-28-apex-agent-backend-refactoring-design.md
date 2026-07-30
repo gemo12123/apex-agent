@@ -2,6 +2,7 @@
 
 > 状态：已确认
 > 日期：2026-07-28
+> 最近修订：2026-07-30
 > 范围：仅重构 `apex-agent` 后端，不修改 `apex-frontend`
 > 基线：当前单模块后端共有 248 个生产源码文件、44 个测试源码文件；重构前完整后端测试为 137 个测试全部通过
 
@@ -50,9 +51,9 @@ ChatController
 8. 新增 `AGENT_BUILD` 生命周期点。普通新执行创建 `ApexAgent` 时执行；`HUMAN_RESPONSE` 恢复时不执行。
 9. HUMAN_RESPONSE 恢复原 Turn 和原 Iteration，跳过 `PRE_TOOL_CALL` 之前已经完成的生命周期。
 10. 只允许持久化当前挂起工具已经执行的 `PRE_TOOL_CALL` Hook 标识；不得用通用的“已执行 Hook 列表”恢复其他生命周期。
-11. 工具配置分为可用全集和默认启用集合；只有当前启用工具能够进入模型入参并被真实执行。
-12. Skill 分为可用全集和已激活集合。已激活 Skill 在同一 session 内跨 Turn 保留，不同 session 和用户之间隔离。
-13. Skill 集合不由生命周期 Hook 动态增删；`activate_skill` 是改变激活状态的唯一默认入口。
+11. 工具配置分为可用全集和默认启用集合；`enabledTools` 是 session 级状态，只在新 session 的首个 Turn 使用 `defaultEnabledTools` 初始化，后续 Turn 直接沿用。
+12. Agent 定义只配置 `enabledSkills`，不再配置 `availableSkills`；`activatedSkills` 是其 session 级子集，在同一 session 内跨 Turn 保留。
+13. Skill 集合不由生命周期 Hook 动态增删；`activate_skill` 是改变激活状态的唯一默认入口，Skill instructions 只作为普通对话消息存在。
 14. 对话摘要压缩保留在 runtime。
 15. 长期记忆、会话搜索和 Skill Learning 封存在 `memory`，其他模块不依赖 `memory`。
 16. runtime 提供内存存储、Print 消息出口和默认 Agent，使外部项目只依赖 runtime、通过 `new` 对象即可运行。
@@ -61,6 +62,11 @@ ChatController
 19. Agent 数据库配置源本期不实现，只定义统一接口；本期提供 Java 对象、文件和 Spring 配置实现。
 20. platform 正式切换到 PostgreSQL，不考虑现有 MySQL 或历史表数据兼容。
 21. HTTP、SSE 和人在回路协议保持不变，不修改前端。
+22. Agent 定义只允许来自一个完整配置源，不保留全局配置与 workspace 配置叠加。
+23. Hook 返回 `HookResult` record；流控枚举只是其中一个字段，默认错误策略为 `CONTINUE`。
+24. 工具确认与 `ask_human` 统一由 `PRE_TOOL_CALL` Hook 请求人工介入。
+25. runtime 自身保证同一 `sessionId` 只有一个活跃执行，内存存储通过不可变快照或深拷贝隔离运行对象。
+26. 项目 JSON 处理统一使用 Jackson，并彻底移除 Fastjson。
 
 ## 3. 目标与非目标
 
@@ -130,6 +136,7 @@ memory         -> common + core-extension
 - `runtime` 不依赖 platform 和 memory。
 - `platform` 可以引入完整 Spring 与数据库依赖。
 - 没有任何模块依赖 `memory`。
+- 全部模块使用 Jackson；依赖树中不得出现 Fastjson。
 
 ### 4.2 Maven 目录
 
@@ -222,10 +229,11 @@ artifactId: apex-agent-{module}
 - `SkillDefinition`、`SkillSetDefinition`。
 - `HookPoint`、`HookBinding`、`HookFlowAction`、`HookErrorPolicy`。
 - `HookContext` 的各类数据视图和 `HookResult`。
-- `PendingHumanInteraction`、`PendingToolExecution`、`SuspensionPoint`。
-- `MessageOperation`。
+- `HumanInterventionRequest`、`SuspendedToolCall`、`SuspensionPoint`。
+- `MessageOperation`、`AgentDefinitionOperation`。
 - `ExecutionStatus`。
 - 运行时不可变快照及持久化所需的中立数据结构。
+- 基于 Jackson 的 `JsonUtils`。
 
 规则：
 
@@ -234,6 +242,8 @@ artifactId: apex-agent-{module}
 - 不包含数据库实体或 ORM 注解。
 - 集合字段在跨边界时使用不可变副本。
 - 对持久化快照中的 Hook 使用稳定的 `hookId`，不使用 Spring Bean 名或 Java 类名。
+- `JsonUtils` 提供 `toJson`、`fromJson`、`toTree`、`convert` 和 `deepCopy` 等便捷方法；其他模块不直接散落 `ObjectMapper` 配置。
+- `JsonUtils` 只依赖 Jackson，不引入 Spring；所有 Fastjson API 和依赖必须移除。
 
 ### 5.3 core-extension
 
@@ -264,7 +274,7 @@ public interface LifecycleHook {
 }
 
 public interface HookResolver {
-    LifecycleHook resolve(String extensionId);
+    LifecycleHook resolve(String name);
 }
 
 public interface AgentEventPublisher {
@@ -282,13 +292,6 @@ public interface ConversationRepository {
     void compact(...);
 }
 
-public interface ExecutionRepository {
-    void saveTurn(Turn turn);
-    void saveIteration(Iteration iteration);
-    Optional<Turn> findTurn(...);
-    Optional<Iteration> findIteration(...);
-}
-
 public interface ConversationWindowManager {
     List<AgentMessageEntry> prepare(...);
 }
@@ -298,10 +301,8 @@ public interface ConversationWindowManager {
 
 - `IdGenerator`。
 - `TimeProvider`。
-- `AgentDefinitionSnapshotRepository`，也可以作为 `SessionRepository` 的快照职责。
 - `SkillProvider`。
 - `SkillActivator`。
-- 必要的序列化端口。
 
 严格限制：
 
@@ -328,7 +329,7 @@ public interface ConversationWindowManager {
 - 人在回路挂起状态生成。
 - HUMAN_RESPONSE 恢复状态机。
 - 协议消息工厂。
-- 会话、Turn、Iteration 持久化接口的调用。
+- 包含当前 Turn/Iteration 的 SessionSnapshot 持久化接口调用。
 
 不包含：
 
@@ -349,11 +350,11 @@ core 只定义循环与接口使用，不决定扩展的来源。
 包含：
 
 - `ask_human`。
+- `AskHumanInterventionHook`。
 - `ToolConfirmHook`。
 - `PlainTextTruncateHook`。
 - Tool/Hook 匹配器。
 - Tool Confirmation 规格构造器。
-- Skill 基础定义和通用辅助能力。
 - 不依赖 Spring 容器的通用 Hook 组合器。
 
 明确删除：
@@ -376,14 +377,15 @@ kit 中的实现只通过 `core-extension` 接口和 common 上下文工作，�
 - Spring AI `ChatModel`/消息/ToolCallback 与 common 模型之间的适配。
 - 默认模型网关。
 - 默认工具执行器。
-- 内存 Session/Conversation/Turn/Iteration 存储。
+- 内存 Session/Conversation 存储；当前 Turn/Iteration 作为 SessionSnapshot 的一部分保存。
 - 对话窗口管理和摘要压缩。
 - Print 消息出口。
 - Java 对象和文件版 AgentDefinitionProvider。
 - 默认 HookResolver/ToolProvider 注册表。
-- MCP stdio 客户端生命周期和工具适配。
+- MCP stdio/SSE 客户端生命周期和工具适配。
 - HTTP SubAgent 工具和远程 SSE 消息解析。
-- 普通 Skill 加载、资源读取和 `activate_skill`。
+- 保留现有 `org.gemo.apex.skills` 中非 learning 的 Skill 加载、解析、资源读取和 `activate_skill` 逻辑。
+- session 级执行锁。
 
 runtime 可以使用最小范围的 Spring AI 依赖，但不得要求 Spring IoC 容器。
 
@@ -409,7 +411,7 @@ MCP 和 SubAgent 是 runtime 的可选能力：
 - `SseEmitterAgentEventPublisher`。
 - Spring YAML AgentDefinitionProvider。
 - Spring Bean/配置到 runtime Hook、Tool 注册表的适配。
-- PostgreSQL Session/Conversation/Turn/Iteration 存储。
+- PostgreSQL Session/Conversation 存储；Turn/Iteration 暂不单独建表。
 - Agent 列表接口。
 - platform 配置与数据库迁移脚本。
 
@@ -433,7 +435,7 @@ platform 不拥有核心循环，也不重新实现 runtime 的工具和 Hook �
 
 边界：
 
-- 不包含 runtime 必需的 Session/Turn/Iteration 存储实现。
+- 不包含 runtime 必需的 Session/Conversation 存储实现。
 - 不包含普通 Skill 定义、加载或 `activate_skill`。
 - platform、runtime、core 和 kit 均不依赖 memory。
 - platform 默认配置不再引用 `skillExperienceAugmentHook` 或 `skillUsageRecorderHook`。
@@ -458,12 +460,12 @@ Session 持久化：
 
 - `sessionId`、`agentKey`、`userId`。
 - 当前状态。
-- 当前 Turn/Iteration 定位。
-- 构造完成后的 `AgentDefinitionSnapshot`。
+- 当前 Turn/Iteration 运行快照。
+- 构造完成后的 `AgentDefinitionSnapshot` 恢复投影。
 - 对话消息和摘要边界。
-- 当前启用工具集合，仅在 Turn 进行中或挂起时保存。
+- session 级当前启用工具集合 `enabledTools`。
 - session 级已激活 Skill 集合。
-- PendingHumanInteraction/PendingToolExecution。
+- 唯一的人工介入挂起对象 `SuspendedToolCall`。
 - 最近活跃时间。
 
 不持久化：
@@ -476,14 +478,16 @@ Session 持久化：
 
 ### 6.2 Turn
 
-Turn 表示一次 `RequestType.NEW` 用户输入开始，到完成、失败或挂起恢复完成为止的业务轮次。
+Turn 表示从一次 `RequestType.NEW` 用户输入开始，到该输入对应的 ReAct 执行最终完成或失败为止的业务轮次。
 
 规则：
 
 - 同一 Session 的 `turnNo` 单调递增。
 - HUMAN_RESPONSE 不创建新 Turn。
 - HUMAN_RESPONSE 恢复原 Turn。
-- 新 Turn 重置 `enabledTools` 为 `defaultEnabledTools`。
+- 工具确认、`ask_human` 等人工介入只会挂起当前 Turn，不表示 Turn 结束。
+- 只有新 session 的首个 Turn 使用 Agent 定义中的 `defaultEnabledTools` 初始化 session 的 `enabledTools`。
+- 同一 session 的后续 Turn 直接沿用 `enabledTools`，不得重新应用 `defaultEnabledTools`。
 - 新 Turn 不清空 session 级 `activatedSkills`。
 - Turn 挂起时状态为 `SUSPENDED`，但不触发 `TURN_END`。
 
@@ -513,7 +517,6 @@ description: 通用智能体
 
 prompt:
   system: classpath:agents/default_agent/REACT_PROMPT.md
-  rules: classpath:agents/default_agent/AGENT.md
 
 tools:
   available:
@@ -521,30 +524,39 @@ tools:
     - activate_skill
     - read_skill_resource
     - meeting-server/*
+    - subagent/researcher
   default-enabled:
     - ask_human
     - activate_skill
     - read_skill_resource
     - meeting-server/*
+    - subagent/researcher
 
 skills:
-  available:
+  enabled:
     - meeting-skill
+
+subagents:
+  researcher:
+    agent-key: researcher_agent
+    endpoint: http://agent-platform.example.com/api/sse/chat
+    description: 负责检索和整理研究资料
+    timeout: 60s
 
 hooks:
   agent-build:
     - id: normalize-agent-definition
-      extension: normalizeAgentDefinition
+      name: normalizeAgentDefinition
       order: 10
   pre-tool-call:
     - id: confirm-contact-detail
-      extension: toolConfirmHook
+      name: toolConfirmHook
       order: 100
       tools: ["contacts_get_detail"]
       options: {}
   post-tool-call:
     - id: truncate-plain-text
-      extension: plainTextTruncateHook
+      name: plainTextTruncateHook
       order: 200
       tools: ["*"]
       options:
@@ -554,8 +566,12 @@ hooks:
 要求：
 
 - 每个 Hook Binding 必须有稳定且在当前生命周期点内唯一的 `id`。
-- `extension` 是扩展注册键，不等于 Spring Bean 名。
+- `name` 是 Hook 注册表中的解析名，不等于 Spring Bean 名。
 - `default-enabled` 必须是 `available` 的子集。
+- `default-enabled` 只属于 Agent 定义，不写入 session；session 只保存实际的 `enabledTools`。
+- `skills.enabled` 是该 Agent 允许激活的 Skill 集合，不再提供 `skills.available` 配置。
+- `subagents` 把任意目标 Agent 声明为 HTTP 工具；生成的工具名仍需出现在 `tools.available`，是否默认启用仍由 `tools.default-enabled` 决定。
+- 本期 Prompt 只实现 `prompt.system`，不解析或合并 `prompt.rules`。
 - 重复工具名、Skill 名、Hook ID 在构造阶段直接失败。
 - runtime Builder 可以直接传同构 Java 对象，不要求 YAML。
 
@@ -568,7 +584,13 @@ hooks:
 - `ProgrammaticAgentDefinitionProvider`：runtime，直接接收 Java 对象。
 - `FileAgentDefinitionProvider`：runtime，支持 classpath 和文件系统。
 - `SpringPropertiesAgentDefinitionProvider`：platform，将 `application.yml` 转换为中立定义。
-- `LayeredAgentDefinitionProvider`：保持现有全局配置与 workspace 配置的叠加能力。
+
+配置源规则：
+
+- 每个 runtime/platform 实例只选择一个 `AgentDefinitionProvider`。
+- Provider 必须返回一份完整定义，不做“全局默认值 + workspace 覆盖”的字段级叠加。
+- 同时配置多个互相覆盖的定义源时构造失败，不按优先级静默合并。
+- workspace 路径可以作为文件 Provider 的资源根目录，但不再具有独立配置层语义。
 
 本期不实现：
 
@@ -587,19 +609,19 @@ hooks:
 4. 校验工具、Skill、Hook 和 Prompt。
 5. 冻结为不可变 `AgentDefinitionSnapshot`。
 6. 该快照作为当前 Turn 的运行定义。
-7. Session 挂起时持久化快照。
+7. 在 SessionSnapshot 中保存当前活动 Turn 使用的恢复投影，挂起时只更新会话运行快照，不在挂起工具对象中重复保存。
 
 持久化快照是必要条件：HUMAN_RESPONSE 恢复不能重新执行 `AGENT_BUILD`，但必须继续使用挂起前由构造 Hook 产生的最终定义。
 
 快照只保存可序列化定义：
 
-- Prompt 文本或稳定资源版本。
-- 工具名、默认启用工具名。
+- `prompt.system` 文本或稳定资源版本。
+- 可用工具名；`defaultEnabledTools` 是 session 初始化参数，不进入 SessionSnapshot 的恢复投影。
 - Skill 定义或稳定引用。
-- Hook Binding ID、extension、顺序、匹配规则和 options。
+- Hook Binding ID、name、顺序、匹配规则和 options。
 - 定义版本。
 
-工具实例、Hook 实例和客户端连接由 runtime 根据快照重新解析。
+工具实例、Hook 实例和客户端连接由 runtime 根据快照重新解析。内存 Repository 也必须保存同样的恢复投影，不能因为进程内仍有完整 Agent 定义对象而把 `defaultEnabledTools` 作为 session 状态保留。
 
 ## 8. 生命周期
 
@@ -660,24 +682,47 @@ sequenceDiagram
 
 ### 8.3 Hook 能力
 
-Hook 通过显式 `HookResult` 修改运行时，不直接持有 core 实现对象。
+Hook 通过显式 `HookResult` 修改运行时，不直接持有 core 实现对象。返回值必须是 common 中的 record，不能把返回类型简化为流控枚举：
+
+```java
+public record HookResult(
+        HookFlowAction action,
+        List<MessageOperation> messageOperations,
+        List<AgentDefinitionOperation> definitionOperations,
+        Set<String> enableToolNames,
+        Set<String> disableToolNames,
+        Map<String, Object> toolArguments,
+        ToolResult toolResult,
+        HumanInterventionRequest humanIntervention,
+        String reason) {
+}
+```
+
+约定：
+
+- `action` 只表达控制流，其余字段表达同一个 Hook 原子提交的状态变化。
+- 未使用的字段使用空集合或 `null`/`Optional` 的统一约定，具体 Java 风格在实现阶段固定，禁止各 Hook 自行解释。
+- `PRE_TOOL_CALL` 可以同时改写参数、改变 session 的工具启用集合、请求人工介入，或者通过 `toolResult` 直接返回结果。
+- `POST_TOOL_CALL` 可以通过 `toolResult` 替换工具结果。
+- `AGENT_BUILD` 通过 `definitionOperations` 修改构造草稿。
+- core 先校验整个 record，再一次性应用；任一字段非法时不得留下部分修改。
 
 可修改项：
 
 - 工作消息：追加、删除、替换。
-- 当前 Turn 的启用工具集合。
+- session 级启用工具集合。
 - 当前工具参数。
 - 当前工具结果。
 - 构造阶段的 Agent 定义草稿，包括工具全集、默认启用工具和 Hook 配置。
-- Skill 定义的元数据或说明内容可以在构造阶段规范化，但不允许运行期动态增删可用/已激活 Skill 集合。
+- Skill 定义的元数据或说明内容可以在构造阶段规范化，但不允许运行期通过 Hook 动态增删 `enabledSkills`/`activatedSkills`。
 
 工具启用变更规则：
 
 - 只能启用 `availableTools` 中存在的工具。
 - 禁用立即生效。
-- 变更在当前 Turn 后续 Iteration 中持续有效。
-- 挂起时保存，恢复时继续使用。
-- 新 Turn 重置为 `defaultEnabledTools`。
+- 变更立即写入 SessionContext，并在当前及后续 Turn 持续有效。
+- 挂起和恢复直接使用 session 的 `enabledTools`，挂起工具对象不重复保存集合。
+- `defaultEnabledTools` 只在新 session 首个 Turn 初始化一次，此后不参与重置。
 
 ### 8.4 流控动作
 
@@ -685,13 +730,27 @@ Hook 通过显式 `HookResult` 修改运行时，不直接持有 core 实现对�
 | --- | --- |
 | `AGENT_BUILD` | `CONTINUE` |
 | `TURN_START` | `CONTINUE`、`END_TURN` |
-| `ITERATION_START` | `CONTINUE`、`SKIP_ITERATION`、`END_TURN` |
-| `PRE_MODEL_CALL` | `CONTINUE`、`SKIP_ITERATION`、`END_TURN` |
-| `POST_MODEL_CALL` | `CONTINUE`、`SKIP_ITERATION`、`END_TURN` |
-| `PRE_TOOL_CALL` | `CONTINUE`、`BLOCK_TOOL`、`REQUEST_CONFIRMATION`、`SKIP_ITERATION`、`END_TURN` |
-| `POST_TOOL_CALL` | `CONTINUE`、`SKIP_ITERATION`、`END_TURN` |
+| `ITERATION_START` | `CONTINUE`、`END_TURN` |
+| `PRE_MODEL_CALL` | `CONTINUE`、`END_TURN` |
+| `POST_MODEL_CALL` | `CONTINUE`、`END_TURN` |
+| `PRE_TOOL_CALL` | `CONTINUE`、`BLOCK_TOOL`、`RETURN_TOOL_RESULT`、`REQUEST_HUMAN_INTERVENTION`、`END_TURN` |
+| `POST_TOOL_CALL` | `CONTINUE`、`END_TURN` |
 | `ITERATION_END` | `CONTINUE`、`END_TURN` |
 | `TURN_END` | `CONTINUE` |
+
+动作语义：
+
+| 动作 | 对当前 Hook 链、工具与循环的影响 |
+| --- | --- |
+| `CONTINUE` | 原子应用 `HookResult` 中的修改，然后执行当前生命周期点的下一个 Hook；Hook 链结束后继续正常流程。 |
+| `BLOCK_TOOL` | 仅允许在 `PRE_TOOL_CALL` 返回。停止当前工具剩余的 PRE Hook，不调用真实工具，以标准失败 `ToolResult` 表示拦截，再执行该结果的 `POST_TOOL_CALL`，之后继续剩余 ToolCall。 |
+| `RETURN_TOOL_RESULT` | 仅允许在 `PRE_TOOL_CALL` 返回。停止当前工具剩余的 PRE Hook，不调用真实工具，把 record 中的 `toolResult` 当作工具结果，再执行 `POST_TOOL_CALL`，之后继续剩余 ToolCall。该动作可用于缓存、Mock、权限代理和人工拒绝。 |
+| `REQUEST_HUMAN_INTERVENTION` | 仅允许在 `PRE_TOOL_CALL` 返回。当前 Hook 记为已执行，停止当前 Hook 链并保存人工介入状态；不执行工具、`POST_TOOL_CALL`、`ITERATION_END` 或 `TURN_END`。HUMAN_RESPONSE 到达后恢复同一 Turn/Iteration，并从尚未执行的 PRE Hook 继续。 |
+| `END_TURN` | 先原子应用当前 record，再停止当前生命周期点剩余 Hook、剩余 ToolCall 和后续模型循环。若 Iteration 已创建且尚未结束，则只执行一次 `ITERATION_END`；随后只执行一次 `TURN_END`。处于两种结束 Hook 内时不递归重入：`ITERATION_END` 返回该动作只停止其剩余 Hook 后转入 `TURN_END`。被跳过的普通 Hook 不补跑。 |
+
+`END_TURN` 若发生在尚有未处理 ToolCall 的位置，core 为当前及剩余 ToolCall 追加标准“Turn 已终止”结果以维持 Assistant ToolCall 与 ToolResult 一一匹配，但不执行这些工具的 PRE/POST Hook。
+
+本方案不存在 `SKIP_ITERATION`。需要终止当前处理时使用定义明确的工具级动作，或使用 `END_TURN` 结束整个 Turn，避免产生没有模型/工具结果的半完成 Iteration。
 
 非法动作视为 Hook 执行失败，并按错误策略处理。
 
@@ -699,7 +758,7 @@ Hook 通过显式 `HookResult` 修改运行时，不直接持有 core 实现对�
 
 - `AGENT_BUILD` 固定为 fail-fast。
 - 其他 Hook 支持 `FAIL_FAST` 和 `CONTINUE`。
-- 默认策略为 `FAIL_FAST`。
+- 默认策略为 `CONTINUE`；只有显式配置 `FAIL_FAST` 时才终止执行。
 - `CONTINUE` 必须记录结构化日志和指标，但不在持久化快照中保存“已执行 Hook 列表”。
 - Hook 对消息、参数、结果或工具集合的修改以单个 Hook 为原子边界：失败时不得留下部分修改。
 
@@ -722,7 +781,8 @@ while iteration < maxIterations:
         return
 
     for toolCall in modelResponse.toolCalls:
-        run PRE_TOOL_CALL
+        hookResult = run PRE_TOOL_CALL
+        handle block / direct result / human intervention / end turn
         check tool is enabled
         execute tool
         run POST_TOOL_CALL
@@ -742,7 +802,7 @@ fail when maxIterations exceeded
 - 工具结果改写在写入对话前完成。
 - `AssistantMessage` 与每个 `ToolResult` 必须一一匹配。
 - 一个 ToolCall 失败只生成对应工具响应；是否终止 Turn 由错误策略或 Hook 决定。
-- `ask_human` 是普通可配置工具，但其结果由 HUMAN_RESPONSE 补齐。
+- `ask_human` 是普通可配置工具：首次调用在 PRE Hook 被挂起，HUMAN_RESPONSE 后真实执行该工具，由工具读取用户回复并返回 `ToolResult`。
 - 不存在 Stage、Plan、PlanExecutor Prompt 或模式切换。
 
 ## 10. HUMAN_RESPONSE 恢复
@@ -760,10 +820,11 @@ HUMAN_RESPONSE 是原执行的延续，不是新消息 Turn，也不是新的模
 - 不再次调用模型。
 - 不执行 `POST_MODEL_CALL`。
 - 从挂起工具尚未执行的 `PRE_TOOL_CALL` Hook 开始继续。
+- 不触发 `TURN_END`；只有原 Turn 最终完成或失败时才结束。
 
 ### 10.2 允许持久化的 Hook 进度
 
-只允许在 `PendingToolExecution` 中保存：
+只允许在 `SuspendedToolCall` 中保存：
 
 ```text
 executedPreToolHookIds: List<String>
@@ -787,34 +848,45 @@ executedPreToolHookIds: List<String>
 
 Turn、Iteration 和挂起阶段由明确状态字段表达，而不是通过 Hook 历史推断。
 
-### 10.3 工具确认挂起
+### 10.3 统一的人工介入模型
 
-`PendingToolExecution` 至少保存：
+工具确认与 `ask_human` 不再使用两套 core 恢复逻辑，二者都由 kit 中的 `PRE_TOOL_CALL` Hook 返回：
+
+```text
+HookFlowAction.REQUEST_HUMAN_INTERVENTION
+```
+
+`HookResult.humanIntervention` 区分：
+
+- `QUESTION`：向用户提问，对外发送现有 `ASK_HUMAN` 消息。
+- `TOOL_CONFIRMATION`：请求确认或编辑工具参数，对外发送现有 `TOOL_CONFIRMATION` 消息。
+
+协议消息保持不变，“人工介入”只是内部统一概念。`SuspendedToolCall` 至少保存：
 
 - `sessionId`、`turnNo`、`iterationNo`。
-- `toolIndex`。
-- `toolCallId`。
-- `invocationId`。
-- `toolName`。
-- Hook 改写后的参数。
-- 可编辑参数键。
-- `confirmationId`。
+- `toolCallId`、`invocationId`、`toolName`。
+- Hook 改写后的工具参数。
+- 人工介入类型、交互标识、展示载荷及允许编辑的参数键。
 - `executedPreToolHookIds`。
 - `SuspensionPoint.PRE_TOOL_CALL`。
-- 当前 `enabledToolNames`。
-- 当前 `AgentDefinitionSnapshot` 引用或内容。
 
-请求确认时：
+明确不保存：
 
-1. PRE_TOOL_CALL Hook 按顺序执行。
+- ToolCall 的数组 `index`。恢复时通过 `toolCallId` 在当前 Iteration 的模型响应中定位。
+- `enabledToolNames`。该集合是 SessionSnapshot 的一级状态，恢复时直接读取。
+- `AgentDefinitionSnapshot`。当前活动 Turn 的构造快照属于 SessionSnapshot，不能在挂起对象中重复保存。
+
+请求人工介入时：
+
+1. PRE_TOOL_CALL Hook 按定义顺序执行。
 2. 每个成功结束的 Hook ID 追加到 `executedPreToolHookIds`。
-3. 某 Hook 返回 `REQUEST_CONFIRMATION` 时，该 Hook 也视为已执行。
-4. 保存 PendingToolExecution 和会话快照。
-5. 状态切为 `HUMAN_IN_THE_LOOP`。
-6. 发送当前协议的 `TOOL_CONFIRMATION`。
-7. 不执行 `ITERATION_END` 或 `TURN_END`。
+3. 返回 `REQUEST_HUMAN_INTERVENTION` 的 Hook 也视为已执行。
+4. 保存 `SuspendedToolCall` 和包含当前 Turn/Iteration 的 SessionSnapshot。
+5. Session 状态切为 `HUMAN_IN_THE_LOOP`。
+6. 根据介入类型发送现有 `ASK_HUMAN` 或 `TOOL_CONFIRMATION` 协议消息。
+7. 不执行真实工具、`POST_TOOL_CALL`、`ITERATION_END` 或 `TURN_END`。
 
-### 10.4 批准恢复
+### 10.4 HUMAN_RESPONSE 恢复流程
 
 ```mermaid
 sequenceDiagram
@@ -824,53 +896,45 @@ sequenceDiagram
     participant Hooks
     participant Tool
 
-    Platform->>Runtime: HUMAN_RESPONSE(APPROVE)
-    Runtime->>Store: load session + turn + iteration + pending tool
-    Runtime->>Runtime: restore AgentDefinitionSnapshot
+    Platform->>Runtime: HUMAN_RESPONSE
+    Runtime->>Store: load SessionSnapshot + suspended tool
+    Runtime->>Runtime: locate ToolCall by toolCallId
     Note over Runtime: skip AGENT_BUILD through POST_MODEL_CALL
     Runtime->>Hooks: PRE_TOOL_CALL(skip executedPreToolHookIds)
     Hooks-->>Runtime: remaining hook results
-    Runtime->>Tool: execute merged arguments
+    Runtime->>Tool: execute with human response when required
     Tool-->>Runtime: result
     Runtime->>Hooks: POST_TOOL_CALL
     Runtime->>Runtime: continue remaining tool calls / finish iteration
 ```
 
-批准时：
+通用恢复步骤：
 
-1. 校验 userId、agentKey、session 状态、toolCallId 和 confirmationId。
-2. 只合并允许编辑的参数。
-3. 从持久化的 AgentDefinitionSnapshot 恢复 Hook 顺序。
-4. 重新解析 Hook 实例。
-5. 调用 PRE_TOOL_CALL 分发器并传入 `executedPreToolHookIds` 跳过集合。
-6. 只执行未执行的 PRE_TOOL_CALL Hook。
-7. 新执行完成的 Hook ID继续追加并持久化。
-8. 若后续 Hook 再次请求确认，则用更新后的列表再次挂起。
-9. 所有 pre-hook 完成后再次校验工具仍启用。
-10. 执行真实工具并正常运行 POST_TOOL_CALL。
-11. 继续处理同一模型响应中剩余 ToolCall。
-12. 完成原 Iteration，再进入下一 ReAct Iteration。
+1. 在 runtime 的 session 锁内校验 `userId`、`agentKey`、session 状态、交互标识和 `toolCallId`。
+2. 从 SessionSnapshot 恢复同一 Turn、同一 Iteration、session 的 `enabledTools` 和活动 Agent 定义快照。
+3. 通过 `toolCallId` 定位 ToolCall，不依赖数组索引。
+4. 重新解析 Hook/Tool 实例，并把人工回复放入只对本地工具可见的 `ToolExecutionContext`。
+5. PRE_TOOL_CALL 分发器跳过 `executedPreToolHookIds`，只执行尚未执行的 Hook。
+6. 新成功完成的 PRE Hook ID 继续追加；如果后续 Hook 再次请求人工介入，则更新唯一的挂起记录并再次挂起。
+7. 所有 PRE Hook 完成后再次校验工具仍在 session 的 `enabledTools` 中。
+8. 获得 ToolResult 后运行 `POST_TOOL_CALL`，清除挂起状态，并继续同一模型响应的剩余 ToolCall。
+9. 完成原 Iteration 后才进入下一次模型推理；原 Turn 最终收口时才运行 `TURN_END`。
 
-### 10.5 拒绝恢复
+### 10.5 两类介入的差异
 
-拒绝时：
+`ask_human`：
 
-- 不执行剩余 PRE_TOOL_CALL Hook。
-- 不执行真实工具。
-- 不执行 POST_TOOL_CALL。
-- 为该 ToolCall 写入“用户拒绝”的 ToolResult。
-- 清除 PendingToolExecution。
-- 继续同一模型响应中剩余 ToolCall；若没有剩余调用，则结束当前 Iteration 并进入下一次模型推理。
+- 首次到达 PRE_TOOL_CALL 时，由 `AskHumanInterventionHook` 请求人工介入，不执行工具。
+- HUMAN_RESPONSE 恢复后，该 Hook 因已执行而被跳过。
+- 其余 PRE Hook 执行完成后，真实 `AskHumanTool` 从 `ToolExecutionContext.humanResponse` 读取用户消息，并将其作为正常 ToolResult 返回。
+- core 不直接伪造 `ask_human` 的 ToolResult。
 
-### 10.6 ask_human 恢复
+工具确认：
 
-`ask_human` 恢复时：
-
-- 把前端提交内容转换为对应 `toolCallId` 的 ToolResult。
-- 不重新执行该 `ask_human` 调用之前的生命周期。
-- 不重新执行模型。
-- 继续同一模型响应中的其他未完成 ToolCall。
-- 后续每个新 ToolCall 正常从自身 PRE_TOOL_CALL 开始。
+- 批准时只合并配置允许编辑的参数，然后执行剩余 PRE Hook 和真实工具。
+- 拒绝时把用户决定映射为 `RETURN_TOOL_RESULT`，不执行剩余 PRE Hook 或真实工具，生成“用户拒绝”的 ToolResult，并按该动作语义执行 `POST_TOOL_CALL`。
+- 参数非法、响应类型与人工介入类型不匹配时恢复失败，不把该请求当作新的 Turn。
+- 两类介入收口后都清除 `SuspendedToolCall` 和 `executedPreToolHookIds`。
 
 ## 11. 工具体系
 
@@ -880,19 +944,21 @@ sequenceDiagram
 
 1. `registeredTools`：runtime 注册表中可以被解析的所有工具。
 2. `availableTools`：当前 Agent 定义允许使用的工具全集。
-3. `enabledTools`：当前 Turn 实际启用的工具。
+3. `enabledTools`：当前 session 实际启用的工具。
 
-Agent 配置保存 `availableTools` 和 `defaultEnabledTools`。
+Agent 定义保存 `availableTools` 和 `defaultEnabledTools`。SessionSnapshot 只保存 `enabledTools`，没有独立的 `defaultEnabledTools` 字段。
 
 规则：
 
 - `defaultEnabledTools ⊆ availableTools ⊆ registeredTools`。
 - Agent 构造时完成校验。
 - 生命周期只能在 `availableTools` 范围内改变 `enabledTools`。
-- Prompt 只携带 `enabledTools`。
+- 模型请求只携带 `enabledTools` 的工具定义。
 - 执行器只允许执行 `enabledTools`。
-- 挂起恢复必须恢复当时的 `enabledTools`，避免确认前后工具权限漂移。
-- 新 Turn 使用定义快照中的 `defaultEnabledTools` 重新初始化。
+- 新 session 的首个 Turn 使用定义快照中的 `defaultEnabledTools` 初始化 `enabledTools`。
+- 同一 session 后续 Turn 和 HUMAN_RESPONSE 都直接沿用 SessionSnapshot 中的 `enabledTools`。
+- 若新 Turn 构造出的 Agent 定义已无法解析 session 中某个已启用工具，则构造失败并报告配置漂移；不得静默重置为默认集合。
+- `defaultEnabledTools` 是初始化参数，不随 SessionSnapshot 单独持久化，也不参与后续 Turn 的恢复或重置。
 
 ### 11.2 工具来源
 
@@ -900,7 +966,7 @@ runtime 默认支持：
 
 - kit 基础工具。
 - 调用方通过 Builder 注册的本地工具。
-- MCP stdio 工具。
+- MCP stdio 或 SSE 工具。
 - HTTP SubAgent 工具。
 - Skill 工具。
 
@@ -909,48 +975,62 @@ runtime 默认支持：
 ### 11.3 MCP
 
 - MCP 配置属于 Agent 定义引用和 runtime 外部资源配置。
-- runtime 负责进程启动、初始化、超时、缓存和关闭。
-- MCP ToolContext 只接收可序列化的 session 快照，不接收 `ApexAgentContext` 实例。
+- runtime 通过 `McpTransport` 抽象支持 stdio、SSE；具体 server 自行选择 transport，不限定为本地进程模式。
+- 对 stdio，runtime 负责进程启动、初始化、超时和关闭；对 SSE，runtime 负责连接、重连、超时和关闭。
+- 调用 MCP 工具时只传模型产生并经 PRE Hook 改写后的工具参数。
+- MCP 工具不得接收 `ToolExecutionContext`、SessionSnapshot、`sessionId`、用户信息、Agent 信息或其他隐式上下文。
 - MCP Client 缓存按 runtime 实例和 server 定义隔离。
 - runtime 关闭时释放全部 MCP Client。
 
 ### 11.4 HTTP SubAgent
 
-- SubAgent 继续复用当前 `/api/sse/chat` 协议。
-- runtime 负责 HTTP 请求和 SSE 解析。
-- protocol 提供消息反序列化模型。
-- 子 Agent 的 `STREAM_CONTENT` 聚合为工具结果。
-- `INVOCATION_*` 按当前行为透传。
-- `ARTIFACT_*` 继续保持当前无生产者/忽略语义。
-- 用户身份继续通过 `X-User-Id` 传播。
+- “SubAgent”不是单独的 Agent 类型。任意已注册 Agent 都可以独立处理用户请求，也可以被另一个 Agent 作为 HTTP 工具调用。
+- Agent 定义通过 SubAgent 工具配置声明目标 `agentKey`、名称、描述、服务地址、超时等；runtime 将其适配为普通 `AgentTool`，core 不感知父子关系。
+- 调用时 runtime 向目标平台的现有 `POST /api/sse/chat` 发送 `RequestType.NEW`，使用目标 `agentKey` 和独立的子 sessionId，不复用父 sessionId。
+- 用户身份继续通过 `X-User-Id` 传播；父调用链深度和 trace 信息只用于 runtime 侧防递归与观测，不改变前端协议。
+- runtime 负责 HTTP 请求、SSE 解析、超时、取消和异常转换，protocol 提供消息反序列化模型。
+- 子 Agent 的 `STREAM_CONTENT` 聚合为父 Agent 当前 ToolCall 的 ToolResult。
+- `INVOCATION_*` 按当前行为透传；`ARTIFACT_*` 保持当前无生产者/忽略语义；收到 `END` 后完成当前工具调用。
+- 子 Agent 请求与普通用户请求走同一个 chat 接口和同一套 ApexAgent 主循环，因此任何 Agent 都天然具备作为 SubAgent 的能力。
+- 必须限制最大调用深度，并拒绝目标 `agentKey` 已出现在当前 SubAgent 调用链中的递归调用，避免每层创建新 session 后仍形成 Agent 闭环。
 
 ## 12. Skill
 
 ### 12.1 状态
 
-Skill 使用两个 session 隔离集合：
+Skill 使用一个定义集合和一个 session 隔离集合：
 
-- `availableSkills`：Agent 配置允许使用的 Skill 全集。
+- `enabledSkills`：Agent 定义配置的、该 Agent 可以使用的 Skill 集合。
 - `activatedSkills`：当前 session 已激活 Skill。
 
 规则：
 
-- `activatedSkills ⊆ availableSkills`。
+- `activatedSkills ⊆ enabledSkills`。
 - `activate_skill` 成功后把 Skill 名加入 session 的 `activatedSkills`。
 - 新 Turn 不清空 `activatedSkills`。
 - HUMAN_RESPONSE 恢复保持集合不变。
 - 不同 session 和不同用户之间不共享激活状态。
 - 生命周期 Hook 不动态增删这两个集合。
-- Agent 定义重新加载时，如果可用 Skill 被删除，应在下一个普通新 Turn 构造快照时移除不再可用的激活项，并记录告警。
+- 配置结构中没有 `availableSkills`；Skill 注册表中存在但未列入 `enabledSkills` 的 Skill 对该 Agent 不可见、不可激活。
+- Agent 定义重新加载时，如果某个已激活 Skill 不再位于 `enabledSkills`，应在下一个普通新 Turn 构造阶段移除该激活项并记录告警。
 
-### 12.2 Prompt 注入
+### 12.2 instructions 的消息语义
 
-- 未激活 Skill 只以名称和摘要出现在可用 Skill 列表中。
-- 已激活 Skill 的完整 instructions 由 runtime 在每次模型调用前作为固定上下文注入。
-- 该注入不依赖历史 ToolResult 是否仍处于压缩窗口，因此跨 Turn 和对话压缩后仍有效。
-- Skill 资源读取工具只能访问 `availableSkills` 中的资源。
+- `enabledSkills` 的名称和摘要可以用于生成 Skill 目录消息，帮助模型选择 `activate_skill`。
+- `activate_skill` 读取 Skill 后，将完整 instructions 作为该工具的正常 ToolResult 写入对话消息列表。
+- runtime 不把已激活 Skill instructions 作为固定 system 前缀，也不在每次模型调用前重新注入。
+- 跨 Turn 时，模型是否能看到 instructions 取决于正常的对话窗口与摘要结果；`activatedSkills` 只记录状态，不复制正文。
+- 对已激活 Skill 再次调用 `activate_skill` 必须幂等，并可再次返回 instructions，以便模型主动恢复已被窗口压缩的内容。
+- Skill 资源读取工具只能访问 `enabledSkills` 中的资源。
 
-### 12.3 Skill Learning
+### 12.3 现有 Skill 逻辑的保留边界
+
+- `src/main/java/org/gemo/apex/skills` 下非 `learning` 的加载、发现、解析、instructions 读取、资源读取和工具使用逻辑必须保留其行为。
+- 这些实现按依赖边界迁移到 runtime；纯接口和中立实体分别落在 core-extension/common，但不能以“重写”为由删减现有文件 Skill 能力。
+- 不保留全局 Skill 配置与 workspace Skill 配置的叠加；一个 `SkillProvider` 返回当前 runtime 的完整 Skill 注册集合。
+- `org.gemo.apex.skills.learning` 迁入 memory 并保持封存。
+
+### 12.4 Skill Learning
 
 Skill Learning 全部移动到 memory：
 
@@ -1033,7 +1113,7 @@ try (ApexAgentRuntime runtime = ApexAgentRuntime.builder()
 
 默认值：
 
-- 内存 Session/Conversation/Execution Repository。
+- 内存 Session/Conversation Repository。
 - Print 事件出口。
 - 默认 ReAct Prompt。
 - 默认最大 Iteration 数 30。
@@ -1049,7 +1129,6 @@ ApexAgentRuntime runtime = ApexAgentRuntime.builder()
         .agentDefinitionProvider(definitionProvider)
         .sessionRepository(sessionRepository)
         .conversationRepository(conversationRepository)
-        .executionRepository(executionRepository)
         .eventPublisher(eventPublisher)
         .registerTool(customTool)
         .registerHook("toolConfirmHook", toolConfirmHook)
@@ -1080,6 +1159,47 @@ resumed.run();
 `resumeAgent` 会创建恢复执行对象，但明确不分发 `AGENT_BUILD`，而是加载持久化的 `AgentDefinitionSnapshot`。
 
 内存 runtime 只能在同一 runtime 实例存活期间恢复；platform 的 PostgreSQL 实现支持进程重启后恢复。
+
+### 14.4 session 并发保护
+
+runtime 必须独立保证同一 `sessionId` 只能有一个活跃执行，不能把正确性依赖于 platform：
+
+- `ApexAgent.run()` 进入时通过 `SessionExecutionCoordinator` 获取 session 级内存锁，`NEW` 与 `HUMAN_RESPONSE` 使用同一锁空间。
+- 从加载 SessionSnapshot、修改运行态到最终保存的整个执行区间都在锁内。
+- 第二个并发执行立即抛出中立的 `SessionBusyException`，不排队、不覆盖第一个执行的状态。
+- 锁在 `finally` 中释放；获取失败、构造失败和事件发送异常都不得泄漏锁。
+- 锁表使用稳定 LockEntry 或引用计数清理，禁止在仍有等待者/持有者时从 Map 删除并创建第二把同 key 锁。
+- platform 可以保留入口级快速拒绝，但 runtime 的检查是最终一致性保障。
+
+### 14.5 内存存储的对象隔离
+
+runtime 的内存 Repository 不能直接保存调用方传入的可变对象引用：
+
+- `save` 时把 SessionSnapshot、消息载荷和集合转为不可变快照或使用 `JsonUtils.deepCopy` 复制。
+- `load` 时再次返回独立副本，调用方不得获得存储内部引用。
+- 嵌套的 Turn、Iteration、ToolCall、Hook 参数 Map 和 Skill/工具集合都必须被复制，不能只复制顶层对象。
+- 测试必须覆盖“保存后修改原对象不影响存储值”和“修改 load 返回值不影响下一次 load”两个方向。
+- platform 的 PostgreSQL Repository 也使用相同的中立快照序列化，避免 ORM 实体或 Jackson Tree 被运行态直接持有。
+
+### 14.6 JSON 统一策略
+
+common 提供唯一的 Jackson 便捷入口：
+
+```java
+String json = JsonUtils.toJson(value);
+MyType value = JsonUtils.fromJson(json, MyType.class);
+List<MyType> values = JsonUtils.fromJson(json, new TypeReference<>() {});
+JsonNode tree = JsonUtils.toTree(value);
+Target target = JsonUtils.convert(source, Target.class);
+SessionSnapshot copy = JsonUtils.deepCopy(snapshot, SessionSnapshot.class);
+```
+
+规则：
+
+- `JsonUtils` 内部集中配置 `ObjectMapper`、Java Time、record、枚举及 snake_case 所需模块。
+- protocol 中用于保持既有字段名的 Jackson 注解继续有效。
+- runtime/platform 的 Spring AI 或数据库特殊类型通过各自 Adapter 先转为 common DTO，再调用 `JsonUtils`，不把项目依赖模块注册进 common。
+- 删除 Fastjson/fastjson2 依赖、import 和工具调用；禁止双 JSON 栈并存。
 
 ## 15. platform
 
@@ -1136,9 +1256,9 @@ platform 处理：
 ### 15.3 并发
 
 - 保留同一 `sessionId` 只允许一个活跃执行。
-- session lock 由 platform 维护。
-- runtime/core 不依赖 HTTP 409，但应通过明确异常表达并发冲突。
-- platform 将冲突映射为 409。
+- runtime 的 `SessionExecutionCoordinator` 是最终并发保护。
+- platform 可保留当前基于内存的入口锁用于更早拒绝，但不得形成与 runtime 不同的 session 锁语义。
+- core 不依赖 HTTP 409；runtime 通过 `SessionBusyException` 表达冲突，platform 将其映射为 409。
 - 用户上下文不再位于 memory 包，移动到 platform。
 - 异步 TaskDecorator 继续传播并清理用户上下文。
 
@@ -1152,49 +1272,36 @@ platform 处理：
 - 使用 PostgreSQL JSONB 保存运行快照和中立消息载荷。
 - 建议引入 Flyway 管理 platform schema。
 - JDBC/MyBatis Plus 只存在于 platform。
+- 时间字段统一使用 `*_time`，例如 `created_time`、`updated_time`、`start_time`、`end_time`，不再使用 `*_at`。
+- 本期不为 Turn 和 Iteration 建独立表；二者仍是核心领域概念，但作为 SessionSnapshot 的嵌套运行状态持久化。
 
 ### 16.2 建议表
 
-### `apex_agent_session`
+#### `apex_agent_session`
 
 - `session_id`。
 - `user_id`。
 - `agent_key`。
 - `status`。
 - `current_turn_no`。
-- `current_iteration_no`。
-- `agent_definition_snapshot JSONB`。
+- `agent_definition_snapshot JSONB`：当前活动 Turn 的恢复投影，不包含初始化专用的 `defaultEnabledTools`。
 - `enabled_tool_names JSONB`。
 - `activated_skill_names JSONB`。
-- `pending_human_interaction JSONB`。
-- `pending_tool_execution JSONB`。
+- `runtime_snapshot JSONB`：保存当前活动 Turn/Iteration、模型响应、已完成 ToolResult 等恢复所需状态。
+- `suspended_tool_call JSONB`。
 - `last_active_time`。
-- `created_at`、`updated_at`。
+- `created_time`、`updated_time`。
 
-### `apex_agent_turn`
+`apex_agent_session` 不保存：
 
-- `session_id`。
-- `turn_no`。
-- `status`。
-- `started_at`、`ended_at`。
-- `error`。
-- 主键 `(session_id, turn_no)`。
+- `current_iteration_no` 独立列；当前 Iteration 位于 `runtime_snapshot`。
+- `default_enabled_tool_names`；默认集合只存在于 Agent 定义。
+- ToolCall 数组 index；恢复通过 `toolCallId` 定位。
+- 挂起对象内重复的 `enabledToolNames` 或 `AgentDefinitionSnapshot`。
 
-### `apex_agent_iteration`
+本期明确不创建 `apex_agent_turn`、`apex_agent_iteration`。如未来出现跨 Turn/Iteration 的独立查询、审计或归档需求，再基于实际查询模型拆表，不能提前让 core 依赖数据库表形态。
 
-- `session_id`。
-- `turn_no`。
-- `iteration_no`。
-- `status`。
-- `model_input JSONB`。
-- `model_output JSONB`。
-- `tool_calls JSONB`。
-- `flow_action`。
-- `error`。
-- `started_at`、`ended_at`。
-- 主键 `(session_id, turn_no, iteration_no)`。
-
-### `apex_agent_dialogue_message`
+#### `apex_agent_dialogue_message`
 
 - `id`。
 - `session_id`。
@@ -1205,26 +1312,26 @@ platform 处理：
 - `content`。
 - `payload JSONB`。
 - `compacted`。
-- `created_at`。
+- `created_time`。
 - 唯一约束 `(session_id, sort_no)`。
 
-### `apex_agent_dialogue_summary`
+#### `apex_agent_dialogue_summary`
 
 - `session_id`。
 - `content`。
 - `payload JSONB`。
 - `compacted_to_sort_no`。
 - `source_turn_no`。
-- `created_at`、`updated_at`。
+- `created_time`、`updated_time`。
 
 ### 16.3 Hook 持久化限制
 
-platform schema 不再为 Turn/Iteration 保存通用 `hook_executions` 数组。
+platform schema 不在 SessionSnapshot 的 Turn/Iteration 状态中保存通用 `hook_executions` 数组。
 
 唯一允许持久化的执行 Hook 标识位于：
 
 ```text
-apex_agent_session.pending_tool_execution.executedPreToolHookIds
+apex_agent_session.suspended_tool_call.executedPreToolHookIds
 ```
 
 Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
@@ -1232,10 +1339,10 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 ### 16.4 事务边界
 
 - 新 Turn 创建、用户消息追加和 Session 快照保存为一个事务。
-- 工具确认挂起、PendingToolExecution 和 Session 状态切换为一个事务。
+- 任一人工介入挂起、SuspendedToolCall 和 Session 状态切换为一个事务。
 - HUMAN_RESPONSE 参数合并和恢复占用同一 session 执行锁。
 - 每个 ToolResult 追加后及时提交，保证多工具调用中途挂起时前序结果可恢复。
-- Turn/Iteration 结束与 Session 状态更新保持一致。
+- Turn/Iteration 嵌套状态结束与 Session 状态更新保持一致。
 
 ## 17. PlanExecutor 清理
 
@@ -1311,9 +1418,10 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 | `domain/dto/ChatRequest` | protocol |
 | 事件、请求、消息字段常量 | protocol |
 | Agent/Turn/Iteration/Tool/Hook 中立实体 | common |
+| Fastjson 调用和零散 Jackson 配置 | common `JsonUtils`，Fastjson 删除 |
 | `IAgentDefinitionLoader` 接口 | core-extension |
 | 生命周期 Hook 接口 | core-extension |
-| Session/Execution Store 接口 | core-extension |
+| Session/Conversation Store 接口 | core-extension |
 | `SuperAgent` 主循环 | core，重写为 `ApexAgent` |
 | `HumanInLoopResumer` | core，改为恢复状态机 |
 | `ToolCallProcessor` | core，拆分编排与执行端口 |
@@ -1325,11 +1433,12 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 | `CustomToolCallingManager` | runtime Spring AI Tool 执行适配 |
 | MCP 定义和客户端 | runtime |
 | `SubAgentToolCallback`、消息 Handler | runtime |
-| `skills` 非 learning 部分 | kit + runtime |
-| 内存 Session/Execution Store | runtime |
+| `org.gemo.apex.skills` 非 learning 部分 | runtime，保留现有加载和使用行为 |
+| 内存 Session/Conversation Store | runtime |
+| 当前 session 内存锁 | runtime `SessionExecutionCoordinator` |
 | 对话摘要压缩 | runtime |
 | Web、SSE、线程池、用户 Filter | platform |
-| PostgreSQL Session/Execution Store | platform |
+| PostgreSQL Session/Conversation Store | platform |
 | 长期 Memory、搜索、管理接口 | memory |
 | `skills/learning` | memory |
 
@@ -1356,6 +1465,7 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - 改父聚合 POM。
 - 搬迁并净化协议实体。
 - 建立无 Spring common 模型。
+- 在 common 建立 `JsonUtils`，替换 Fastjson 并移除其依赖。
 - 保持 platform 临时调用旧链路，确保协议测试继续通过。
 
 ### 阶段 2：core-extension
@@ -1368,15 +1478,17 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 
 - 实现 `ApexAgent`。
 - 实现九个生命周期点。
-- 实现工具启用状态。
+- 实现 HookResult record、流控动作和默认 `CONTINUE` 错误策略。
+- 实现 session 级工具启用状态。
 - 实现 Turn/Iteration。
-- 实现挂起快照和 HUMAN_RESPONSE 恢复。
+- 实现统一人工介入、挂起快照和 HUMAN_RESPONSE 恢复。
 - 删除 core 对 Spring、Web、Memory 的直接依赖。
 
 ### 阶段 4：kit
 
 - 迁移 `ask_human`。
-- 迁移工具确认和结果截断 Hook。
+- 迁移统一的人工介入 Hook、工具确认和结果截断 Hook。
+- 为 `RETURN_TOOL_RESULT` 提供通用辅助构造器。
 - 删除计划工具。
 - 完成 Hook 行为单元测试。
 
@@ -1385,8 +1497,9 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - 实现 Builder 和无 Spring 容器启动。
 - 实现 Spring AI Adapter。
 - 实现内存 Store、Print Publisher 和摘要压缩。
-- 迁移普通 Skill。
-- 迁移 MCP 和 HTTP SubAgent。
+- 实现 session 执行锁和内存 Store 深拷贝隔离。
+- 保留并迁移 `org.gemo.apex.skills` 非 learning 逻辑。
+- 迁移 MCP stdio/SSE 和 HTTP SubAgent。
 - 提供 runtime-only 示例和集成测试。
 
 ### 阶段 6：platform
@@ -1395,7 +1508,7 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - 接入 runtime。
 - 实现 SSE Publisher、Coordinator 和用户上下文。
 - 切换 PostgreSQL。
-- 增加 Flyway schema。
+- 增加不含独立 Turn/Iteration 表的 Flyway schema。
 - 删除 MySQL 依赖。
 - 验证现有前端无缝连接。
 
@@ -1430,6 +1543,7 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - runtime 不依赖 platform/memory。
 - 没有任何模块依赖 memory。
 - protocol 消息不依赖执行上下文。
+- 依赖树不包含 Fastjson/fastjson2。
 
 可以使用 Maven Enforcer、ArchUnit 和模块级编译测试组合实现。
 
@@ -1439,11 +1553,15 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 
 - 九个生命周期点的完整顺序。
 - Hook 排序和错误策略。
+- Hook 未配置错误策略时默认 `CONTINUE`。
 - Hook 修改消息、工具集合、参数、结果。
 - 非法流控动作。
+- `BLOCK_TOOL`、`RETURN_TOOL_RESULT`、`REQUEST_HUMAN_INTERVENTION` 和 `END_TURN` 对剩余 Hook、工具和结束 Hook 的精确影响。
+- `RETURN_TOOL_RESULT` 跳过真实工具但正常运行 POST_TOOL_CALL。
 - 只将 enabledTools 发送给模型。
 - 被禁用工具无法真实执行。
-- 工具启用变更跨 Iteration 保留、新 Turn 重置。
+- `defaultEnabledTools` 只初始化新 session 首个 Turn。
+- 工具启用变更跨 Iteration、跨后续 Turn 保留。
 - 最大 Iteration。
 - 多 ToolCall 顺序和部分结果。
 - Turn/Iteration 状态流转。
@@ -1459,10 +1577,12 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - 已执行 PRE_TOOL_CALL Hook 不重复。
 - 未执行 PRE_TOOL_CALL Hook 继续按顺序执行。
 - 后续 Hook 再次确认时更新唯一允许保存的 Hook ID 列表。
-- 拒绝时不执行剩余 pre-hook、工具和 post-hook。
+- 挂起数据不包含 ToolCall index、`enabledToolNames` 或 AgentDefinitionSnapshot。
+- 工具确认拒绝映射为 `RETURN_TOOL_RESULT`，不执行剩余 pre-hook/真实工具，但执行 post-hook。
 - 批准时参数只合并可编辑字段。
+- `ask_human` 在恢复后真实执行，并由工具从 ToolExecutionContext 读取用户消息。
 - 多 ToolCall 中前序结果不丢失。
-- 恢复完成后清除 pending 和 executedPreToolHookIds。
+- 恢复完成后清除 `SuspendedToolCall` 和 `executedPreToolHookIds`。
 - 配置文件变化时仍使用挂起前 AgentDefinitionSnapshot。
 
 ### 21.4 runtime 测试
@@ -1471,12 +1591,17 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - 默认内存存储。
 - Print Publisher 输出协议 JSON。
 - 文件 Agent 配置。
+- 多配置源同时出现时失败，不执行全局/workspace 叠加。
 - 摘要压缩。
-- MCP 资源关闭。
-- HTTP SubAgent 协议解析。
+- MCP stdio/SSE 资源关闭，调用只传工具参数且不泄露上下文。
+- 任意 Agent 作为 HTTP SubAgent 的协议解析、独立子 session 和调用深度限制。
+- 同一 session 并发执行被 runtime 拒绝，NEW 与 HUMAN_RESPONSE 使用同一锁。
+- 内存 Store 的 save/load 双向深拷贝隔离。
+- `JsonUtils` 的泛型反序列化、时间类型、record 和 deepCopy。
 - Skill 激活跨 Turn 保留。
 - Skill 在不同 Session 之间隔离。
-- 未激活和已激活 Skill Prompt 注入差异。
+- Skill instructions 只由 `activate_skill` ToolResult 进入消息列表，不作为固定前缀重复注入。
+- `org.gemo.apex.skills` 现有非 learning 加载与资源读取回归测试。
 
 ### 21.5 platform 测试
 
@@ -1488,6 +1613,8 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - NEW 与 HUMAN_RESPONSE 路由。
 - PostgreSQL Repository。
 - 事务和进程重启恢复。
+- schema 不包含 `current_iteration_no`、`apex_agent_turn` 或 `apex_agent_iteration`。
+- 时间列统一为 `*_time`。
 - Agent 列表。
 
 PostgreSQL 集成测试建议使用 Testcontainers；纯规则测试不得依赖外部数据库。
@@ -1522,6 +1649,7 @@ PostgreSQL 集成测试建议使用 Testcontainers；纯规则测试不得依赖
 - core-extension 中没有实现类。
 - common 没有 Spring 依赖。
 - memory 没有被任何模块依赖。
+- common 提供统一 Jackson `JsonUtils`，依赖树中没有 Fastjson。
 
 ### runtime
 
@@ -1529,6 +1657,8 @@ PostgreSQL 集成测试建议使用 Testcontainers；纯规则测试不得依赖
 - 提供 ChatModel/ModelGateway 和 Agent 定义后，可通过普通 Java `new`/Builder 运行。
 - 无需 Spring ApplicationContext。
 - 默认使用内存存储和 Print Publisher。
+- 同一 session 只允许一个活跃执行。
+- 内存存储不暴露或持有运行态可变对象引用。
 
 ### 执行
 
@@ -1536,8 +1666,10 @@ PostgreSQL 集成测试建议使用 Testcontainers；纯规则测试不得依赖
 - 主循环只有 ReAct。
 - Turn/Iteration 语义保持。
 - 工具全集、默认启用集合和当前启用集合边界清晰。
+- `enabledTools` 是 session 级状态，默认集合只用于新 session 首个 Turn。
 - 只有启用工具进入模型并允许执行。
 - 九个生命周期点工作正常。
+- Hook 返回 record，默认错误策略为 `CONTINUE`，且不存在 `SKIP_ITERATION`。
 
 ### 恢复
 
@@ -1545,13 +1677,15 @@ PostgreSQL 集成测试建议使用 Testcontainers；纯规则测试不得依赖
 - HUMAN_RESPONSE 不执行 AGENT_BUILD 或模型调用前生命周期。
 - 只保存已执行 PRE_TOOL_CALL Hook ID。
 - 已执行 pre-hook 不重复，未执行 pre-hook 能继续。
+- 工具确认和 `ask_human` 共享人工介入恢复管线。
 - Agent 构造快照可以在恢复时重建同一运行定义。
 
 ### Skill
 
-- Skill 可用全集和已激活集合分离。
+- Agent 定义的 `enabledSkills` 和 session 的 `activatedSkills` 分离。
 - 激活状态在同一 Session 中跨 Turn 保留。
 - 不同 Session/用户隔离。
+- instructions 只存在于消息列表，不作为固定前缀注入。
 - runtime 不接入 Skill Learning。
 
 ### platform
@@ -1561,6 +1695,7 @@ PostgreSQL 集成测试建议使用 Testcontainers；纯规则测试不得依赖
 - `context.mode` 固定为 react。
 - PostgreSQL 为唯一 platform 数据库。
 - 不保留 MySQL 兼容逻辑。
+- Turn/Iteration 暂不单独建表，session 不保存 `current_iteration_no`。
 
 ## 23. 风险与控制
 
@@ -1580,10 +1715,10 @@ AGENT_BUILD 能修改最终定义，而 HUMAN_RESPONSE 又禁止重新执行构�
 
 控制：
 
-- 挂起前持久化不可变 AgentDefinitionSnapshot。
+- 活动 Turn 创建后在 SessionSnapshot 中持久化不可变 AgentDefinitionSnapshot 恢复投影，挂起对象不重复保存。
 - Snapshot 使用定义版本。
-- 恢复时按快照解析扩展。
-- 扩展 ID 无法解析时恢复失败，不静默换用最新定义。
+- 恢复时按快照中的 Hook `name` 解析实现。
+- Hook 名无法解析时恢复失败，不静默换用最新定义。
 
 ### 23.3 PRE_TOOL_CALL Hook 标识
 
@@ -1596,15 +1731,16 @@ AGENT_BUILD 能修改最终定义，而 HUMAN_RESPONSE 又禁止重新执行构�
 - Hook 链来自挂起前定义快照。
 - 不保存其他生命周期 Hook 历史。
 
-### 23.4 Skill 跨 Turn 激活
+### 23.4 Skill instructions 被窗口压缩
 
-仅依赖历史 ToolResult 会在摘要压缩后丢失 Skill instructions。
+Skill instructions 只存在于对话消息，可能在窗口压缩后不再以完整正文出现在模型输入中。这是“不使用固定前缀重复注入”约束下的预期结果，不能靠 `activatedSkills` 偷偷恢复正文。
 
 控制：
 
 - activatedSkills 属于 SessionSnapshot。
-- 每次模型调用前重新注入已激活 Skill instructions。
-- Skill 不存在时在新 Turn 构造阶段清理并告警。
+- 摘要按普通对话内容处理 Skill 使用结论，但不伪装成完整 instructions。
+- `activate_skill` 对已激活 Skill 保持幂等，并可再次把 instructions 作为新的 ToolResult 写入消息列表。
+- Skill 不再 enabled 时在新 Turn 构造阶段清理激活状态并告警。
 
 ### 23.5 双重 END
 
@@ -1627,6 +1763,26 @@ core 发送 END，platform 又需要覆盖构造失败和线程池拒绝路径�
 - runtime 保持对话连续性和摘要。
 - memory 独立构建，未来通过扩展接口重新接入。
 
+### 23.7 session 工具状态与定义漂移
+
+`enabledTools` 跨 Turn 保留，而 Agent 定义会在每次 NEW 时重新构造；配置删除工具后，旧 session 可能仍保存该工具名。
+
+控制：
+
+- 新 session 只初始化一次默认集合。
+- 后续 Turn 不静默重置或求交集。
+- 若 session 的已启用工具无法由新定义解析，NEW 构造失败并给出具体工具名，由调用方显式修复配置或会话状态。
+
+### 23.8 内存锁与对象别名
+
+仅在 platform 加锁会让 runtime 独立使用时出现并发覆盖；内存 Repository 保存原对象会让未调用 `save` 的运行时修改污染存储。
+
+控制：
+
+- runtime 以 `SessionExecutionCoordinator` 包围完整执行。
+- 锁项采用安全的生命周期管理，所有退出路径在 `finally` 释放。
+- 内存 Repository 在 save/load 两侧深拷贝，并用别名污染回归测试锁定。
+
 ## 24. 最终目标形态
 
 重构完成后，系统的核心关系应收敛为：
@@ -1639,7 +1795,7 @@ flowchart LR
     Agent --> Hooks["LifecycleHook 接口"]
     Agent --> Model["ModelGateway 接口"]
     Agent --> Tools["AgentTool 接口"]
-    Agent --> Stores["Session / Turn / Iteration 接口"]
+    Agent --> Stores["Session / Conversation 接口"]
     Agent --> Events["AgentEventPublisher 接口"]
 
     RuntimeImpl["runtime 默认实现"] -.-> Hooks
