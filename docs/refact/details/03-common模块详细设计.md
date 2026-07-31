@@ -28,8 +28,9 @@
 2. 从当前 Spring AI 样本提取必须保留字段：role、text、toolCallId、name、arguments、ordinal、ToolResult 关联和必要 metadata。
 3. 在构造器中校验必填字段并复制所有嵌套集合。
 4. 为定义态、session 态和请求态建立不同类型，不把 defaultEnabledTools、enabledTools 混在同一对象。
-5. 为本地 ToolExecutionContext 只保留显式中立信息和可选 human submission，不引用 observer/publisher。
-6. 定义 `ToolOrigin`、`UnavailableToolSource` 和 `ToolAvailabilitySnapshot`，让 runtime 报告 MCP/SubAgent 初始化故障而不携带客户端或框架异常。
+5. 为本地 ToolExecutionContext 只保留显式中立信息、可选 human submission 和请求级 `CancellationToken`，不引用 observer/publisher。
+6. 定义 `CancellationToken`/`CancellationRegistration` 非持久化接口及 `CancellationRequestedException`，支持轮询、检查点抛出和主动取消回调注册；`ToolExecutionStatus` 同步包含 CANCELLED。
+7. 定义 `ToolOrigin`、`UnavailableToolSource` 和 `ToolAvailabilitySnapshot`，让 runtime 报告 MCP/SubAgent 初始化故障而不携带客户端或框架异常。
 
 ### 接口和数据结构
 
@@ -42,9 +43,10 @@ record AgentExecutionDescriptor(String executionId, String sessionId,
 record ToolDefinition(String name, String description, String inputSchemaJson,
                       Map<String, Object> metadata) {}
 record ToolExecutionContext(String sessionId, long turnNo, int iterationNo,
-                            String userId, HumanSubmission humanSubmission,
-                            SubAgentCallTrace subAgentCallTrace,
-                            Map<String, Object> attributes) {}
+                             String userId, HumanSubmission humanSubmission,
+                             SubAgentCallTrace subAgentCallTrace,
+                             CancellationToken cancellationToken,
+                             Map<String, Object> attributes) {}
 record SkillDefinition(String name, String description, String instructions,
                        Map<String, SkillResourceDescriptor> resources) {}
 record SubAgentCallTrace(String traceId, List<String> agentKeys, int maxDepth) {}
@@ -60,6 +62,7 @@ record SubAgentCallTrace(String traceId, List<String> agentKeys, int maxDepth) {
 - `ToolSetDefinition` 校验 defaultEnabled ⊆ available；registered 子集要依赖运行注册表，留给 core Assembler。
 - session enabledTools、activatedSkills 用保持确定顺序的不可变集合；建议内部 `LinkedHashSet` 后复制为 unmodifiableSet，序列化顺序稳定。
 - `AgentMessageEntry.payload` 不允许 null Map，外部“无 payload”由 record 使用空 Map，数据库 Adapter 写 null 以节省存储时做映射转换。
+- CancellationToken/Registration 不可序列化，不得进入 snapshot、message payload/metadata 或 deepCopy；`onCancel` 注册晚于取消时必须立即执行，registration close 只注销；`throwIfCancellationRequested()` 固定抛 common `CancellationRequestedException`，adapter 不得各自定义同义异常。
 - availability 对精确工具名使用不可变 Set，对来源使用不可变 List；来源匹配只允许 `(origin, sourceId)` 加稳定工具名前缀，不能使用任意 contains/正则扩大影响范围。
 - 模型异常只由 core 状态机把三层改为 FAILED；common 枚举本身不实现状态迁移方法，避免隐藏副作用。
 
@@ -74,6 +77,8 @@ record SubAgentCallTrace(String traceId, List<String> agentKeys, int maxDepth) {
 - `ToolCallRoundTripTest`：多工具顺序、ID、参数、metadata。
 - `ToolSetDefinitionTest`、`SkillSetDefinitionTest`：子集与重复名。
 - `ToolAvailabilitySnapshotTest`：精确名称、来源 scope、不可变性、稳定前缀边界与健康来源隔离。
+- `CancellationTokenContractTest`：取消前/后注册、并发 cancel/register、回调至多一次、registration 注销、throwIfCancellationRequested；快照类型图不含 token。
+- 状态枚举测试包含 Session/Turn/Iteration/ToolExecutionStatus.CANCELLED，并验证 JSON/快照 round-trip。
 - `ImmutableDomainModelTest`：修改输入集合/Map 或 getter 返回对象不影响 record。
 - `ModelConversationRoundTripTest`：user/assistant/tool 全角色消息。
 - 架构测试确保 common 无 Spring/Spring AI/Servlet/ORM import。
@@ -247,7 +252,7 @@ record TurnSnapshot(
 1. 构建无框架 ObjectMapper：JavaTime、record、NON_NULL、未知字段容忍、日期非时间戳。
 2. 提供统一静态 API和包可见 mapper builder，禁止业务模块各自改变全局规则。
 3. deepCopy 采用 `convertValue(value, targetType)` 或 serialize/deserialize；对泛型使用 JavaType/TypeReference。
-4. protocol Golden File 和 common snapshot 同时跑回归。
+4. 在 common 测试中通过 protocol 的 test-jar 读取同一批 Golden File，用产品 `JsonUtils` 对 protocol DTO 执行消费者 round-trip；依赖方向仍为 common test→protocol test-jar。
 5. 各模块迁移时逐处删除 Fastjson，CLEAN-02 删除依赖。
 
 ### 接口和数据结构
@@ -272,6 +277,7 @@ public final class JsonUtils {
 - `toTree(Object)` 与当前仅接收 JSON string 的实现区分；另提供 `parseTree(String)`，避免方法语义混淆。
 - 深拷贝前检查目标类型，不能把接口/抽象类型无类型信息地复制。
 - common mapper 不注册 Spring AI Message/ChatResponse、MyBatis entity 或 platform module。
+- protocol 模块自身不反向依赖 common；`ProtocolJsonUtilsConsumerTest` 位于 common，只消费 protocol DTO 与 test-jar Golden 资源。
 
 ### 异常处理
 
@@ -282,6 +288,7 @@ public final class JsonUtils {
 ### 测试方案
 
 - generic List/Map、record、enum、Instant、协议多态、SessionSnapshot round-trip。
+- `ProtocolJsonUtilsConsumerTest` 对全部 protocol Golden File 使用真实 `JsonUtils` round-trip，证明 DTO 显式注解优先；protocol reactor 项目依赖图中不存在 protocol→common。
 - save/load 双向别名测试所需的深层 Map/List/ToolCall 数据。
 - mapperCopy 修改配置不影响全局 mapper。
 - 源码扫描 common 无 Spring AI module；全项目最终无 Fastjson。

@@ -67,7 +67,7 @@ interface ConversationRepository {
 }
 ```
 
-`ModelStreamObserver` 和 `ToolExecutionObserver` 都有 `isCancelled()`；adapter 在回调抛异常或取消为 true 时停止上游流。`ToolExecutionObserver.onEvent` 接收 protocol AgentMessage，但 allowlist 由 core 实现检查。
+`ModelStreamObserver` 和 `ToolExecutionObserver` 都返回同一个请求级 `CancellationToken`，不再只暴露布尔 `isCancelled()`。adapter 必须把 subscription/future/call handle 的取消 command 注册到 token，并仍可在回调边界检查 token。`ToolExecutionObserver.onEvent` 接收 protocol AgentMessage，但 allowlist 由 core 实现检查。
 
 `IdGenerator` 提供 `newExecutionId/newEntryId/newInvocationId/newConfirmationId/newSubSessionId/newCompactionId`，避免 core 依赖 UUID 静态调用；`TimeProvider.now()` 返回 Instant。
 
@@ -83,7 +83,7 @@ interface ConversationRepository {
 
 - 接口不吞异常、不声明框架异常。实现用中立运行时异常包装。
 - 找不到定义、工具、Skill、Hook 的异常类型在 common/core 定义；interface JavaDoc 说明何时抛出。
-- Publisher/Observer 失败必须可传播，不能像当前 MessageUtils 只 warn 后继续。
+- Publisher/Observer 失败必须可传播并触发同一 token 的取消命令，不能像当前 MessageUtils 只 warn 后继续。
 
 ### 测试方案
 
@@ -91,7 +91,7 @@ interface ConversationRepository {
 - 反射检查参数/返回值只属于 JDK、protocol、common或同模块其他interface，后者只用于端口组合。
 - `AgentDefinitionProviderContractTest` 的 Fake 统计 load/list 调用，证明列表不必加载定义。
 - `ToolAvailabilityProviderContractTest` 验证快照不可变、精确名/稳定前缀匹配和健康来源不受影响；同一调用内不得出现 ToolProvider 已剔除而 availability 尚未更新的中间态。
-- Observer Fake 验证取消语义和事件回调异常可见。
+- Observer Fake 验证 token 身份一致、取消回调主动触发和事件回调异常可见；只轮询而不注册底层取消句柄的 adapter 契约测试失败。
 - Repository Fake 验证 append/compact 命令包含稳定幂等 ID。
 
 ### 架构符合性
@@ -188,7 +188,7 @@ CompactionCheck 必须含 messages/system/tools 的 token/字符估算、阈值�
 2. 断言 `Class.isInterface()`。
 3. 扫描 declared methods，拒绝非 abstract、非 static compiler constant accessor 的 default 实现；本设计直接禁止所有 default 方法。
 4. 扫描注解和签名依赖。
-5. 检查 POM 直接依赖只有 common。
+5. 检查 POM 直接依赖精确为 protocol 与 common；前者由 AgentEventPublisher/ToolExecutionObserver 的 AgentMessage 签名直接使用，不能只依靠 common 的传递依赖。
 
 ### 接口和数据结构
 
@@ -209,7 +209,7 @@ CompactionCheck 必须含 messages/system/tools 的 token/字符估算、阈值�
 
 - fixture 临时加入 record、default method、`@Component`、Spring AI 参数，逐条验证规则失败。
 - 模块独立 `test`、父 reactor `test` 均自动执行。
-- 依赖树断言只有 common（protocol 仅传递）。
+- 依赖树断言直接项目依赖只有 protocol、common，且 dependency analyze 无 used-but-undeclared。
 
 ### 架构符合性
 

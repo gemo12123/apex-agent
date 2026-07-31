@@ -37,10 +37,12 @@
   2. 对兼容保留的 `PLAN_*`、`TASK_THINK_*`、`STREAM_THINK` 做序列化测试。
   3. 验证所有运行事件的 `context.mode` 兼容值、`content_id`、`tool_call_id`、confirmation/tool/invocation 标识。
   4. 固定 END 不增加 `execution_status` 或其他字段。
-  5. 固定工具确认拒绝结果“用户拒绝执行”和 END_TURN 补齐结果“达到最大轮次，强制结束”；两者不增加自定义 code 或 payload。
+  5. 对模型可见固定 ToolResult 只断言 protocol 没有新增对应 SSE 事件、code 或 payload；具体文本与关联 ID 归 core 测试。
+  6. protocol 测试使用本模块 test scope 的最小 Jackson mapper，不调用 common `JsonUtils`；Golden 夹具以 test-jar 供 common 消费测试复用。
 - **预期产出**：protocol Golden File 测试集和协议兼容报告。
 - **验收标准**：
   - 迁移前后 Golden File 字节级或规范化 JSON 结构完全一致。
   - `END` 精确序列化为 `{"event_type":"END"}`。
   - 测试明确区分“DTO 可序列化”和“默认链路会生产该事件”。
+  - protocol 的 compile/test 依赖均不包含 common，reactor 中不存在 protocol→common 反向边。
 - **限制条件或注意事项**：若现有 Golden File 与已确认设计冲突，不可自行选择一方；登记差异并确认。模型可见 ToolResult 属于 common 对话模型，不新增 SSE 事件类型。

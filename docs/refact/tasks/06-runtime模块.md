@@ -33,19 +33,21 @@
 - **任务目标**：隔离 Spring AI 类型，保证 common ModelRequest/Response 与真实模型调用之间无损转换。
 - **当前进度**：未开始。
 - **设计依据**：设计文档第 5.6、23.1 节；架构文档第 5.6、17.1 节。
-- **涉及范围**：ModelGateway、Spring AI Message/ChatResponse/ToolCall/ToolResponse 转换、流 observer、默认工具执行器。
+- **涉及范围**：ModelGateway、Spring AI Message/ChatResponse/ToolCall/ToolResponse 转换、流 observer、模型工具定义适配。
 - **前置依赖**：COM-01/04、EXT-01、CORE-05A/05B、CORE-06。
 - **具体执行内容**：
   1. 建立 common 与 Spring AI 消息的双向 Adapter。
   2. 保留 ToolCall ID、名称、参数、顺序、role、内容和必要 metadata。
   3. 将流式内容通过 observer 交给 core 事件工厂，并返回完整中立 ModelResponse。
-  4. 把 AgentTool 适配到模型可见工具定义和真实执行入口。
+  4. 把 AgentTool 适配为模型可见工具定义，关闭 Spring AI 自动工具执行；真实执行仍由 CORE-06 统一调用 AgentTool。
   5. 对真实 Spring AI 消息样本做 round-trip 契约测试。
-- **预期产出**：Spring AI Adapter、默认 ModelGateway/工具执行器及契约测试。
+  6. subscription 建立后立即向请求级 token 注册 dispose；token 在建立前或建立后取消都必须终止活动模型调用。
+- **预期产出**：Spring AI Adapter、默认 ModelGateway、模型工具定义适配器及契约测试。
 - **验收标准**：
   - 文本、工具调用、多工具顺序和 ToolResult round-trip 无信息丢失。
   - core/common 不出现 Spring AI import。
   - ModelGateway 内部重试不重复进入 core 压缩门。
+  - 请求取消会主动 dispose 模型 subscription，并以 `CancellationRequestedException` 结束而不是记为模型失败。
 - **限制条件或注意事项**：不升级 Spring AI 版本；若现有供应商专有字段无法由已设计中立模型表达，标记设计缺口而非把供应商类型泄漏到 common。
 
 ## RUN-03 实现内存存储、对话窗口与默认压缩能力
@@ -76,20 +78,25 @@
 - **任务目标**：用原子状态保证 execution 只能启动一次，且所有结束路径只执行一次资源收口。
 - **当前进度**：未开始。
 - **设计依据**：设计文档第 13.3、14.4 节；架构文档第 8.6、9.3 节。
-- **涉及范围**：ApexAgentExecution、run、cancelBeforeStart、close、构造失败和状态转换测试。
+- **涉及范围**：ApexAgentExecution、RuntimeCancellationSource、ActiveExecutionRegistry、run、cancel、cancelBeforeStart、close、构造失败和状态转换测试。
 - **前置依赖**：CORE-04、RUN-01。
 - **具体执行内容**：
-  1. 定义 PREPARED、RUNNING、TERMINATED 或等价内部状态及合法转换。
+  1. 定义 PREPARED、RUNNING、CANCEL_REQUESTED、TERMINATED 状态及合法转换。
   2. `run()` 只能成功进入一次，finally 统一调用幂等收口。
-  3. `cancelBeforeStart()` 只在未启动时生效，发布结束请求并释放资源。
-  4. `close()` 作为未运行、异常或调用方遗漏时的最后兜底。
-  5. 为 Publisher 异常、Agent 构造失败、正常、失败和再次挂起路径建立竞态测试。
+  3. 提供请求级 `cancel()`：未启动时调用 core `cancelBeforeRun()` 保存 CANCELLED 后立即收口；运行中只发出 token 取消命令并立即返回，不等待、不提前发布 END 或释放 lease。
+  4. `cancelBeforeStart()` 只在未启动时生效，发布结束请求并释放资源。
+  5. `close()` 委托 `cancel()`，运行中也会收到取消命令。
+  6. `RuntimeCancellationSource` 向 common 暴露只读 token，并保证取消前后注册的底层 command 都精确执行一次。
+  7. execution 返回调用方前登记到活动表，终止回调按 END、请求资源、lease、注销顺序幂等收口。
+  8. 终止时先把 execution 原子置为 TERMINATED，再执行 END/complete 等外部回调，避免 emitter completion 反向取消正常执行。
+  9. 为 Publisher 异常、Agent 构造失败、正常、失败、再次挂起和运行中取消路径建立竞态测试。
 - **预期产出**：ApexAgentExecution 状态机和并发单元测试。
 - **验收标准**：
   - run/cancel/close 并发竞争时 Agent 至多运行一次，收口回调至多执行一次。
-  - 未调用 run 时 close 可以释放；运行后重复 close 无副作用。
+  - 未调用 run 时 close 把已准备 Session/Turn 记为 CANCELLED 并释放；运行后重复 close 无副作用。
   - 非法状态转换有明确异常或幂等结果。
-- **限制条件或注意事项**：本任务通过抽象收口回调测试，不实现具体 lease 表或 Once Publisher。
+  - RUNNING 状态 cancel/close 立即返回并触发底层 callback；lease 只在 run finally 释放。
+- **限制条件或注意事项**：`cancel()` 返回 true 只表示首次发出命令；若 core 已提交自然终态，迟到取消不回写 CANCELLED。测试按线性化顺序接受自然终态或取消终态，但资源收口必须唯一。本任务通过抽象收口回调测试，不实现具体 lease 表或 Once Publisher；不设置取消超时或 grace period，也不保证不合作的自定义工具在有限时间内退出。
 
 ## RUN-04B 实现 SessionExecutionCoordinator 与 lease
 
@@ -126,12 +133,14 @@
   4. core 同步构造/恢复准备失败时通过同一 Once Publisher 发布且只发布精确 END，释放 lease 后抛出带 `endPublished=true` 的准备异常供 platform 返回已完成 emitter。
   5. 让 ToolExecutionObserver 最终写入当前请求的 Once Publisher，但禁止工具发布 END。
   6. 覆盖并发不同 session、连续恢复、构造失败、线程池拒绝和 Publisher 异常。
+  7. 每个 execution 创建唯一 `RuntimeCancellationSource`，并向 ModelStreamObserver、ToolExecutionObserver、ToolExecutionContext 注入同一 token；Publisher 失败触发该 source。
 - **预期产出**：请求级 Publisher、runtime 准备 API 和端到端并发测试。
 - **验收标准**：
   - newAgent/resumeAgent 返回前已取得 lease；冲突同步抛出。
   - 每次 NEW/HUMAN_RESPONSE 使用独立 Publisher 和 END 状态。
   - 正常、失败、挂起、构造失败和 cancelBeforeStart 均只发送一次 END、释放一次 lease；构造/恢复准备失败流中不存在 END 以外的事件。
   - ToolExecutionObserver 进度事件不串请求且不能结束父传输。
+  - execution 返回前已登记，准备失败无残留登记；Publisher 失败触发 token，finally 后活动表清零。
 - **限制条件或注意事项**：Builder 不接受共享有状态 Publisher 实例；platform 不得维护第二套 session 锁或 END 状态。
 
 ## RUN-05 迁移普通 Skill 加载、激活与资源读取
@@ -172,6 +181,7 @@
   4. 未配置时不启动进程/连接；关闭 runtime 时释放全部自有资源。
   5. server 初始化失败时记录 warn，关闭本次失败产生的资源，并按 server sourceId/稳定工具名前缀登记不可用状态；健康 server 和 runtime 启动继续，不提供策略开关。
   6. 不为不可用工具建立新活动绑定；已有 session 的既有绑定只读留痕并退出有效集合，既有 ToolCall/ToolResult 不删除且不能重放执行。
+  7. 每次 MCP call 创建可取消 handle，向 ToolExecutionContext 的 token 注册 cancel；取消时停止重连/读取并抛 `CancellationRequestedException`。
 - **预期产出**：可选 MCP 集成、资源生命周期测试和参数泄漏测试。
 - **验收标准**：
   - stdio/SSE 工具发现和调用契约测试通过。
@@ -179,6 +189,7 @@
   - runtime close 后进程、连接和调度资源全部关闭。
   - 未配置 MCP 时无相关资源创建。
   - 单个 MCP server 初始化失败不阻止其他 server/runtime 启动；不可用新绑定被拒绝、旧绑定只读留痕，受影响工具不进入模型列表且无资源泄漏。
+  - 活动 MCP 调用收到取消命令后 handle.cancel 精确一次，不由 adapter 形成普通失败 ToolResult；core 仅按统一取消收口规则补标准结果。
 - **限制条件或注意事项**：不得把 MCP 类型放入 common/core；不可用范围只覆盖失败 server 的 sourceId/稳定前缀，不扩大到健康集成，也不得在恢复健康时自动启用旧 session。
 
 ## RUN-07 迁移 HTTP SubAgent 工具
@@ -194,9 +205,10 @@
   2. 通过 `X-User-Id` 传播用户身份。
   3. 聚合 STREAM_CONTENT 为父 ToolResult；通过 core 传入的 ToolExecutionObserver 发布 INVOCATION 事件。
   4. 保持 ARTIFACT 当前忽略语义；远端 END 只结束当前工具调用，不调用 observer 发布 END。
-  5. 实现超时、取消、异常转换、最大深度和 agentKey 调用链闭环检测。
+  5. 实现业务超时、请求级主动取消、异常转换、最大深度和 agentKey 调用链闭环检测。
   6. 使用 protocol + Jackson 解析，移除 Fastjson。
   7. SubAgent 初始化失败时记录 warn，关闭本次失败产生的资源并按 sourceId/工具名登记不可用状态；新绑定被拒绝，已有绑定只读留痕并退出有效集合，其他工具继续；不提供策略开关。
+  8. HTTP future 与 response body/stream 向请求 token 注册 cancel/close；取消时停止读取和事件转发并抛 `CancellationRequestedException`。
 - **预期产出**：HTTP SubAgent AgentTool、SSE 解析器和集成测试。
 - **验收标准**：
   - 子调用使用独立 session，不复用父 session。
@@ -205,6 +217,7 @@
   - 递归深度和 agentKey 闭环均被拒绝。
   - 单个 SubAgent 初始化失败不阻止 runtime 启动，对应工具不进入模型列表且无资源泄漏。
   - 依赖和源码中不再因该能力引入 Fastjson。
+  - token 在发请求前、等待响应和读取 body 阶段取消都能主动终止底层调用，adapter 不生成模型可见失败 ToolResult；core 仅按统一取消收口规则补标准结果。
 - **限制条件或注意事项**：SubAgent 不是特殊 Agent 类型；不得改变远端协议；调用链信息只用于 runtime 观测和防递归，不进入前端协议。
 
 ## RUN-08 完成资源生命周期、runtime-only 示例与集成验收
@@ -213,7 +226,7 @@
 - **任务目标**：证明 runtime 在无 Spring IoC 情况下可独立运行、恢复、关闭，并且可选集成不会泄漏资源。
 - **当前进度**：未开始。
 - **设计依据**：设计文档第 14、21.4、22 节；架构文档第 9.5、15.1 节。
-- **涉及范围**：ApexAgentRuntime AutoCloseable、内部 executor/scheduler、示例、runtime 集成测试与 artifact 依赖。
+- **涉及范围**：ApexAgentRuntime AutoCloseable、ActiveExecutionRegistry、ResourceRegistry、内部 executor/scheduler、示例、runtime 集成测试与 artifact 依赖。
 - **前置依赖**：RUN-01～03、RUN-04A～04C、RUN-05～07。
 - **具体执行内容**：
   1. 明确 runtime 创建和外部注入资源的所有权、关闭顺序和幂等性。
@@ -222,6 +235,7 @@
   4. 运行无 Spring IoC 集成测试，覆盖默认内存、Print JSON、工具、压缩和恢复。
   5. 覆盖 MCP/SubAgent 单项初始化失败，验证 warn、新绑定拒绝、旧绑定转历史、有效集合清理、历史消息保留、健康工具继续可用及失败资源关闭。
   6. 检查 runtime artifact 不依赖 platform/memory。
+  7. close 原子拒绝新 execution，向活动表快照逐个发出 `cancel()` 后立即返回；无活动 execution 时同步关闭共享自有资源，有活动 execution 时由最后一个注销触发关闭。
 - **预期产出**：runtime-only 示例、集成测试、资源关闭报告。
 - **验收标准**：
   - 普通 Java 测试不启动 ApplicationContext 并完整执行一次 Agent。
@@ -229,4 +243,5 @@
   - 默认 Print 输出满足 protocol Golden File。
   - MCP/SubAgent 初始化失败不会阻止健康 Agent 的 runtime-only 执行；受影响工具不出现在模型列表或 session enabledTools，历史记录不能被执行。
   - 依赖树无 platform/memory，且只有最小 Spring AI 依赖。
-- **限制条件或注意事项**：外部注入资源是否由 runtime 关闭必须在 Builder 契约中显式；MCP/SubAgent 初始化失败固定采用 warn、禁止新绑定、旧绑定只读留痕、健康能力继续的策略。
+- close 与 new/resume 竞态不会产生关闭后漏登记；活动执行的 lease 不被 close 线程提前释放。
+- **限制条件或注意事项**：外部注入资源是否由 runtime 关闭必须在 Builder 契约中显式；MCP/SubAgent 初始化失败固定采用 warn、禁止新绑定、旧绑定只读留痕、健康能力继续的策略。取消只要求发出命令，不设置超时或 grace period；不合作的自定义工具可能导致 execution、lease 和依赖它的共享资源长期保留。

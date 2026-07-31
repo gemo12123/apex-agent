@@ -52,7 +52,7 @@
 ## CORE-03 实现 Session、Turn、Iteration 状态编排
 
 - **任务名称**：建立唯一执行层级和持久化状态流转。
-- **任务目标**：用明确状态而非 Hook 历史表达新 Turn、Iteration、挂起、恢复和结束。
+- **任务目标**：用明确状态而非 Hook 历史表达新 Turn、Iteration、挂起、恢复、完成、失败和取消。
 - **当前进度**：未开始。现有概念已存在，但状态与 Spring 上下文、Plan 和 Memory 混合。
 - **设计依据**：设计文档第 6、10.2、16.4 节；架构文档第 6.1、8.1 节。
 - **涉及范围**：`ApexAgentContext`、`AgentRuntimeContext`、Session/Turn/Iteration 创建和状态机、Session/Conversation Repository 调用。
@@ -65,12 +65,17 @@
   5. 按“追加用户消息 → 保存 SessionSnapshot”的顺序调用两个 Repository；任一步失败都停止后续执行，不承诺跨 Repository 原子回滚。
   6. 人工介入状态与当前 Turn/Iteration 放入同一个 SessionSnapshot，由单次 SessionRepository 保存。
   7. 固化异常终态：模型异常时当前 Iteration、Turn、Session 进入 `FAILED` 并立即返回；Hook 异常跳过且状态不变；工具异常形成 ToolResult 后继续。
+  8. 每次执行使用 runtime 注入的同一请求级 `CancellationToken`；在模型、工具和持久化边界检查取消，取消时三层状态进入 `CANCELLED`，不误记为失败。
+  9. 提供 `ApexAgent.cancelBeforeRun()`，把同步准备阶段已创建的 Session/Turn 标记 CANCELLED 并保存，不创建 Iteration或运行生命周期；并发互斥由 runtime execution 保证。
 - **预期产出**：执行状态机、快照提交编排和状态转换测试。
 - **验收标准**：
   - turnNo/iterationNo 在正常、多工具、挂起和恢复场景符合定义。
   - 后续 Turn 不重置 enabledTools/activatedSkills。
   - 挂起不执行 TURN_END，最终收口只执行一次。
   - 模型异常不再执行后续 Hook、工具或模型调用，三层状态均为 `FAILED`；请求仍由既有 END 收口。
+  - 模型阶段取消且 Assistant entry 尚未追加时不创建 ToolResult；工具阶段取消时停止后续编排，三层状态均为 `CANCELLED`，并为已持久化 Assistant entry 中当前及剩余未完成 ToolCall 补标准取消结果以保持一一匹配。
+  - PREPARED 取消只保存 Session/Turn CANCELLED，Iteration、Hook、模型和工具调用次数均为 0；保存失败不妨碍 runtime 最终 END/lease 收口。
+  - CANCELLED session 允许后续 NEW 创建递增 Turn，但拒绝 HUMAN_RESPONSE 恢复已取消 Turn。
   - Repository Fake 可断言每个关键状态的调用顺序、停止条件和提交内容。
 - **限制条件或注意事项**：core 不感知数据库事务技术，本期不提供跨 Session/Conversation Repository 原子事务；不得创建 Stage 或执行模式层级；模型异常不新增协议错误事件。
 
@@ -88,6 +93,7 @@
   3. 通过 `AgentEventPublisher` 发布，不访问 SSE、Servlet 或 platform。
   4. 正常完成、失败和挂起退出当前传输时请求 END。
   5. 将真正的 END 幂等交给 RUN-04C 的请求级 Once Publisher。
+  6. Publisher 发布失败时触发同一请求的取消令牌并传播异常，促使模型、HTTP/MCP 或其他活动适配器执行已注册的取消动作。
 - **预期产出**：core 事件工厂、发布适配测试和 Golden File 复用测试。
 - **验收标准**：
   - 事件 JSON 与 PRO-02 Golden File 一致。
@@ -132,6 +138,7 @@
   4. 形成完整中立 ModelResponse 并执行 POST_MODEL_CALL。
   5. ModelGateway 内部重试复用同一最终请求，不重新进入生命周期或压缩门。
   6. ModelGateway 最终失败时把当前 Iteration、Turn、Session 标记为 `FAILED` 后立即返回，不执行 POST_MODEL_CALL 或结束生命周期。
+  7. 调用 Gateway 前后检查请求级 token，并通过 `ModelStreamObserver.cancellationToken()` 传递同一实例；Gateway 建立 subscription 后立即注册主动 `dispose` 动作。
 - **预期产出**：模型步骤组件、流聚合测试和生命周期顺序测试。
 - **验收标准**：
   - 每个 Iteration 的业务模型只调用一次逻辑模型步骤。
@@ -139,6 +146,7 @@
   - PRE/POST_MODEL_CALL 各执行一次，重试不重复执行。
   - PRE_MODEL_CALL 修改后超限时模型不执行。
   - 模型最终异常时无后续 Hook、工具或模型调用，三层失败状态和单次 END 收口可断言。
+  - token 在订阅创建前或创建后取消都能调用活动 subscription 的 `dispose`；core 在最近边界退出并记录 `CANCELLED`。
 - **限制条件或注意事项**：Spring AI 类型转换属于 RUN-02；模型异常直接返回，不新增 SSE 错误事件。
 
 ## CORE-05C 实现模型调用前压缩门
@@ -182,6 +190,8 @@
   7. 工具发布 END、交互事件、流内容或其他禁止事件时拒绝转发；observer 不暴露底层 Publisher，也不进入快照。
   8. 每个 ToolResult 先追加 ConversationRepository，再保存 SessionSnapshot；两步成功后才继续后序调用。
   9. END_TURN 为当前和剩余 ToolCall 逐个补齐内容为“达到最大轮次，强制结束”的 ToolResult，保留原 toolCallId/name 并保持一一匹配，不增加自定义 code/payload。
+  10. `ToolExecutionContext` 与 observer 暴露同一请求级 token；工具执行前后检查取消，适配器响应后抛 `CancellationRequestedException`，core 停止剩余真实 ToolCall，并为已追加的未完成调用补标准取消结果。
+  11. 在 core 内提供唯一 `ToolResultFactory`，统一构造拒绝、强制结束、取消、阻断、禁用、不可用和普通执行失败等状态机合成结果；固定文案不得散落在 kit 或分支代码。
 - **预期产出**：工具编排器、三层状态管理和多 ToolCall 测试。
 - **验收标准**：
   - 禁用工具不进入模型请求，也无法通过伪造/过期 ToolCall 执行。
@@ -189,6 +199,9 @@
   - 多 ToolCall 顺序、工具异常结果回传模型、失败隔离和前序结果持久化有自动测试。
   - 允许的 INVOCATION 进度事件写入当前请求；END 和非 allowlist 事件被拒绝。
   - END_TURN 后 Assistant ToolCall 与 ToolResult 数量和 ID 一一匹配。
+  - 工具执行期间取消会触发底层已注册的取消动作，剩余真实工具不执行；当前及剩余未完成调用按 ordinal 生成取消 ToolResult，不运行 POST Hook或下一模型调用。
+  - 取消结果一次批量 append 后再一次保存含 ToolExecutionStatus/三层 CANCELLED 的快照；append/save 故障遵循稳定 entryId 和既有部分提交规则。
+  - 确认拒绝、END_TURN 和取消结果均保留原 toolCallId/name、空 metadata，并由同一个 core 工厂生成；kit 中不存在等价工厂。
 - **限制条件或注意事项**：工具来源对 core 透明；本期不保证 Conversation/Session 两个保存原子回滚；MCP 隐式上下文限制由 RUN-06 实现；禁用工具通常不会被模型调用，执行前二次校验只用于防御伪造或过期 ToolCall。
 
 ## CORE-07A 实现人工介入挂起保存
@@ -247,7 +260,7 @@
   3. END_TURN 时为当前和剩余调用补齐“达到最大轮次，强制结束” ToolResult、清除挂起并执行一次结束生命周期。
   4. BLOCK/RETURN 跳过真实工具，执行 POST_TOOL_CALL 后清除挂起。
   5. 全部 CONTINUE 时重新校验 enabledTools，执行真实工具和 POST_TOOL_CALL。
-  6. 工具确认批准只合并允许编辑参数；拒绝映射 RETURN_TOOL_RESULT，模型可见结果固定为“用户拒绝执行”。
+  6. 工具确认批准只合并允许编辑参数；拒绝映射 RETURN_TOOL_RESULT，并调用 CORE-06 唯一工厂生成模型可见“用户拒绝执行”结果。
   7. ask_human 真实工具读取 humanResponse；收口后继续剩余 ToolCall/Iteration。
 - **预期产出**：五分支恢复执行器和完整恢复回归测试。
 - **验收标准**：

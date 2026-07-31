@@ -9,22 +9,25 @@
 - **任务目标**：用中立 DTO/record 表达 AgentDefinition、Session/Turn/Iteration、模型消息、工具和 Skill，使 core-extension 与 core 不依赖具体框架类型。
 - **当前进度**：未开始。
 - **设计依据**：设计文档第 5.2、6、7.1、11、12 节；架构文档第 5.2、6.1～6.4 节。
-- **涉及范围**：AgentDefinition/草稿/快照/元数据，请求命令，Session/Turn/Iteration 与状态，中立消息和模型流，ToolDefinition/ToolCall/ToolResult/ToolExecutionContext，工具三层状态、ToolOrigin/ToolAvailabilitySnapshot，SkillDefinition/SkillSetDefinition。
+- **涉及范围**：AgentDefinition/草稿/快照/元数据，请求命令，Session/Turn/Iteration 与状态，中立消息和模型流，ToolDefinition/ToolCall/ToolResult/ToolExecutionContext，CancellationToken/Registration，工具三层状态、ToolOrigin/ToolAvailabilitySnapshot，SkillDefinition/SkillSetDefinition。
 - **前置依赖**：PRO-01、FND-02。
 - **具体执行内容**：
   1. 定义跨模块唯一的数据模型，保留 ToolCall ID、顺序、参数和 metadata 的无损表达能力。
   2. 明确 `registeredTools`、`availableTools`、`defaultEnabledTools`、session `enabledTools` 的不同归属。
   3. 明确 `enabledSkills` 与 session `activatedSkills` 的不同归属。
   4. 对跨边界集合使用不可变副本或防御性复制。
-  5. ToolExecutionContext 只保存本地工具所需中立数据，不引用 core-extension 的 ToolExecutionObserver 或 AgentEventPublisher。
+  5. ToolExecutionContext 只保存本地工具所需中立数据和请求级 CancellationToken，不引用 core-extension 的 ToolExecutionObserver 或 AgentEventPublisher；token 不得持久化。
   6. 为状态转换定义明确枚举；模型异常时当前 Iteration、Turn、Session 进入 `FAILED`，Hook/工具异常不改变三层状态。
   7. 定义不可用工具的精确名称/来源 scope 快照；它只表达 MCP/SubAgent 健康事实，不把历史绑定误作第四层可执行工具状态。
+  8. 为 Session/Turn/Iteration/ToolExecutionStatus 增加 CANCELLED，并定义可注册主动取消 command 的 token 及统一 `CancellationRequestedException`；不引入取消等待时间或超时配置。
 - **预期产出**：common 基础领域模型和构造/不变量单元测试。
 - **验收标准**：
   - common 不包含 Spring、Spring AI、Servlet、ORM 或数据库类型。
   - ToolCall/ToolResult 的 ID、名称、参数和顺序可完整往返。
+  - Session/Turn/Iteration/ToolExecutionStatus.CANCELLED 可序列化并通过快照 round-trip。
   - 工具与 Skill 子集关系能被独立校验。
   - availability 集合与来源 scope 均不可变，稳定前缀匹配规则可独立测试。
+  - token 并发注册/取消回调至多一次，取消后注册立即执行；任何快照/JSON round-trip 均不包含 token。
   - 集合不可通过调用方引用修改内部状态。
 - **限制条件或注意事项**：中立模型不得简化到丢失现有协议或 Spring AI 必需信息，也不得用 `Map<String,Object>` 代替已明确的核心领域结构。
 
@@ -86,10 +89,12 @@
   3. 用明确目标类型反序列化，不把未校验 Tree/Map 传给 core。
   4. 对嵌套 Turn、Iteration、ToolCall、Map、集合做深拷贝别名测试。
   5. 配合各模块移除 Fastjson，最终在依赖树级阻止重新引入。
+  6. 在 common 测试中消费 protocol test-jar 的 Golden File，用真实 JsonUtils 验证 protocol 注解优先级；不得把该测试放回 protocol。
 - **预期产出**：common `JsonUtils`、序列化/深拷贝测试和迁移约束。
 - **验收标准**：
   - 泛型集合、时间、record、枚举和 SessionSnapshot round-trip 测试通过。
   - deepCopy 后修改源对象或副本互不影响。
   - common 不注册 Spring AI、数据库或 platform 专用类型模块。
   - 最终父工程依赖树与源码搜索均无 Fastjson/fastjson2。
+  - common 的消费者测试覆盖全部 protocol Golden File，且 Maven 图保持单向 common→protocol。
 - **限制条件或注意事项**：protocol 的显式字段注解优先于全局命名策略；数据库与 Spring AI 类型必须先由所属模块转换为 common DTO。

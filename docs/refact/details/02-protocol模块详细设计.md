@@ -136,12 +136,12 @@ artifact-declared.compat.json
 artifact-change.compat.json
 ```
 
-模型可见的“用户拒绝执行”“达到最大轮次，强制结束”是 common ToolResult，不是 SSE DTO。protocol 这里只断言没有新增对应事件或 code/payload；文本值的主断言归 KIT-02、CORE-06、CORE-07C。
+模型可见的“用户拒绝执行”“达到最大轮次，强制结束”“请求已取消，工具未执行完成”是 common ToolResult，不是 SSE DTO。protocol 这里只断言没有新增对应事件或 code/payload；文本、关联 ID 与空 metadata 的主断言归 core 唯一 `ToolResultFactory`（CORE-06/CORE-07C）。
 
 ### 关键实现逻辑
 
 - JSON 对象字段顺序一般不构成协议，但 END 是明确的原始字符串契约；其余使用结构比较，避免 mapper 属性排序造成无意义失败。
-- 所有 mapper 配置必须通过 common `JsonUtils` 最终 round-trip 再跑一遍，证明 protocol 注解优先于 common 的全局配置。
+- protocol 测试只使用本模块 test scope 的最小 Jackson `ObjectMapper` 验证 DTO 注解和 Golden File，不引用 common `JsonUtils`。使用产品 JsonUtils 的消费者 round-trip 迁到 COM-04，保持依赖方向始终为 common→protocol。
 - `content_id`、`tool_call_id`、`confirmation_id`、`invocation_id` 做值保留断言，不仅验证字段存在。
 - `context.mode="react"` 由 core 事件工厂负责设置；protocol 测试使用固定对象验证序列化，不把 mode 设计成 enum。
 
@@ -158,6 +158,7 @@ artifact-change.compat.json
 - 专测 ToolConfirmation 所有展示/编辑字段 snake_case。
 - 用远程 SSE 的 `data:` 包装样本验证 runtime parser 去掉 SSE 前缀后可直接交给 protocol mapper。
 - legacy 与新 protocol 对同一构造数据生成 JSON 对比，直至 platform 切换。
+- protocol 通过 `maven-jar-plugin:test-jar` 附加只读 Golden File/测试夹具供 common 的 test scope 消费；execution 显式绑定 `process-test-classes`，保证根工程执行 `mvn test` 时附件已经可解析，而不是等到 package。该附件不得引用 common 测试类。
 
 ### 架构符合性
 

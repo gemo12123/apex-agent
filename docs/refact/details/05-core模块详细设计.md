@@ -2,7 +2,7 @@
 
 ## 模块设计定位
 
-`apex-agent-core` 只实现 Agent 语义：定义构造、Session/Turn/Iteration、11 个生命周期、唯一 ReAct 循环、工具处理、压缩门、挂起和恢复。它只依赖 common 与 core-extension；所有测试使用 Fake 端口。
+`apex-agent-core` 只实现 Agent 语义：定义构造、Session/Turn/Iteration、11 个生命周期、唯一 ReAct 循环、工具处理、压缩门、挂起和恢复。它直接依赖 protocol、common 与 core-extension；protocol 用于事件 DTO，所有外部能力测试使用 Fake 端口。
 
 目标包结构：
 
@@ -84,7 +84,7 @@ final class ApexAgentFactory {
 }
 ```
 
-`AgentAssemblyResult` 是 core 内部结果，Factory 必须把其中三项作为一次 session candidate 使用；任一步校验或持久化失败都不能只提交定义或只提交历史记录。`AgentPorts` 持有 DefinitionProvider、ToolProvider、ToolAvailabilityProvider、HookResolver、ModelGateway、repositories、compaction ports、Skill ports、Publisher、IdGenerator、TimeProvider 和 maxIterations/hardLimit 配置。它是 core 内不可变类，不进入 common 或快照。
+`AgentAssemblyResult` 是 core 内部结果，Factory 必须把其中三项作为一次 session candidate 使用；任一步校验或持久化失败都不能只提交定义或只提交历史记录。`AgentPorts` 持有 DefinitionProvider、ToolProvider、ToolAvailabilityProvider、HookResolver、ModelGateway、repositories、compaction ports、Skill ports、Publisher、请求级 CancellationToken、IdGenerator、TimeProvider 和 maxIterations/hardLimit 配置。它是 core 内不可变类，不进入 common 或快照。
 
 ### 关键实现逻辑
 
@@ -195,7 +195,7 @@ Hook 实现只返回中立意图，core 独占解释与状态变更；无 Spring
 
 ### 实现目标
 
-用明确状态机表达 NEW、连续 Turn、Iteration、挂起、恢复、完成和失败；修复当前 `nextTurnNo()` 可能脱离 session 以及新 Turn 清空工具/Skill 的行为。
+用明确状态机表达 NEW、连续 Turn、Iteration、挂起、恢复、完成、失败和取消；修复当前 `nextTurnNo()` 可能脱离 session 以及新 Turn 清空工具/Skill 的行为。
 
 ### 涉及模块/类
 
@@ -225,6 +225,7 @@ void suspend(SuspendedToolCall suspended);
 void completeIteration();
 void completeTurn(TurnCompletionReason reason);
 void fail(Throwable cause);
+void cancel();
 ```
 
 不得向业务代码暴露通用 `setStatus`。ApexAgentContext 是请求内聚合，SessionSnapshotMapper 生成不可变持久化对象。
@@ -232,10 +233,13 @@ void fail(Throwable cause);
 ### 关键实现逻辑
 
 - Session `COMPLETED` 仅表示上一 Turn完成；下一个合法 NEW 可将其重新置 IN_PROGRESS。
+- Session `CANCELLED` 仅表示上一执行/Turn 被取消；lease 释放后的合法 NEW 可创建下一 Turn 并重新置 IN_PROGRESS，HUMAN_RESPONSE 不得恢复已取消 Turn。
 - NEW 在 HUMAN_IN_THE_LOOP 时拒绝，不能隐式取消挂起。
 - 挂起不设置 endedTime、不跑 TURN_END；恢复保持原 startedTime/编号。
 - 模型异常将当前 Iteration、Turn、Session 一次性改 FAILED，不执行 POST_MODEL/IterationEnd/TurnEnd；best-effort 保存失败快照。
 - Hook 普通异常不改状态；工具异常转换 ToolResult，不改三层为 FAILED。
+- 请求级 token 在 core 检查点抛 `CancellationRequestedException` 时，当前活动 Iteration/Turn/Session 转为 CANCELLED，不运行后续 Hook、模型或真实工具。若 Assistant ToolCall 已持久化，交 CORE-06 为未完成调用补取消 ToolResult 后保存；否则直接保存状态。随后由 execution finally 发送 END/释放 lease。
+- `ApexAgent.cancelBeforeRun()` 只把同步准备阶段已创建的 Session/Turn 标记 CANCELLED 并保存，不创建 Iteration、不运行 Hook/模型/工具；保存失败向 runtime 传播但不阻止其 END/lease 收口。该方法与 `run()` 的互斥由 runtime execution 状态机保证。
 - 新 Turn user message append 后 session save 失败，后续不运行；重试复用稳定 entryId 的策略由调用命令/协调器保持。
 
 ### 异常处理
@@ -251,6 +255,8 @@ void fail(Throwable cause);
 - HUMAN_IN_LOOP 上 NEW 拒绝，恢复不加编号。
 - 四类 Repository 顺序 Fake；每一步失败后无后续调用。
 - 模型异常三层 FAILED 且无结束 Hook；Hook/工具异常对比测试。
+- 模型前、模型中、工具前、工具中和持久化边界取消均进入 CANCELLED；取消不误记 FAILED，不产生模型可见失败 ToolResult。
+- PREPARED 取消只保存 Session/Turn CANCELLED，Iteration/Hook/模型/工具调用次数均为 0；保存失败时 runtime 仍执行 END/lease 收口。
 
 ### 架构符合性
 
@@ -298,7 +304,7 @@ final class AgentEventFactory {
 
 ### 异常处理
 
-- publisher 抛 AgentEventPublishException 时立即停止当前传输，标记 observer 取消并传播；不能 warn 后继续消耗模型/执行工具。
+- publisher 抛 AgentEventPublishException 时由 execution 发出同一请求 token 的取消命令并传播；不能只设置 observer 布尔值、warn 后继续消耗模型/执行工具。
 - 事件构造缺必要 ID 是 core contract error，不发送半成品。
 
 ### 测试方案
@@ -404,14 +410,16 @@ base request from CORE-05C
 - PRE_MODEL Patch 不能改 session/agent identity；可以改消息、模型 options 和工具投影。
 - 模型看到的 tools 由 CORE-06 投影的 enabledTools 生成。
 - ModelGateway 内部重试只复用同一个 final ModelRequest/observer，不重新进入 Hook 或 compaction。
+- 调用 Gateway 前后检查 token；ModelStreamObserver 返回该 token。Gateway adapter 必须在建立 subscription 后立即注册 `dispose`，即使取消先于 subscription 创建也会立刻执行。
 - POST_MODEL 可修改 response/messages，但不能改变已有 ToolCall ID/name；参数修改只在 PRE_TOOL_CALL。
 - 最终 assistant entry 含 ToolCall 完整列表，先 append conversation 再 save session，成功后才能执行工具。
-- 事件发布失败让 observer cancelled，Gateway adapter 取消上游；当前执行失败并释放 lease。
+- 事件发布失败触发 token，Gateway adapter 主动取消 subscription；若最终以 `CancellationRequestedException` 退出则三层记 CANCELLED，其他发布故障仍按失败处理。
 
 ### 异常处理
 
 - PRE_MODEL hard limit 超限：`ModelContextLimitException`，不调用模型，三层 FAILED。
 - Gateway 最终异常：三层 FAILED，不执行 POST_MODEL、工具、IterationEnd、TurnEnd；best-effort save 后 END。
+- `CancellationRequestedException`：三层 CANCELLED，不执行 POST_MODEL、工具或结束 Hook；不包装为 ModelInvocationException。
 - assistant append/save 失败：停止工具，状态 FAILED。
 - ToolCall ID 重复/参数 JSON 非对象：`InvalidModelResponseException`。
 
@@ -422,6 +430,7 @@ base request from CORE-05C
 - PRE 修改后超限不调用 Gateway。
 - assistant append/save 发生在工具前；故障注入后工具 0 次。
 - Gateway/Publisher 异常三层状态和结束 Hook次数。
+- token 在订阅创建前/后取消均调用 dispose；core 停在最近检查点且状态为 CANCELLED。
 
 ### 架构符合性
 
@@ -526,21 +535,41 @@ set current call
 
 内部 `ToolCallOutcome`：Completed、Suspended、EndTurn。BLOCK/RETURN 最终都转 Completed ToolResult。
 
+状态机合成结果由 core 内部唯一 `ToolResultFactory` 负责：
+
+```java
+final class ToolResultFactory {
+    ToolResult userDenied(ToolCall call);                    // 用户拒绝执行
+    ToolResult forcedEnd(ToolCall call);                     // 达到最大轮次，强制结束
+    ToolResult blocked(ToolCall call, String reason);
+    ToolResult disabled(ToolCall call);
+    ToolResult unavailable(ToolCall call);
+    ToolResult executionFailed(ToolCall call, Throwable error);
+    ToolResult cancelled(ToolCall call);                     // 请求已取消，工具未执行完成
+}
+```
+
+所有方法保留原 toolCallId/name；`userDenied`、`forcedEnd` 和 `cancelled` 的 metadata 固定为空，不增加 code/payload。该工厂是 core 包内实现，不进入 core-extension，kit 不提供同名或等价工厂。
+
 ### 关键实现逻辑
 
 - Hook enable 只能选 available；disable 立即影响同一响应后续 ToolCall。如果后续 ToolCall 已被模型产生但此时禁用，不执行真实工具，生成模型可见“工具当前未启用，无法执行”结果并继续，保证一一匹配。
 - PRE ToolCallPatch 只能改 arguments。POST ToolResultPatch 只能改 content/metadata，不改关联 ID/name。
 - BLOCK 使用 reason 构造失败 ToolResult并运行 POST；RETURN 使用给定结果并运行 POST。
 - 普通工具异常转换为当前结果，内容包含可给模型理解的脱敏摘要，不附加新 SSE 错误事件，继续剩余调用和下一 Iteration。
-- Restricted observer 只允许 INVOCATION_DECLARED/CHANGE，验证 invocation/toolCall 关联后写当前请求 Publisher；END/交互/流内容/Artifact 直接拒绝。
+- Restricted observer 只允许 INVOCATION_DECLARED/CHANGE，验证 invocation/toolCall 关联后写当前请求 Publisher，并返回与 ToolExecutionContext 相同的 CancellationToken；END/交互/流内容/Artifact 直接拒绝。
+- 每个 PRE Hook、真实工具和 POST Hook 前后检查 token。`CancellationRequestedException` 不转换为普通失败 ToolResult，而是转入下述统一取消补齐与终止分支；普通工具异常才转换为模型可见失败结果并继续。
 - 每个结果 stable entryId，append -> save 成功后才处理下一 ToolCall。
 - END_TURN 为当前及所有未完成调用补固定强制结束结果，不运行它们 PRE/POST/真实工具；已完成结果不重写。
+- CORE-07C 的确认拒绝与本任务的 END_TURN 必须调用同一个 `ToolResultFactory`；禁止在分支内手写固定文案。
 
 ### 异常处理
 
 - 找不到/禁用工具不真实执行，但补 ToolResult；已知外部工具故障固定生成内容“工具不可用”的 ToolResult。只有 availability 中有结构化记录时走该分支，普通缺失仍视为契约/配置错误。
 - ToolResult ID/name 不匹配是 ToolContractException，执行失败而非交给模型。
 - Observer 非 allowlist 事件抛 IllegalToolEventException，作为该工具执行异常转换 ToolResult；父 END 不受影响。
+- 取消命令不是工具失败；adapter 响应取消后抛 `CancellationRequestedException`。若 Assistant ToolCall 已追加，core 不运行 PRE/POST Hook或真实工具，使用唯一工厂为当前及剩余未完成调用补“请求已取消，工具未执行完成”结果，按 ordinal 追加后把三层记 CANCELLED；已完成结果不重写，也不进入下一模型调用。
+- 取消补齐使用一次 `ConversationRepository.append(cancelledEntries)` 批量按 ordinal 写入，entryId 在写前生成且重试稳定；随后一次 `SessionRepository.save` 同时保存 ToolExecutionStatus 与三层 CANCELLED。append 失败不保存快照；save 失败不回滚 append，沿用既有幂等重试/部分提交风险规则。
 - append/save 失败停止剩余 ToolCall。
 
 ### 测试方案
@@ -551,7 +580,8 @@ set current call
 - CONTINUE/BLOCK/RETURN/END_TURN 和工具异常。
 - 多 ToolCall 前序持久化、后序失败/挂起，结果顺序一一对应。
 - observer allowlist、关联 ID、跨请求隔离和 END 拒绝。
-- 强制结束固定文本、无 code/payload。
+- ToolExecutionContext/observer token 同一实例；工具执行前/中取消时底层 command 被调用，取消后不再新增真实工具调用；当前及剩余未完成调用各有一次取消 ToolResult且不运行 POST Hook。
+- 拒绝/强制结束/取消固定文本、原 ID/name、空 metadata；扫描 core/kit 证明仅 core 工厂持有三段固定文案。
 
 ### 架构符合性
 
@@ -695,6 +725,7 @@ editable 参数合并算法：以 suspended.resolvedArguments 为基准，只覆
 ### 关键实现逻辑
 
 - rejected confirmation 在剩余 Hook 之前终止 PRE 链，避免审批后 Hook 产生副作用。
+- rejected confirmation 调用 CORE-06 的唯一 `ToolResultFactory.userDenied`，不从 kit 获取结果、不在恢复分支复制文案。
 - ask_human 首次 Hook ID 已保存，恢复跳过它；真实 AskHumanTool恰好执行一次并从 ToolExecutionContext 读 typed response。
 - 得到任何最终 ToolResult 后先 POST Tool Hook，再 append/save，最后清除挂起；为使“结果和清除”在同一 SessionSnapshot 中，session save 使用已清除状态的快照。
 - 如果 append 成功、session save 失败，重试通过 stable entryId 避免重复结果。

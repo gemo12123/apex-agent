@@ -4,6 +4,8 @@
 
 `apex-agent-platform` 是唯一 Spring Boot 可执行应用。它负责配置映射、HTTP/SSE、用户边界、异步派发和 PostgreSQL Adapter，不重新实现 Agent 循环、Hook、工具、恢复、END 幂等或 session lease。
 
+platform POM 直接声明 protocol、common、core-extension、runtime：Web DTO/协议消息、命令对象、`AgentEventPublisher` 实现和 runtime API 都是直接源码引用；不直接依赖 core 或 kit。
+
 目标包：`bootstrap`、`config`、`web`、`web.sse`、`security`、`execution`、`persistence.session`、`persistence.conversation`、`persistence.snapshot`。
 
 ## PLAT-01 迁移 Spring Boot 装配、Agent 配置与列表接口
@@ -110,7 +112,7 @@ Filter validates X-User-Id
 - NEW：query非空、humanResponse可空。
 - HUMAN_RESPONSE：humanResponse非空、query不参与执行。
 - Header `X-User-Id` 必填，显式写入 AgentRequest/HumanResponseCommand。
-- `SseEmitterAgentEventPublisher.publish` 用 common JsonUtils 序列化并 `emitter.send(serializedString)`；实现请求级 cancellation/closed 标识。
+- `SseEmitterAgentEventPublisher.publish` 用 common JsonUtils 序列化并 `emitter.send(serializedString)`；实现请求级 closed 标识。发布 END 只负责 send，不在 `publish` 内调用 emitter.complete；complete 由 execution terminator 在状态已置 TERMINATED 后执行。取消执行由 `ApexAgentExecution` 独占，不在 Publisher 内另建 token。
 
 ### 关键实现逻辑
 
@@ -120,7 +122,8 @@ Filter validates X-User-Id
 - `endPublished=false` 说明 Publisher 创建/发送本身失败，无法满足 END-only 契约；此时才按平台基础设施异常处理并记录告警，不能返回一个声称已正常收口的空 SSE。
 - 取得 execution 后才提交异步任务。TaskRejectedException立即 cancelBeforeStart，Once确保 END一次。
 - TaskDecorator捕获请求线程 userId，异步执行前 set，finally clear；core/runtime始终使用命令中的 userId，不读 ThreadLocal。
-- emitter completion/timeout/error标记 Publisher取消；运行中模型在下一 observer检查时取消。不能由 emitter callback直接释放 lease，lease仍归 execution finally。
+- Coordinator 用 `AtomicReference<ApexAgentExecution>` 保存句柄。emitter completion/timeout/error 先把 Publisher 标记 closed，再对已绑定 execution 调用 `cancel()`；runtime 返回 execution 后写入引用，并在提交任务前再次检查 Publisher closed，已关闭则调用 `cancel()` 而不提交，闭合“callback 先于句柄绑定”的竞态。
+- callback 只发非阻塞取消命令，不能直接释放 lease、发布 END 或等待执行退出；RUNNING 的 lease 仍归 execution finally。底层模型、HTTP/MCP 和工具取消由请求 token 的已注册 command 完成。
 
 ### 异常处理
 
@@ -129,6 +132,8 @@ Filter validates X-User-Id
 - core 构造/恢复准备失败由上述 END-only 分支返回；SSE 对外不暴露异常类型、message 或 stack trace。
 - Sse send失败抛 AgentEventPublishException，background结束并释放 lease。
 - task rejection和Publisher错误不能重复 END/complete。
+- emitter callback 与 execution 绑定竞态由 closed 二次检查收口；回调本身的 cancel 异常只记录请求标识，不向已关闭连接写消息。
+- END send 成功与 emitter complete 分属 Once Publisher/terminator；不得让 Publisher 在 execution 尚为 RUNNING 时 complete 并触发反向 cancel。
 
 ### 测试方案
 
@@ -137,6 +142,8 @@ Filter validates X-User-Id
 - 参数错误 400、busy 409 均无 END；core 构造失败和恢复快照校验失败均返回 200，解析出的事件序列严格等于一个 Golden File END。
 - 每请求 emitter隔离、连续恢复新 emitter、事件不串写。
 - executor拒绝 END/release各一次。
+- emitter 在 execution 绑定前/绑定后完成、超时或报错均会使 cancel 精确生效一次；RUNNING 场景不提前释放 lease。
+- 正常 END 后 terminator 先置 TERMINATED 再 complete，completion callback 的 cancel 返回 false且不触发 token。
 - Filter/TaskDecorator传播与请求/异步结束清理。
 - core/runtime无 ThreadLocal依赖、ApexAgentContext无 SseEmitter。
 

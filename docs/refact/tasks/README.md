@@ -22,11 +22,11 @@
 | 0 | [工程基线与模块骨架](00-工程基线与模块骨架.md) | 特征基线、临时 legacy、父 POM、八模块骨架、分阶段依赖守卫 | 无 |
 | 1 | [protocol 模块](01-protocol模块.md) | HTTP/SSE/远程 SubAgent 线协议 DTO | FND-01、FND-02 |
 | 2 | [common 模块](02-common模块.md) | 中立领域模型、快照、Hook 结果、JsonUtils | protocol |
-| 3 | [core-extension 模块](03-core-extension模块.md) | 仅接口的扩展端口 | common |
-| 4 | [core 模块](04-core模块.md) | 定义构造、生命周期、ReAct、工具、压缩、恢复 | common、core-extension |
-| 5 | [kit 模块](05-kit模块.md) | `ask_human`、工具确认、截断等通用扩展 | core-extension；部分能力与 core 联调 |
-| 6 | [runtime 模块](06-runtime模块.md) | Builder、默认实现、Spring AI 适配、内存存储、Skill、MCP、SubAgent、lease | core、kit |
-| 7 | [platform 模块](07-platform模块.md) | Spring Boot、HTTP/SSE、配置、用户上下文、PostgreSQL | runtime |
+| 3 | [core-extension 模块](03-core-extension模块.md) | 仅接口的扩展端口 | protocol、common |
+| 4 | [core 模块](04-core模块.md) | 定义构造、生命周期、ReAct、工具、压缩、恢复 | protocol、common、core-extension |
+| 5 | [kit 模块](05-kit模块.md) | `ask_human`、工具确认、截断等通用扩展 | protocol、common、core-extension；部分能力与 core 联调 |
+| 6 | [runtime 模块](06-runtime模块.md) | Builder、默认实现、Spring AI 适配、内存存储、Skill、MCP、SubAgent、lease | protocol、common、core-extension、core、kit |
+| 7 | [platform 模块](07-platform模块.md) | Spring Boot、HTTP/SSE、配置、用户上下文、PostgreSQL | protocol、common、core-extension、runtime |
 | 8 | [memory 模块](08-memory模块.md) | 长期记忆、搜索、Skill Learning 独立封存 | common、core-extension |
 | 9 | [清理与整体验收](09-清理与整体验收.md) | 删除 PlanExecutor/legacy、重命名、文档与全量验收 | 全部模块 |
 
@@ -101,9 +101,11 @@
 | core-extension 接口 | EXT-01/02 | core、kit、runtime、platform、memory | 接口先冻结；ToolExecutionObserver 由 EXT-01 定义，core 绑定，runtime 工具消费 |
 | AgentDefinition 校验规则 | CORE-01 | runtime Builder、platform Provider | core 先提供唯一校验器；下游不得复制规则 |
 | 工具执行期事件 | EXT-01、CORE-06 | RUN-07、RUN-04C | core 创建请求级 observer 并校验 allowlist；SubAgent 只经 observer 透传 INVOCATION；工具不能发布 END |
-| 人工介入状态机 | CORE-07A～07C | KIT-01/02、RUN-04C、PLAT-02/03D | kit 先提供结果语义，core 分挂起、校验、五分支实现，下游再接入 |
+| 人工介入状态机 | CORE-07A～07C | KIT-01/02、RUN-04C、PLAT-02/03D | kit 先提供介入请求语义，core 分挂起、校验、五分支实现，下游再接入 |
+| 状态机合成 ToolResult | CORE-06/07C | PRO-02、KIT-02 | core 唯一工厂持有拒绝/强制结束/取消文案与关联逻辑；protocol 只守线协议，kit 不生成固定结果 |
 | END 幂等 | RUN-04C | CORE-04、PLAT-02 | core 只请求发布；runtime Once 包装独占幂等；platform 只调用取消兜底 |
 | session execution lease | RUN-04B/04C | PLAT-02 | runtime 是唯一正确性来源；platform 不维护第二套锁表 |
+| 请求级取消 | COM-01、RUN-04A/04C | EXT-01、CORE-03/04/05B/06、RUN-02/06/07/08、PLAT-02 | runtime source 发命令；observer/context 共享 token；默认adapter主动取消；finally 独占 END/lease 收口 |
 | Repository 提交顺序 | CORE-03/05C/06/07A | PLAT-03C | core 定义调用顺序；各 Adapter 保证单次操作；本期不提供跨 Repository 原子事务 |
 | PostgreSQL schema 与 Repository | PLAT-03A/03B | PLAT-03C/03D、MEM-03 | schema、Adapter、顺序、重启测试依次合并；memory 不复用核心会话表 |
 | 旧 PlanExecutor/SuperAgent 文件 | CLEAN-01/02 | 所有迁移任务 | 新链路通过后最后删除 |
@@ -122,7 +124,7 @@
 | 唯一 ReAct 循环、模型流与压缩门 | CORE-05A/05B/05C |
 | 工具三层状态、多 ToolCall、执行期事件 observer | EXT-01、CORE-06、RUN-07 |
 | 统一人工介入与 HUMAN_RESPONSE | CORE-07A/07B/07C、KIT-01/02 |
-| runtime Builder、Spring AI、内存存储、execution、事件与 lease | RUN-01/02/03/04A/04B/04C |
+| runtime Builder、Spring AI、内存存储、execution、请求级取消、事件与 lease | COM-01、EXT-01、CORE-03/04/05B/06、RUN-01/02/03/04A/04B/04C、PLAT-02 |
 | 普通 Skill、MCP、HTTP SubAgent | RUN-05/06/07 |
 | Spring Boot、HTTP/SSE、用户上下文、Agent 列表 | PLAT-01/02 |
 | PostgreSQL schema、Repository、提交顺序与重启恢复 | PLAT-03A/03B/03C/03D |
@@ -137,7 +139,7 @@
 
 ## 6. 设计确认结果
 
-Q-01～Q-06 及补充决策 Q-07～Q-08 已于 2026-07-31 确认，以下结论是对应任务的实施与验收依据：
+Q-01～Q-09 已于 2026-07-31 确认，以下结论是对应任务的实施与验收依据：
 
 | 编号 | 已确认决策 | 影响任务 |
 | --- | --- | --- |
@@ -146,8 +148,9 @@ Q-01～Q-06 及补充决策 Q-07～Q-08 已于 2026-07-31 确认，以下结论�
 | Q-03 | `FileAgentDefinitionProvider` 默认只支持 YAML；资源由调用方显式指定，可来自 classpath 或文件系统，Provider 初始化时加载一次并缓存，不扫描目录、不热加载。本期不设计现有全局/workspace 配置的迁移映射。 | RUN-01、PLAT-01 |
 | Q-04 | MCP 或 SubAgent 初始化失败时记录 warn、关闭失败资源并登记不可用状态，健康集成和 runtime 继续启动。不可用工具禁止新活动绑定；新 session 或 AGENT_BUILD 新增该绑定时构造失败。已有 session 的旧绑定转为只读历史记录并从有效定义、`enabledTools` 和 ToolCatalog 移出；既有 ToolCall/ToolResult 保留展示但不可执行，也不自动重新启用。 | COM-03、EXT-01、CORE-01/06/07B、RUN-06/07/08 |
 | Q-05 | 首版快照/定义 schema 版本固定为字符串 `1.0.0`，本期只实现该版本的读写与 round-trip；跨版本升级、版本跨度和未知版本处理均不在本期范围，不宣称跨版本兼容。 | COM-03、PLAT-03B/03D、CLEAN-03 |
-| Q-06 | 工具确认拒绝映射为 `RETURN_TOOL_RESULT`，模型可见结果文本固定为“用户拒绝执行”。禁用工具不进入模型工具列表，执行前仍做二次校验以阻止伪造或过期调用。`END_TURN` 遇到当前或剩余 ToolCall 时，逐个按原 toolCallId/name 补齐结果文本“达到最大轮次，强制结束”。这两类结果不增加自定义 code 或 payload。 | PRO-02、CORE-06、CORE-07C、KIT-02 |
+| Q-06 | 工具确认拒绝映射为 `RETURN_TOOL_RESULT`，模型可见结果文本固定为“用户拒绝执行”。禁用工具不进入模型工具列表，执行前仍做二次校验以阻止伪造或过期调用。`END_TURN` 遇到当前或剩余 ToolCall 时，逐个按原 toolCallId/name 补齐结果文本“达到最大轮次，强制结束”。这两类结果不增加自定义 code 或 payload，并由 core 内部唯一 `ToolResultFactory` 生成；kit 只产生确认请求。 | PRO-02、CORE-06、CORE-07C |
 | Q-07 | Header/请求字段错误返回 HTTP 400；session busy 返回 HTTP 409 且不发 END。请求级 Publisher 已绑定、lease 已取得后，core 同步构造或恢复准备失败由 runtime 发布唯一且载荷不变的 END、释放 lease；platform 返回 HTTP 200 的仅 END SSE，不追加错误事件或文本。 | RUN-04C、PLAT-02/04 |
 | Q-08 | 只有 AGENT_BUILD 可以通过 `AgentDefinitionOperation` 修改 Agent 定义。其他生命周期不得修改定义或 Hook 链；消息、session `enabledTools`、当前模型/工具/压缩对象仍按各自结果族修改，且属于运行态。 | COM-02、CORE-01/02 |
+| Q-09 | 每个 execution 使用唯一请求级取消 token。运行中 `cancel()`/`close()` 只发非阻塞取消命令，不等待、不提前释放 lease；默认模型、HTTP/SubAgent、MCP adapter 必须主动取消底层调用。runtime close 向全部活动 execution 发命令后返回，不设置取消超时或 grace period；最终 END、请求资源和 lease 只由实际执行 finally 收口。若 Assistant ToolCall 已持久化，core 为未完成调用按原ID/name补“请求已取消，工具未执行完成”且 metadata 为空的结果后结束，不运行后续 Hook/真实工具/模型。 | COM-01、EXT-01、CORE-03/04/05B/06、RUN-02/04A/04C/06/07/08、PLAT-02 |
 
 这些确认不改变模块边界；所有原受阻任务均可按上述结论进入实施和最终签收。

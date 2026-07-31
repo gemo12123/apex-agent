@@ -75,7 +75,7 @@ flowchart LR
 | 当前事实 | 架构影响 | 目标处理 |
 | --- | --- | --- |
 | `SuperAgentContext` 同时持有 Spring AI Message、ToolCallback、`SseEmitter`、Plan、Skill、Memory 和恢复状态 | 会话领域对象同时承担运行对象、传输对象和持久化对象职责 | 拆成中立 `SessionContext`、运行态 `ApexAgentContext`、不可变快照和事件端口 |
-| `SuperAgent` 直接依赖 Spring AI、Memory、Store、工具解析与 Hook 实现 | 核心循环无法独立测试和复用 | core 仅依赖 common 与 core-extension |
+| `SuperAgent` 直接依赖 Spring AI、Memory、Store、工具解析与 Hook 实现 | 核心循环无法独立测试和复用 | core 仅依赖 protocol、common 与 core-extension |
 | `DefaultAgentLifecycleHookRuntime` 通过 `ApplicationContext.getBean` 解析 Hook | runtime 无法脱离 Spring 容器 | 由 `HookResolver` 解析稳定注册名 |
 | Hook 使用一个可空字段较多的 `AgentHookResult`，并保存 Bean 名 | 动作语义和恢复语义不稳定 | 按生命周期和动作分型，恢复只保存稳定 Hook Binding ID |
 | `PendingToolExecution` 保存 ToolCall 数组索引、Bean 名和部分重复状态 | 配置或数组变化会导致恢复漂移 | 通过 `toolCallId` 定位，只保存已执行 PRE_TOOL_CALL Hook ID |
@@ -124,12 +124,22 @@ flowchart LR
 ```mermaid
 flowchart TD
     PL["platform"] --> R["runtime"]
+    PL --> CE["core-extension"]
+    PL --> C["common"]
+    PL --> P["protocol"]
     R --> CO["core"]
     R --> K["kit"]
+    R --> CE
+    R --> C
+    R --> P
     CO --> CE["core-extension"]
     CO --> C["common"]
+    CO --> P
     K --> CE
+    K --> C
+    K --> P
     CE --> C
+    CE --> P
     C --> P["protocol"]
     M["memory"] --> CE
     M --> C
@@ -139,13 +149,15 @@ flowchart TD
 
 ```text
 common         -> protocol
-core-extension -> common
-core           -> common + core-extension
-kit            -> core-extension
-runtime        -> core + kit
-platform       -> runtime
+core-extension -> protocol + common
+core           -> protocol + common + core-extension
+kit            -> protocol + common + core-extension
+runtime        -> protocol + common + core-extension + core + kit
+platform       -> protocol + common + core-extension + runtime
 memory         -> common + core-extension
 ```
+
+这是生产源码的真实直接 Maven 依赖图，不是删除冗余边后的传递闭包简图。源码或测试直接引用哪个项目模块的类型，本模块 POM 就必须直接声明哪个模块；`dependencyManagement` 和其他模块的传递依赖不能替代直接声明。
 
 禁止形成任何反向依赖或环：
 
@@ -207,6 +219,7 @@ common 保存扩展接口和核心实现共同使用的中立对象：
 - Session、Turn、Iteration 及状态。
 - 中立消息、模型请求、模型响应、流片段。
 - 工具定义、工具调用、工具结果和三层工具状态。
+- 请求级 `CancellationToken`、registration 和统一 `CancellationRequestedException`；可写 source 只在 runtime。
 - Skill 定义与 session 激活状态。
 - HookPoint、HookBinding、生命周期上下文视图和分型结果。
 - 消息、工具参数、工具结果、模型请求、压缩请求/结果的专用 Patch。
@@ -218,7 +231,7 @@ common 对外暴露不可变集合或防御性副本，不能泄漏可变运行�
 
 ### 5.3 core-extension：扩展端口
 
-core-extension 严格只声明接口。接口参数和返回值只能来自 JDK、protocol 或 common。
+core-extension 严格只声明接口。接口参数和返回值只能来自 JDK、protocol、common，或用于端口组合的 core-extension 同模块 interface；不得引用同模块实现类、record 或 enum。
 
 主要端口：
 
@@ -226,8 +239,9 @@ core-extension 严格只声明接口。接口参数和返回值只能来自 JDK�
 | --- | --- |
 | `AgentDefinitionProvider` | 按 `agentKey` 返回完整 Agent 定义，并通过 `listAgents()` 直接返回轻量元数据列表 |
 | `ModelGateway` | 流式调用模型并返回中立响应 |
+| `ModelStreamObserver` | 接收模型流片段并暴露请求级 CancellationToken |
 | `AgentTool` | 声明并执行单个工具 |
-| `ToolExecutionObserver` | 接收工具执行期允许透传的进度事件 |
+| `ToolExecutionObserver` | 接收工具执行期允许透传的进度事件并暴露同一请求级 CancellationToken |
 | `ToolProvider` | 为定义快照解析工具实例 |
 | `LifecycleHook<C,R>` | 执行单个生命周期扩展 |
 | `HookResolver` | 按生命周期点和注册名解析 Hook |
@@ -286,9 +300,9 @@ kit 提供可以被任意 runtime 复用的实现：
 - `PlainTextTruncateHook`。
 - 工具与 Hook 匹配器。
 - Tool Confirmation 规格构造器。
-- 通用 Hook 组合器和工具结果辅助构造器。
+- 通用 Hook 组合器。
 
-kit 不包含计划工具和 PlanExecutor 守卫，也不依赖 core 实现类。
+kit 不包含计划工具、PlanExecutor 守卫或状态机固定 ToolResult 工厂，也不依赖 core 实现类。
 
 ### 5.6 runtime：开箱即用运行时
 
@@ -384,6 +398,8 @@ Turn 从一个 `RequestType.NEW` 开始，到该输入对应的 ReAct 执行完�
 - 挂起时 Turn 状态为 `SUSPENDED`，但不执行 `TURN_END`。
 - 只有原 Turn 真正收口时执行一次 `TURN_END`。
 - 模型调用异常时当前 Iteration、Turn、Session 均标记为 `FAILED` 并立即返回，不再执行后续 Hook、工具、模型调用或结束生命周期；请求级执行句柄仍负责用既有 `END` 收口并释放 lease。
+- 请求取消时当前活动 Session、Turn、Iteration 进入 `CANCELLED`，不误记 `FAILED`；若 execution 尚未 run，则只取消已同步创建的 Session/Turn，不创建 Iteration。
+- CANCELLED session 可在 lease 释放后接受后续 NEW 并创建递增 Turn，但不能用 HUMAN_RESPONSE 恢复已取消 Turn。
 
 Iteration 表示一次业务模型推理及其产生的全部 ToolCall 处理：
 
@@ -392,6 +408,7 @@ Iteration 表示一次业务模型推理及其产生的全部 ToolCall 处理：
 - 人工介入保留当前 Iteration。
 - HUMAN_RESPONSE 恢复原 Iteration，不重新调用模型。
 - 同一响应的 ToolCall 按原顺序处理，前序结果不可丢失。
+- 模型/工具 adapter 响应 token 后抛 `CancellationRequestedException`，停止剩余真实 ToolCall；模型阶段未追加 Assistant entry 时不生成结果，工具阶段已追加时由 core 为未完成调用补标准取消 ToolResult以维持配对。
 
 ### 6.2 Agent 定义与定义快照
 
@@ -636,11 +653,12 @@ while iterationNo < maxIterations:
 
 - `maxIterations` 是 runtime 配置，默认 30。
 - 最后一个允许的 Iteration 提示模型直接输出最终结论且不再调用工具，不创建第 `maxIterations + 1` 个 Iteration；若模型仍返回 ToolCall，则不执行工具并逐个补齐“达到最大轮次，强制结束”。
-- Assistant ToolCall 与 ToolResult 一一匹配。
+- Assistant ToolCall 与 ToolResult 一一匹配；工具阶段取消时，core 为当前及剩余未完成调用补“请求已取消，工具未执行完成”结果后结束，不进入下一模型调用。
 - 一个工具执行异常只生成该工具的模型可见 ToolResult，不终止 Turn，由下一 Iteration 的模型决定后续行为。
 - 多 ToolCall 按模型响应顺序处理。
 - 禁用工具不进入模型工具列表；执行前二次校验仅防御伪造或过期 ToolCall。
 - END_TURN 遇到未处理 ToolCall 时，为当前及剩余调用按原 toolCallId/name 补内容为“达到最大轮次，强制结束”的结果，不增加自定义 code/payload，也不运行其 PRE/POST Hook。
+- 状态机合成 ToolResult 由 core 内部唯一 `ToolResultFactory` 生成；确认拒绝、END_TURN 和请求取消不在 kit 或分支代码中重复构造。
 
 ### 8.3 模型调用前压缩门
 
@@ -689,7 +707,7 @@ resolve ToolCall
 
 模型只提供工具参数。MCP 不接收 sessionId、用户信息、Agent 信息或其他隐式 ToolExecutionContext；本地工具可以通过显式中立 ToolExecutionContext 获得必要上下文。
 
-`ToolExecutionObserver` 是 core-extension 接口，由 core 在调用工具前创建并绑定当前请求的 `AgentEventPublisher`。本期 allowlist 仅包含 `INVOCATION_DECLARED`、`INVOCATION_CHANGE`；`END`、`ASK_HUMAN`、`TOOL_CONFIRMATION`、流内容和其他事件均被拒绝。工具不能取得底层 Publisher。observer 不进入 SessionSnapshot，跨请求恢复时由 core 重新创建。
+`ToolExecutionObserver` 是 core-extension 接口，由 core 在调用工具前创建并绑定当前请求的 `AgentEventPublisher`。本期 allowlist 仅包含 `INVOCATION_DECLARED`、`INVOCATION_CHANGE`；`END`、`ASK_HUMAN`、`TOOL_CONFIRMATION`、流内容和其他事件均被拒绝。工具不能取得底层 Publisher。observer 与 `ToolExecutionContext` 暴露同一请求级 `CancellationToken`，adapter 必须把底层可取消 handle 注册为 command；observer 和 token 都不进入 SessionSnapshot，跨请求恢复时由 runtime/core 重新创建。
 
 ### 8.5 HUMAN_RESPONSE 恢复
 
@@ -764,6 +782,7 @@ flowchart TD
 
 - core 接管执行后，由 ApexAgent 在当前 SSE 传输正常完成、失败或挂起退出时请求发布 END。
 - Agent 尚未构造成功时由 runtime 使用请求级 Once Publisher 收口；线程池拒绝时由 platform 调用 `ApexAgentExecution.cancelBeforeStart()` 收口。
+- SseEmitter Publisher 对 END 只执行 send；execution terminator 先置 TERMINATED，再 complete emitter，因此正常 completion callback 不会反向发出取消命令。
 - runtime 为每次执行创建独立 `OnceAgentEventPublisher`；END 幂等状态属于该请求，不能存放在共享 runtime、Session 或 Builder Publisher 中。
 - END 只代表本次 SSE 传输结束，不表示挂起的业务 Turn 已完成。
 
@@ -840,8 +859,10 @@ runtime 的 `SessionExecutionCoordinator` 是唯一并发正确性来源：
 - `newAgent`/`resumeAgent` 在返回 `ApexAgentExecution` 前同步获取 `SessionExecutionLease`，取得 lease 后才调用 core Factory；由 Factory 通过端口加载快照并创建 core Agent。
 - 第二个并发执行在 runtime API 返回前抛出中立 `SessionBusyException`。
 - `ApexAgentExecution` 持有 core Agent、请求级 Once Publisher 与 lease；`run()` 在 finally 释放。
-- 线程池拒绝或尚未启动时调用 `cancelBeforeStart()`，幂等发布 END 并释放；`close()` 是最后兜底。
-- Agent 构造失败、再次挂起、Publisher 异常、取消和正常完成均只释放一次。
+- 线程池拒绝或尚未启动时调用 `cancelBeforeStart()`，先由 core 把已准备的 Session/Turn 保存为 CANCELLED，再幂等发布 END 并释放；`close()` 是最后兜底。
+- execution 状态为 PREPARED、RUNNING、CANCEL_REQUESTED、TERMINATED。`cancel()` 在 PREPARED 立即收口，在 RUNNING 只发出请求 token 的取消命令并返回；`close()` 委托 `cancel()`，不能忽略运行中执行。
+- Agent 构造失败、再次挂起、Publisher 异常、取消和正常完成均只释放一次；RUNNING 取消不能提前发布 END 或释放 lease，必须由实际执行线程 finally 收口。
+- runtime 维护活动 execution 注册表；句柄在 API 返回前登记、终止后注销。runtime close 原子拒绝新登记，向全部活动 execution 发出 `cancel()` 后返回，不等待、不设置取消超时或 grace period。
 - LockEntry 必须稳定管理，不能在仍有持有者或竞争者时创建同 key 的第二把锁。
 
 platform 不维护独立的 `runningAgents/sessionLocks`；它在响应提交前同步调用 runtime API，从而让入口快速拒绝与 runtime 最终保护使用同一 lease 语义。
@@ -869,6 +890,8 @@ runtime 实现 `AutoCloseable`，拥有并关闭自身创建的：
 未配置 MCP/SubAgent 时不得创建对应资源。单个 MCP/SubAgent 初始化失败时记录 warn，关闭本次失败产生的资源并在 `ToolAvailabilityProvider` 中登记来源范围、工具名和原因；不提供策略开关，健康集成和 runtime 启动不受影响。
 
 不可用工具不得形成新的活动绑定。新 session 的定义或 AGENT_BUILD 新增绑定命中不可用状态时，core 构造失败；已有 session 的旧绑定转为 `HistoricalToolBinding`，从有效定义、session `enabledTools` 和请求级 ToolCatalog 移除。历史定义投影及既有 ToolCall/ToolResult 只读保留，不向模型暴露、不允许执行，也不在健康恢复后自动启用。
+
+runtime close 的资源顺序为：拒绝新 execution -> 向活动 execution 发取消命令 -> 最后一个 execution 注销后关闭 SubAgent、MCP、模型摘要客户端、executor/scheduler、repository 等自有共享资源。无活动 execution 时同步关闭；有活动 execution 时 close 发完命令即返回，不能提前关闭仍被执行使用的共享资源。默认模型 subscription、MCP call、HTTP future/body stream 必须主动响应 token；不合作的自定义工具可能长期保留 execution、lease 和共享资源，这是本期明确边界。
 
 ## 10. platform 架构
 
@@ -900,6 +923,7 @@ platform 负责参数校验、用户提取、请求级 SSE Publisher 创建、�
 - core 同步构造/恢复准备失败时，runtime 已通过当前 Once Publisher 发布唯一 `END` 并释放 lease；platform 记录错误、完成 emitter 并以 HTTP 200 `text/event-stream` 返回该仅含 END 的流。Header/请求字段错误仍为 HTTP 400，busy 仍为 409 且不发送 END。
 - 取得 execution 后才提交 SSE 响应并异步调用 `execution.run()`。
 - 线程池拒绝时调用 `execution.cancelBeforeStart()`，确保 END 和 lease 各自只收口一次。
+- emitter completion/timeout/error 通过原子绑定的 execution 调用非阻塞 `cancel()`；callback 早于句柄绑定时由 Publisher closed 标志和绑定后二次检查补发。platform 不直接释放 lease 或维护取消 token。
 - platform 不保存另一套 session 并发占用状态。
 
 Agent 列表调用 `AgentDefinitionProvider.listAgents()` 直接读取轻量元数据，不逐个加载完整 AgentDefinition，也不再绑定全局 Spring 配置对象。
@@ -1007,8 +1031,9 @@ platform 只支持 PostgreSQL，建议由 Flyway 管理：
 - stdio 由 runtime 负责进程启动、初始化、超时和关闭。
 - SSE 由 runtime 负责连接、重连、超时和关闭。
 - MCP 工具统一适配为 AgentTool。
-- MCP 调用只传最终工具参数，不泄漏 session、用户、Agent 或 ToolExecutionContext。
+- MCP 调用只传最终工具参数，不泄漏 session、用户、Agent 或 ToolExecutionContext；adapter 仅在本地读取 context 的 token 并注册当前 call handle cancel。
 - Client 缓存按 runtime 实例和 server 定义隔离。
+- token 取消时停止活动 call 的读取/重连并抛 `CancellationRequestedException`，不能转换成普通工具失败。
 
 ### 12.2 HTTP SubAgent
 
@@ -1022,6 +1047,7 @@ SubAgent 不是特殊 Agent 类型，而是一个指向普通远程 Agent 的工
 - ARTIFACT 事件保持当前无生产者/忽略语义。
 - 收到远端 END 后只结束当前工具调用；SubAgent 工具不得通过 observer 发布父请求 END。
 - 通过最大调用深度与 agentKey 调用链检测阻止递归闭环。
+- HTTP future 和 response body/stream close 注册到父 execution token；取消时停止解析/转发并抛 `CancellationRequestedException`。
 
 ## 13. 协议兼容
 
@@ -1211,6 +1237,7 @@ memory 参与父 POM 编译与单元测试，但不进入 platform 默认启动�
 - ReAct 多 Iteration、多 ToolCall、最后一次模型最终结论约束和最大 Iteration 强制收口。
 - 工具三层状态和执行前二次校验。
 - 模型异常后三层 `FAILED` 并直接返回；工具异常转换为 ToolResult 后继续。
+- 模型阶段取消不产生孤立结果；工具阶段取消为已追加 Assistant entry 的未完成调用补标准取消 ToolResult，状态为 CANCELLED且不再执行 Hook/真实工具/模型。
 - Hook 分型结果、原子修改、执行异常 warn 后跳过和 END_TURN。
 - ToolExecutionObserver 只转发 allowlist 内的进度事件，并拒绝 END。
 - 每个 Iteration 的压缩门只判定一次。
@@ -1234,6 +1261,7 @@ memory 参与父 POM 编译与单元测试，但不进入 platform 默认启动�
 - 多 ToolCall 中前序结果保留。
 - 收口后清除唯一挂起对象。
 - 工具确认拒绝结果固定为“用户拒绝执行”；END_TURN 补齐结果固定为“达到最大轮次，强制结束”，均保留原 toolCallId/name 且无自定义 code/payload。
+- 拒绝、强制结束和取消三类固定结果均由 core 同一 `ToolResultFactory` 生成；kit 只产生确认介入请求，源码/artifact 不包含等价固定结果工厂。
 
 ### 18.4 平台与协议测试
 
@@ -1245,6 +1273,9 @@ memory 参与父 POM 编译与单元测试，但不进入 platform 默认启动�
 - 并发冲突在 Controller 返回 emitter 前同步产生，NEW/HUMAN_RESPONSE 使用同一 lease 空间。
 - 每个请求和每次恢复使用独立 emitter，事件不串写。
 - 线程池拒绝调用 `cancelBeforeStart`，END 与 lease 均只收口一次。
+- emitter 在 execution 绑定前/后完成、超时或报错均会发出一次取消命令；RUNNING 的 lease 只在 run finally 释放。
+- 模型 subscription、MCP call、HTTP SubAgent 在 token 取消时主动 dispose/cancel/close；取消不按工具失败处理，三层状态为 `CANCELLED`。若 Assistant ToolCall 已追加，未完成调用各补一次标准取消 ToolResult。
+- runtime close 发出活动 execution 的取消命令后立即返回，无取消超时/grace period；close 与新登记竞态不漏执行。
 - SSE Golden File。
 - END 只发送一次且精确 JSON 不变。
 - core 同步构造/恢复准备失败返回 HTTP 200 的仅 END SSE；断言无 STREAM_CONTENT、交互、工具或错误事件。参数错误 400、busy 409 两条路径均不发送 END。
@@ -1281,3 +1312,7 @@ memory 参与父 POM 编译与单元测试，但不进入 platform 默认启动�
 22. 默认 lease 只保证单进程安全；本期 platform 只支持单实例部署。
 23. 只有 AGENT_BUILD 可以修改 Agent 定义；其他生命周期只能修改其结果类型允许的运行态对象。
 24. 请求参数错误返回 400、session busy 返回 409；Publisher 已绑定后的 core 构造/恢复准备失败返回只含一个精确 END 的 SSE。
+25. 每个 execution 只有一个请求级取消 token；运行中 cancel/close 只发命令，底层默认 adapter 主动取消，END 与 lease 由执行 finally 收口。
+26. runtime close 不等待取消完成且不使用超时/grace period；不合作扩展可能使 lease 和共享资源长期保留。
+27. 状态机合成 ToolResult 只由 core 唯一工厂产生；kit 不拥有拒绝、强制结束或取消结果。
+28. Maven POM 按源码/测试直接使用声明项目依赖；protocol 测试不回指 common，消费者 JsonUtils 验证位于 common，reactor 图始终无环。

@@ -17,6 +17,7 @@
 - Hook 分型结果怎样原子应用，人工介入怎样恢复到同一个 ToolCall。
 - 两个 Repository 不提供跨库事务时，怎样通过稳定 ID 和幂等写降低部分提交风险。
 - 同步 HTTP 409、异步执行、请求级 END 和 session lease 怎样由一个所有权模型收口。
+- 运行中取消怎样通过请求级 token 主动传递到模型、HTTP/MCP 和工具，同时不提前释放 lease。
 - MCP、SubAgent、Skill、Memory 如何在不反向污染 core 的前提下迁移。
 
 ## 2. 输入与优先级
@@ -41,6 +42,8 @@
 - 定义和快照 schema 首版固定为字符串 `1.0.0`；不实现升级链，但遇到非 `1.0.0` 必须显式拒绝，不能误读。
 - runtime 默认 session lease 是立即失败的进程内互斥，不排队；platform 本期只允许单实例。
 - 两个 Repository 之间不增加事务端口；每条消息、ToolResult 和压缩操作必须有稳定幂等键，以便部分提交后安全重试或明确失败。
+- Maven 依赖按源码直接使用声明；protocol 测试不得回指 common，跨模块 JsonUtils 验证由 common 消费测试承担。
+- 状态机合成 ToolResult 只由 core 内部唯一工厂生成；kit 不拥有拒绝或强制结束结果。
 
 ## 4. 当前源码事实校准
 
@@ -65,7 +68,7 @@
 | [04-core-extension模块详细设计](04-core-extension模块详细设计.md) | EXT-01～03 | 纯接口端口和类型元数据 |
 | [05-core模块详细设计](05-core模块详细设计.md) | CORE-01～07C | 定义构造、生命周期、ReAct、压缩、工具和恢复 |
 | [06-kit模块详细设计](06-kit模块详细设计.md) | KIT-01～03 | ask_human、确认、截断和组合器 |
-| [07-runtime模块详细设计](07-runtime模块详细设计.md) | RUN-01～08 | Builder、适配器、存储、lease、Skill、MCP、SubAgent |
+| [07-runtime模块详细设计](07-runtime模块详细设计.md) | RUN-01～08 | Builder、适配器、存储、execution/取消、lease、Skill、MCP、SubAgent |
 | [08-platform模块详细设计](08-platform模块详细设计.md) | PLAT-01～04 | Spring Boot、HTTP/SSE、PostgreSQL 和切换验收 |
 | [09-memory模块详细设计](09-memory模块详细设计.md) | MEM-01～03 | 长期 Memory 与 Skill Learning 封存 |
 | [10-清理与整体验收详细设计](10-清理与整体验收详细设计.md) | CLEAN-01～03 | 删除旧链路、命名收口和交付证据 |
@@ -104,5 +107,6 @@
 - MCP/SubAgent 不可用时禁止新活动绑定；已有绑定仅保留只读历史并从模型与执行路径移除，既有 ToolCall/ToolResult 保留展示但不可执行。
 - 请求级 Publisher 已绑定后，core 同步构造/恢复准备失败由 platform 返回仅含一个既有 END 的 SSE；参数错误仍为 400，session busy 仍为 409 且无 END。
 - 只有 AGENT_BUILD 可以修改 Agent 定义；其他生命周期只能修改各自结果族允许的运行态。
+- 运行中 `cancel()`/`close()` 只发请求级取消命令并立即返回，不设置超时或 grace period；默认 adapter 主动取消底层调用，END 与 lease 由实际执行 finally 收口。
 
 其余仍待确认的条目见 [冲突、风险与待确认项](11-冲突风险与待确认项.md)。

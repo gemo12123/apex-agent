@@ -14,8 +14,8 @@
 - **具体执行内容**：
   1. 依据 common 类型定义端口签名，不携带 Spring AI、SSE、数据库或实现对象。
   2. 使事件端口只接收 protocol `AgentMessage`。
-  3. 定义 `ToolExecutionObserver`，并把它作为 `AgentTool.execute` 的显式参数；ToolExecutionContext 不反向引用 core-extension。
-  4. 明确 observer 本期只允许 INVOCATION_DECLARED/INVOCATION_CHANGE，不能发布 END、交互事件、流内容或其他事件，也不暴露底层 AgentEventPublisher。
+  3. 定义 `ToolExecutionObserver`，并把它作为 `AgentTool.execute` 的显式参数；ToolExecutionContext 不反向引用 core-extension，但携带 common CancellationToken。
+  4. 明确 observer 本期只允许 INVOCATION_DECLARED/INVOCATION_CHANGE，不能发布 END、交互事件、流内容或其他事件，也不暴露底层 AgentEventPublisher；Model/Tool observer 暴露同一 CancellationToken，替代只能轮询的 `isCancelled()`。
   5. 区分单工具执行、工具集合解析和 Agent 定义加载。
   6. `AgentDefinitionProvider` 同时声明 `load(agentKey)` 与 `listAgents()`；后者直接返回 `List<AgentMetadata>`，不得通过逐个加载完整定义实现。
   7. `ToolAvailabilityProvider` 只返回 common 的不可变健康快照，结构化区分精确工具名、来源 scope 和普通配置漂移；端口本身不得修改定义或 session。
@@ -26,6 +26,7 @@
   - 不存在 `default` 方法、实现类、静态工厂或 Spring 注解。
   - Fake 实现可在 core 测试中使用且不启动 Spring。
   - AgentTool 可在执行期间通过 observer 上报允许的进度事件，且接口层没有 Publisher 或 SSE 依赖。
+  - 默认 adapter 能向 token 注册底层取消 command；取消后注册立即执行，不能仅依赖下一次轮询。
   - Agent 列表通过 `listAgents()` 获取轻量元数据，无需 platform 读取具体 Spring 配置对象或完整 AgentDefinition。
   - availability 快照不可变；ToolProvider 发现初始化失败后先发布快照再返回健康工具，core 不会观察到“缺失但无原因”的中间态。
 - **限制条件或注意事项**：数据库版 AgentDefinitionProvider 本期不实现；端口不得为当前实现便利而暴露 `ApplicationContext`、`SseEmitter`、`ToolCallback` 或 ORM 实体。
@@ -62,7 +63,7 @@
 - **具体执行内容**：
   1. 扫描全部顶级类型并断言为 interface。
   2. 检查无 Spring 注解、无 `default` 方法、无实现类。
-  3. 检查依赖只到 common（及其传递的 protocol）和允许的 JDK 类型。
+  3. 检查直接项目依赖精确为 protocol、common；接口直接引用 AgentMessage 时必须直接声明 protocol，不能依靠 common 传递。
   4. 检查接口没有泄漏 Spring AI、Servlet、ORM、MCP 客户端类型。
 - **预期产出**：core-extension 自动架构守卫。
 - **验收标准**：

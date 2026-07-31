@@ -4,6 +4,8 @@
 
 `apex-agent-memory` 封存长期记忆、会话搜索和 Skill Learning。它参与父构建，但不在 runtime/platform 默认依赖图中；普通 Session/Conversation连续性和普通 Skill 不属于本模块。
 
+memory 的直接项目依赖保持 common、core-extension；当前源码不直接引用 protocol 类型，因此 protocol 只作为 common 的传递依赖，不重复声明。
+
 目标包可沿用 `org.gemo.apex.memory` 子域名，减少无关重命名，但所有对 core/runtime/platform 具体类型的引用必须改为 common/extension。
 
 ## MEM-01 分离并迁移长期 Memory 与会话搜索

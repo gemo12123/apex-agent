@@ -4,6 +4,8 @@
 
 `apex-agent-runtime` 把 core、kit 和默认端口实现装配成无需 Spring IoC 的可运行库。它可以依赖 Spring AI API，但所有对象都通过普通构造器/Builder 创建；请求级 Publisher、execution 和 session lease 不进入共享 runtime 状态。
 
+runtime POM 直接声明 protocol、common、core-extension、core、kit；这些模块的类型均被 runtime 源码直接使用，不能依靠 core/kit 的传递依赖。
+
 目标包：`api`、`builder`、`registry`、`definition`、`model.springai`、`tool`、`repository.memory`、`conversation`、`event`、`execution`、`skill`、`mcp`、`subagent`、`resource`。
 
 ## RUN-01 实现 ApexAgentRuntime Builder、注册表与定义 Provider
@@ -109,7 +111,7 @@ runtime 只装配端口并调用 core 工厂，AGENT_BUILD 与定义校验仍在
 1. ModelRequest -> Spring AI messages/options/tool definitions。
 2. 显式关闭 Spring AI 自动工具执行，防止绕过 core PRE/POST Hook。
 3. 订阅流，将正文/tool-call delta 转 ModelStreamChunk。
-4. observer 取消/抛错时 dispose subscription。
+4. 订阅建立后立即通过 `observer.cancellationToken().onCancel(subscription::dispose)` 注册主动取消动作；observer 抛错时也发出同一 token 的取消命令。
 5. 聚合最终 Spring AI response -> common ModelResponse。
 
 ### 接口和数据结构
@@ -125,10 +127,11 @@ Mapper 覆盖 System/User/Assistant/ToolResponse 角色；Assistant 工具调用
 - arguments 原始 JSON必须解析为对象 Map；保留原始字符串可放 metadata 供诊断，不作为执行输入。
 - 流最终只有正文时用累计文本构造 response；只有 ToolCall 时也合法；二者都无则模型响应非法。
 - Gateway 内部重试在 adapter 内使用同一个 request/observer，不能回调 core lifecycle。
+- 每次重试开始前检查 token；活动 subscription 的 registration 在该次订阅结束时注销，避免取消命令作用到已结束对象。
 
 ### 异常处理
 
-- subscription error/interrupt/empty response 包装 ModelInvocationException。
+- subscription error/interrupt/empty response 包装 ModelInvocationException；token 已取消导致的终止统一转换为 `CancellationRequestedException`，由 core 记录 `CANCELLED`。
 - observer 发布失败立即取消流并传播原异常。
 - ToolCall 参数 JSON 非对象、重复 ID或缺 name 包装 InvalidModelResponseException。
 
@@ -137,7 +140,7 @@ Mapper 覆盖 System/User/Assistant/ToolResponse 角色；Assistant 工具调用
 - 使用真实当前版本 Spring AI Message/ChatResponse 样本 round-trip。
 - text、tool-only、text+multi-tool、ToolResponse history。
 - 自动工具执行关闭的 spy ToolCallback测试。
-- 流取消、内部重试、错误和空响应。
+- token 在订阅建立前/后取消、内部重试、错误和空响应；两种时序都断言活动 subscription 的 dispose 被调用。
 - core/common 无 Spring AI import，runtime dependency convergence。
 
 ### 架构符合性
@@ -215,37 +218,55 @@ ConversationState {
 
 ### 涉及模块/类
 
-目标：`runtime.execution.ApexAgentExecution`、`ExecutionState`、`ExecutionTerminator`。
+目标：`runtime.execution.ApexAgentExecution`、`ExecutionState`、`ExecutionTerminator`、`RuntimeCancellationSource`、`ActiveExecutionRegistry`。
 
 ### 核心流程
 
-- 初态 PREPARED。
-- run CAS PREPARED->RUNNING，调用 ApexAgent.run；finally terminateOnce。
-- cancelBeforeStart CAS PREPARED->TERMINATED，END+release。
-- close 若 PREPARED 则等价 cancel；RUNNING 不抢占执行，仅由 run finally终止；TERMINATED no-op。
+- 初态 PREPARED；execution 构造完成后先登记到 runtime 活动表，再返回调用方。
+- `run()` CAS PREPARED->RUNNING，调用 ApexAgent.run；finally 调用 `terminateOnce`。
+- `cancel()` 在 PREPARED 时先 CAS 为 CANCEL_REQUESTED，使并发 `run()` 不能启动，再发出 token 命令、调用 `ApexAgent.cancelBeforeRun()` 保存 CANCELLED 并立即收口；在 RUNNING 时 CAS 为 CANCEL_REQUESTED、发出 token 命令后立即返回，实际执行仍由 run finally 收口。
+- `cancelBeforeStart()` 只接受 PREPARED，供线程池拒绝路径表达明确意图；其终止效果与 PREPARED 状态的 `cancel()` 一致。
+- `close()` 委托 `cancel()`，因此 RUNNING 也会收到取消命令；TERMINATED no-op。
 
 ### 接口和数据结构
 
-`ExecutionTerminator` 持有 Runnable/接口回调：publishEnd、close request resources、release lease；用 AtomicBoolean 执行一次。Execution 不把底层 SseEmitter 暴露。
+```java
+enum ExecutionState { PREPARED, RUNNING, CANCEL_REQUESTED, TERMINATED }
+
+final class ApexAgentExecution implements AutoCloseable {
+    AgentRunOutcome run();
+    boolean cancel();
+    boolean cancelBeforeStart();
+    @Override void close();
+}
+```
+
+`RuntimeCancellationSource` 内部持有原子 cancelled 标志和线程安全 callback 集合，对 core/adapter 只暴露 common `CancellationToken`。`ExecutionTerminator` 持有 publishEnd、close request resources、release lease、unregister execution 回调，并用 AtomicBoolean 执行一次。Execution 不把底层 SseEmitter 暴露。
 
 ### 关键实现逻辑
 
 - 第二次 run 抛 IllegalExecutionStateException，不静默并行。
-- cancelBeforeStart 在 RUNNING/TERMINATED 返回 false，不重复 END。
+- 首次 `cancel()` 负责发出取消命令；并发或重复 cancel 返回 false，不重复执行 callback。`cancelBeforeStart()` 在 RUNNING/CANCEL_REQUESTED/TERMINATED 返回 false。
+- `cancel()` 返回 true 只表示命令首次发出。若 core 已在相邻竞态中提交自然终态，命令不回滚或重写该终态；core 在终态前观察到 token 时才保存 CANCELLED。测试允许该线性化边界的两种合法结果，但 END/release/callback 次数必须唯一。
 - run outcome/异常对调用者可见；finally 收口异常作为 suppressed，不覆盖主异常。
-- close 不等待长期运行，避免死锁；调用方取消运行中模型依赖 observer cancellation/上层线程中断策略，非本任务范围。
+- 取消是发命令而非等待协议：RUNNING 状态不在 cancel/close 线程中发布 END、关闭请求资源或释放 lease，避免仍运行代码使用已释放资源。
+- `terminateOnce` 固定顺序为发布 END、关闭请求资源、释放 lease、从活动表注销；前一步失败不阻断后一步。
+- `terminateOnce` 在调用上述外部回调前先 CAS 到 TERMINATED；否则 END/complete 触发的 emitter completion callback 会在 RUNNING 状态反向调用 cancel，污染正常 outcome。
+- runtime 不设置取消超时或 grace period，也不把线程中断当作统一语义；默认适配器必须注册底层取消动作，自定义不合作工具可能长期占用 execution/lease，这是公开限制。
 
 ### 异常处理
 
 - Agent.run 异常原样传播，terminator 必执行。
+- PREPARED 取消保存失败仍执行 terminator；保存异常为主异常，END/close/release 失败按 suppressed 或日志规则附加。
 - END publish失败仍继续 release lease。
 - lease release失败记录/传播为终止异常，但幂等状态保持 TERMINATED。
 
 ### 测试方案
 
-- 多线程 run/run、run/cancel、cancel/close、close/close 竞态。
+- 多线程 run/run、run/cancel、cancel/close、close/close 竞态；RUNNING 的 cancel 立即返回且底层 callback 精确执行一次。
+- terminate 先置 TERMINATED 再 END/complete；模拟 completion callback 回调 cancel，断言返回 false、token 未被正常收口误取消。
 - 正常、Agent异常、END异常、release异常的调用次数和 suppressed。
-- 未 run 的 try-with-resources 能释放。
+- 未 run 的 try-with-resources 会把 Session/Turn 记为 CANCELLED 并释放；RUNNING close 不提前释放 lease，run finally 才 END/release/unregister。
 
 ### 架构符合性
 
@@ -286,7 +307,7 @@ interface SessionExecutionLease extends AutoCloseable {
 - 不排队、不 blocking wait；已有执行立即 busy，满足 HTTP 409。
 - release 必须校验同一 entry/token；旧 lease 不能删除新持有者。
 - lease 内 AtomicBoolean 保证多次 release 只有第一次进入 map compute。
-- runtime close 检查活动 lease；默认记录 warn，不强制破坏正在运行的 execution，关闭顺序先拒绝新请求再等待/取消由 RUN-08 定义。
+- runtime close 通过 RUN-04A 的活动 execution 注册表发出取消命令；协调器不直接释放活动 lease，实际 release 仍只由 execution terminator 完成。
 
 ### 异常处理
 
@@ -320,8 +341,10 @@ runtime 成为唯一并发正确性来源；默认实现明确不宣称跨实例
 acquire lease
   -> choose explicit publisher or factory.create
   -> wrap Once
-  -> build request AgentPorts
+  -> create request RuntimeCancellationSource
+  -> build request AgentPorts with source.token
   -> core factory createNew/createResumed
+  -> create and register ApexAgentExecution
   -> return ApexAgentExecution
 ```
 
@@ -345,6 +368,7 @@ Once 状态 OPEN/ENDED；首个 END CAS 后转发，后续 END no-op，END 后�
 - lease 必须最先获取，使同 session 的构造读取也串行。
 - Factory 每次调用创建新 Print Publisher，Builder 不接受共享有状态 Publisher。
 - ToolExecutionObserver 绑定本次 Once，不持有 runtime 默认 Publisher。
+- ModelStreamObserver、ToolExecutionObserver、ToolExecutionContext 必须引用该 execution 的同一 token；Publisher 失败也通过该 source 发出取消命令。
 - core 构造/恢复准备失败时 runtime 只能发送 protocol 既有的精确 END，随后抛 `AgentPreparationException(endPublished=true)`。platform 必须返回已完成 emitter，不得映射为新协议错误、HTTP 4xx/5xx 或追加 STREAM_CONTENT。
 - Once 的 END delegate 失败也标记 ENDED，防止多路重复写坏连接。
 
@@ -352,13 +376,14 @@ Once 状态 OPEN/ENDED；首个 END CAS 后转发，后续 END no-op，END 后�
 
 - SessionBusyException 在创建 Publisher/core 前同步抛，不发送 END。
 - publisher factory 失败只 release 并传播；core factory 失败执行 best-effort END、publisher complete/close、release，主异常作为 `AgentPreparationException` cause 保留。
-- cancelBeforeStart 复用 execution terminator。
+- cancel/cancelBeforeStart/close 复用 execution cancellation source 与 terminator；只有执行真正退出或从未启动时才运行 terminator。
 
 ### 测试方案
 
 - new/resume 返回前 lease 已持有；同 session 冲突。
 - 显式/默认 Publisher每请求独立，连续 HUMAN_RESPONSE 不复用 END状态。
 - core 构造/恢复准备失败断言事件列表精确等于 `[END]`、`endPublished=true`、release一次；publisher factory失败断言无虚假 END标志。cancel/正常/挂起竞争下 END和release各一次。
+- execution 返回前已登记；准备失败不残留登记。Publisher 失败会触发 token；执行 finally 后活动表清零。
 - Tool observer 事件进当前 Publisher，禁止 END。
 
 ### 架构符合性
@@ -440,7 +465,7 @@ Once 状态 OPEN/ENDED；首个 END CAS 后转发，后续 END no-op，END 后�
 
 `McpTransport` 是 runtime 内接口，包含 connect/listTools/call/close；不进入 core-extension。ServerDefinition 指定 id、transport type、command/args 或 endpoint、timeouts、环境变量白名单。
 
-`McpAgentToolAdapter.execute` 忽略 ToolExecutionContext业务字段，只使用 ToolCall.arguments；observer 默认不发布事件。
+`McpAgentToolAdapter.execute` 的业务请求只使用 ToolCall.arguments，不把 ToolExecutionContext 隐式字段发送到 MCP；但必须使用 `context.cancellationToken()` 注册当前 MCP call handle 的 cancel 动作。observer 默认不发布事件。
 
 ### 关键实现逻辑
 
@@ -448,6 +473,7 @@ Once 状态 OPEN/ENDED；首个 END CAS 后转发，后续 END no-op，END 后�
 - client cache key 包含 runtime instance + server definition fingerprint，不使用 static cache。
 - stdio 用 ProcessBuilder 参数列表，不拼接 shell字符串；只传显式环境变量。
 - SSE endpoint 校验 URI scheme，连接/重连有上限和退避，close 取消调度。
+- 每次 call 创建独立可取消 handle；发送前检查 token，创建后立即注册 `handle.cancel()`，调用结束注销 registration。取消时停止重连/读取并抛 `CancellationRequestedException`，不能转换成普通“工具不可用” ToolResult。
 - 初始化失败关闭该 server 已创建资源，按 `(MCP, serverId, stableNamePrefix)` 和已知精确工具名原子更新 ToolAvailabilitySnapshot，健康 server 继续。
 - runtime 不直接改 AgentDefinition 或 SessionSnapshot。core 对新绑定抛 `UnavailableToolBindingException`；对已有 session 的旧绑定生成 `HistoricalToolBinding` 并退出有效集合。历史消息和旧定义投影保留，只读且不可执行。
 - 失败工具不能进入模型列表；已挂起该工具恢复时由 core生成不可用 ToolResult。
@@ -455,13 +481,13 @@ Once 状态 OPEN/ENDED；首个 END CAS 后转发，后续 END no-op，END 后�
 ### 异常处理
 
 - init失败 warn并降级，无 fail-fast开关。
-- 单次调用 timeout/协议错误抛 ToolExecutionException，由 core转 ToolResult。
+- 单次调用 timeout/协议错误抛 ToolExecutionException，由 core转 ToolResult；请求 token 取消使用 `CancellationRequestedException`，由 core 终止执行。
 - close聚合异常并继续关闭其他资源。
 - 日志不输出完整工具参数、环境变量或用户上下文。
 
 ### 测试方案
 
-- Fake stdio process/SSE server 的 initialize/list/call/timeout/close。
+- Fake stdio process/SSE server 的 initialize/list/call/timeout/close；活动 call 取消时 handle.cancel 精确一次且不再重连。
 - 参数泄漏测试：请求 JSON只有工具 arguments。
 - cache隔离、未配置零资源、runtime close。
 - 一个 server init失败、另一个正常：新绑定拒绝；旧绑定历史记录幂等、有效集合清理、历史消息不变；健康工具可用。
@@ -506,10 +532,11 @@ SubAgentDefinition 含 targetAgentKey、endpoint、description、timeout；工�
 - 远端 ASK_HUMAN/TOOL_CONFIRMATION 无法由父请求安全恢复子 session；首版明确中止子调用并返回“子智能体请求人工介入，当前工具调用不支持透传恢复”的 ToolResult。不能把交互事件透传给父前端造成错误 session 关联；该限制列入风险 R-12。
 - INVOCATION only经 core observer allowlist；STREAM_CONTENT不透传而聚合。
 - init失败关闭 client资源，按 `(SUB_AGENT, sourceId, exactToolName)` 更新 availability 并继续其他工具；runtime 不修改定义/session。新绑定由 core拒绝，旧绑定由 core迁移历史；调用期超时转换 ToolResult。
+- HTTP 请求创建后立即把 `CompletableFuture.cancel(true)` 与 response body/stream close 注册到请求 token；任一阶段收到命令都停止读取，不再转发 INVOCATION，并抛 `CancellationRequestedException`。
 
 ### 异常处理
 
-- HTTP非2xx、SSE malformed、无 END、timeout/cancel都抛 ToolExecutionException。
+- HTTP非2xx、SSE malformed、无 END、业务 timeout 抛 ToolExecutionException；请求取消单独抛 `CancellationRequestedException`，不得由 adapter 伪装成普通失败 ToolResult。core 可按取消状态机为已追加 Assistant entry 的未完成调用统一补标准取消结果。
 - 远端未知 event_type 记录类型并失败，不静默丢关键语义。
 - recursion/depth 在发 HTTP 前拒绝。
 - 日志不输出 X-User-Id或正文。
@@ -519,7 +546,7 @@ SubAgentDefinition 含 targetAgentKey、endpoint、description、timeout；工�
 - 独立 child session、agentKey、X-User-Id、NEW payload。
 - SSE多行/分片、content聚合、invocation observer、artifact ignore、remote END不结束父请求。
 - ASK_HUMAN/CONFIRMATION显式转失败结果。
-- depth/agent闭环、timeout/cancel、malformed JSON。
+- depth/agent闭环、timeout、malformed JSON；token 在发请求前、等待响应和读取 body 三个阶段取消均主动 cancel/close 且停止事件转发。
 - init失败覆盖新绑定拒绝、旧绑定只读留痕/不可执行、健康 SubAgent 可用，以及 Fastjson源码/依赖清零。
 
 ### 架构符合性
@@ -534,15 +561,15 @@ SubAgent 仍是普通工具，协议复用 protocol，core 不感知父子关系
 
 ### 涉及模块/类
 
-`ApexAgentRuntime.close`、`ResourceRegistry`、RUN-01～07 全部默认实现、`runtime/src/test` integration、`runtime/examples` 或测试资源示例。
+`ApexAgentRuntime.close`、`ActiveExecutionRegistry`、`ResourceRegistry`、RUN-01～07 全部默认实现、`runtime/src/test` integration、`runtime/examples` 或测试资源示例。
 
 ### 核心流程
 
-runtime close：拒绝新 execution -> 等待配置的短 grace period -> 取消/关闭自有 execution资源 -> SubAgent -> MCP -> summary clients -> executors/schedulers -> repositories（若 AutoCloseable）。借用资源不关闭。
+runtime close：原子拒绝新 execution -> 快照活动 execution 并逐个调用 `cancel()` -> 若活动表为空则立即关闭自有共享资源；否则由最后一个 execution 注销时触发共享资源关闭。`close()` 在取消命令全部发出后返回，不等待 execution 结束，也不设置取消超时/grace period。借用资源不关闭。
 
 ### 接口和数据结构
 
-Builder 每个可关闭依赖必须显式 `ownedXxx` 或 `borrowedXxx`，默认调用者注入对象按 borrowed 处理，runtime 内创建按 owned。ResourceRegistry 按反向注册顺序关闭并聚合错误。
+Builder 每个可关闭依赖必须显式 `ownedXxx` 或 `borrowedXxx`，默认调用者注入对象按 borrowed 处理，runtime 内创建按 owned。`ActiveExecutionRegistry` 提供 register/unregister/snapshot，并与 accepting/closeRequested 原子协调，避免 close 与新 execution 登记竞态。ResourceRegistry 按反向注册顺序关闭并聚合错误，关闭顺序为 SubAgent -> MCP -> summary clients -> executors/schedulers -> repositories（若 AutoCloseable）。若 `close()` 时没有活动 execution，资源关闭同步执行且可向调用方抛 `RuntimeCloseException`；若需等最后一个 execution 注销后延迟关闭，调用方已返回，关闭异常只能按 runtimeId/resourceType 记录 error，不回抛到 execution 业务异常。
 
 示例覆盖：最小执行、显式 Publisher、ask_human 挂起/恢复、自定义 Tool/Hook、close。
 
@@ -550,13 +577,16 @@ Builder 每个可关闭依赖必须显式 `ownedXxx` 或 `borrowedXxx`，默认�
 
 - close 用 AtomicBoolean 幂等；close 后 new/resume 抛 RuntimeClosedException。
 - 未配置能力的 lazy supplier 不求值，线程/客户端为 0。
-- 活动 execution 的处理策略必须在 Builder契约明确；推荐 grace period 后触发 observer cancellation，但不能释放仍运行代码持有的 lease，最终 release仍由 execution。
+- close 对每个活动 execution 只发一次请求级取消命令，不等待、不提前释放 lease。默认模型、MCP、HTTP SubAgent adapter 必须主动取消底层调用；不合作的自定义工具可能使共享资源关闭和 lease 释放无限延后。
+- close 与 new/resume 通过活动表的同一原子门协调：关闭标志设置后不得登记新 execution；已经完成同步准备但登记失败的请求立即按 PREPARED cancel 收口。
 - integration初始化失败产生 unavailable snapshot；验证受影响新绑定失败、旧绑定转历史且从有效三层工具状态移除，健康 Agent 运行继续。恢复健康后旧 session 不自动回填 enabledTools。
-- artifact dependency tree 只含 core/kit及最小 Spring AI/JSON/HTTP需要，不含 platform/memory/Spring Boot starter。
+- artifact 直接项目依赖为 protocol、common、core-extension、core、kit，并只引入必要的 Spring AI/JSON/HTTP 外部库；不含 platform/memory/Spring Boot starter，dependency analyze 无 used-but-undeclared。
 
 ### 异常处理
 
-- close各资源失败聚合为 `RuntimeCloseException`，全部资源仍尝试。
+- 发出取消命令时的 callback 异常按 executionId/callbackType 记录 error，但继续通知同 token 的其他 callback 和其他 execution；`cancel()` 仍返回“是否首次发命令”的 boolean，`close()` 不因等待执行终止而阻塞。
+- runtime close 调用某个 PREPARED execution 的 `cancel()` 若因 `cancelBeforeRun()` 保存失败而抛错，必须记录后继续处理活动表其余项；全部取消命令尝试完成后把这类同步错误聚合进 `RuntimeCloseException`。活动 RUNNING execution 尚未退出本身不是 close 错误。
+- 无活动 execution 的同步资源关闭失败聚合抛 `RuntimeCloseException`；延迟关闭发生在最后一个 execution 注销线程，失败聚合后记录 error，不能覆盖该 execution 的主异常，且全部资源仍尝试。
 - 示例不依赖真实外部 MCP/Skill路径或网络。
 - runtime-only模型用 Fake/本地 deterministic gateway。
 
@@ -565,6 +595,9 @@ Builder 每个可关闭依赖必须显式 `ownedXxx` 或 `borrowedXxx`，默认�
 - 无 ApplicationContext 的 NEW、工具、两 Iteration、压缩、QUESTION恢复。
 - Print Publisher protocol Golden File。
 - close幂等、owned关闭、borrowed不关闭、关闭顺序、零可选资源。
+- 活动模型/MCP/HTTP 执行中 close：取消命令各一次、close 立即返回、lease 不提前释放；执行 finally 后注销并由最后一个注销触发共享资源关闭。
+- close 与 execution 登记竞态下不存在关闭后漏登记；不合作 Fake 工具证明 close 仍返回且其 lease 保持占用，明确无超时保证。
+- 多个 PREPARED execution 中一个取消保存失败时，其他 execution 仍收到取消；同步错误在命令遍历后聚合，lease/活动表无可收口项泄漏。
 - MCP/SubAgent部分 init失败仍完整执行。
 - dependency tree与线程/进程泄漏检查。
 

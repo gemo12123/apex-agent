@@ -2,9 +2,9 @@
 
 ## 模块设计定位
 
-`apex-agent-kit` 提供可被任何 runtime 注册的通用 AgentTool 和 LifecycleHook 实现，只依赖 core-extension 及其传递的 common/protocol。它不保存 Session、不发布事件、不解析 Spring Bean，也不拥有恢复状态机。
+`apex-agent-kit` 提供可被任何 runtime 注册的通用 AgentTool 和 LifecycleHook 实现，直接依赖 protocol、common、core-extension。展示 DTO、common 结果和扩展接口均为源码直接引用，不能依靠传递依赖。它不保存 Session、不发布事件、不解析 Spring Bean，也不拥有恢复状态机。
 
-目标包：`tool`、`hook`、`intervention`、`matcher`、`result`。
+目标包：`tool`、`hook`、`intervention`、`matcher`。
 
 ## KIT-01 迁移 ask_human 工具与人工提问 Hook
 
@@ -64,27 +64,18 @@ ask_human 成为普通工具 + Hook 组合，人工状态仍由 core 管理，�
 
 源：`ToolConfirmHook`、`PlainTextTruncateHook`、`ToolMatcher`、ToolConfirmationSpec/DisplayField/EditableField。
 
-目标：`kit.hook.ToolConfirmHook`、`PlainTextTruncateHook`、`kit.matcher.GlobToolMatcher`、`kit.intervention.ToolConfirmationSpecFactory`、`kit.result.StandardToolResultFactory`。
+目标：`kit.hook.ToolConfirmHook`、`PlainTextTruncateHook`、`kit.matcher.GlobToolMatcher`、`kit.intervention.ToolConfirmationSpecFactory`。
 
 ### 核心流程
 
 - ToolConfirmHook 根据 Binding tools/options 匹配，生成 confirmationId/invocation展示信息，返回 RequestHumanIntervention(TOOL_CONFIRMATION)。
 - PlainTextTruncateHook 在 POST_TOOL_CALL 接收最终 ToolResult；纯文本超过上限时返回 ToolResultPatch，其他类型/未超限 Continue。
-- StandardToolResultFactory 为拒绝与强制结束生成固定结果。
 
 ### 接口和数据结构
 
 确认 options 支持：title、description、risk-level、tool-display-name、confirm-label、deny-label、display-fields、editable-fields。editable 由 editable-fields 非空计算，调用方不能单独配置冲突值。risk 默认 MEDIUM。
 
-固定辅助：
-
-```java
-ToolResult userDenied(ToolCall call);      // 用户拒绝执行
-ToolResult forcedEnd(ToolCall call);       // 达到最大轮次，强制结束
-ToolResult blocked(ToolCall call, String reason);
-```
-
-前两者 metadata 为空，不新增 code/payload。
+kit 只产生 `ToolConfirmationInterventionRequest` 和截断 Patch，不产生“用户拒绝执行”“达到最大轮次，强制结束”或“请求已取消，工具未执行完成”结果。这些结果分别由 core 的确认恢复、ReAct 终止和请求取消分支决定，统一经 CORE-06 `ToolResultFactory` 构造。
 
 ### 关键实现逻辑
 
@@ -106,7 +97,7 @@ ToolResult blocked(ToolCall call, String reason);
 - 完整确认 JSON 交给 CORE-04/PRO-02 Golden File。
 - editable 推导、允许键、默认 risk/labels。
 - 截断 0/边界/超长/emoji/非文本。
-- 两个固定 ToolResult 的文本、ID/name 和空 metadata。
+- 联调断言确认拒绝只返回介入请求；恢复后的固定 ToolResult 由 CORE-06/07C 测试覆盖，kit 测试不复制文案断言。
 
 ### 架构符合性
 
@@ -120,7 +111,7 @@ kit 只实现可复用 Hook/工具规则，所有状态和发布仍由 core，�
 
 ### 涉及模块/类
 
-目标：`CompositeLifecycleHook`、`ToolMatcher` 实现、result helpers、kit POM/架构测试。旧 `WritePlanTool`、`UpdatePlanTool` 不迁移。
+目标：`CompositeLifecycleHook`、`ToolMatcher` 实现、kit POM/架构测试。旧 `WritePlanTool`、`UpdatePlanTool` 不迁移。
 
 ### 核心流程
 
@@ -138,8 +129,9 @@ Composite 对任一子 Hook 返回终止动作时停止后续子 Hook并返回�
 ### 关键实现逻辑
 
 - 组合器不是 LifecycleDispatcher，不解析 Binding、不应用状态。
-- kit POM 直接依赖 core-extension；不直接声明 core/runtime/platform。
+- kit POM 直接依赖 protocol、common、core-extension；不直接声明 core/runtime/platform。
 - 旧计划工具留在 legacy 直至 CLEAN-01，kit artifact 从第一天就不存在这些类型。
+- kit 不声明 `StandardToolResultFactory` 或任何固定状态机结果文案；架构测试禁止出现该类型和三段文案，防止与 core 形成双重所有权。
 
 ### 异常处理
 
@@ -150,7 +142,7 @@ Composite 对任一子 Hook 返回终止动作时停止后续子 Hook并返回�
 
 - Composite Continue/终止/异常传播。
 - artifact 扫描无 WritePlanTool、UpdatePlanTool、PlanExecutor、StageTool。
-- dependency tree 无 core/runtime/platform/Spring context。
+- dependency tree 无 core/runtime/platform/Spring context；源码/artifact 无 StandardToolResultFactory。
 - runtime Fake registry 能注册并按 descriptor 解析。
 
 ### 架构符合性

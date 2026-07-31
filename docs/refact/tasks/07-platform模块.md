@@ -40,6 +40,8 @@
   4. 取得 execution 后再异步 `run()`；线程池拒绝调用 `cancelBeforeStart()`。
   5. Filter/TaskDecorator 传播并清理用户上下文；传给 core/runtime 的命令显式携带 userId。
   6. 删除 platform 私有 runningAgents/sessionLocks 正确性状态。
+  7. emitter completion/timeout/error 通过请求级 execution 调用非阻塞 `cancel()`；用 closed 标志和 execution 原子引用的绑定后二次检查，覆盖 callback 先发生的竞态。
+  8. END 发布只 send；由 execution terminator 在状态切为 TERMINATED 后 complete emitter，避免正常完成回调反向触发取消。
 - **预期产出**：兼容 HTTP/SSE 入口、请求级 Publisher、用户上下文和异步执行集成测试。
 - **验收标准**：
   - session 冲突在响应提交前返回 HTTP 409，且不发送 END。
@@ -47,6 +49,8 @@
   - NEW 与 HUMAN_RESPONSE 使用同一 lease 空间，但各有新 emitter/Publisher。
   - 并发不同 session 事件不串写；每次传输 END 恰好一次。
   - 线程池拒绝时 END 与 lease 各收口一次。
+  - emitter 在 execution 绑定前或 RUNNING 期间关闭都能发出一次取消命令；callback 不直接发布 END 或释放 lease。
+  - 正常 END/complete 时 completion callback 不触发 token，执行 outcome 不被改成 CANCELLED。
   - 用户上下文在请求/异步结束后清理，core/runtime 不依赖 ThreadLocal。
 - **限制条件或注意事项**：platform 不维护第二套锁；本期仅单实例部署；`ApexAgentContext` 不得持有 SseEmitter。
 
