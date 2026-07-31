@@ -83,13 +83,13 @@ platform 只把 Spring 配置适配为中立 Provider，定义构造/权威校�
 
 ### 实现目标
 
-保持现有路径、Header 和 ChatRequest，使用 runtime 同步 execution准备实现 409，并让每次 NEW/HUMAN_RESPONSE 拥有独立 emitter/Publisher。
+保持现有 chat 路径、Header 和 ChatRequest，使用 runtime 同步 execution 准备实现 409，并让每次 NEW/HUMAN_RESPONSE 拥有独立 emitter/Publisher；新增无执行副作用的会话状态查询，支持刷新后回显挂起交互。
 
 ### 涉及模块/类
 
 源：`ChatController`、`ChatService`、`SuperAgentCoordinator`、`UserContextFilter`、`ChatExecutionConfiguration`、`MessageUtils`。
 
-目标：`ChatController`、`ChatService`、`ApexAgentCoordinator`、`SseEmitterAgentEventPublisher`、`UserContextFilter/Holder`、`UserContextTaskDecorator`、异常映射。
+目标：`ChatController`、`ChatService`、`SessionStateController`、`SessionStateQueryService`、`SessionStateViewMapper`、`ApexAgentCoordinator`、`SseEmitterAgentEventPublisher`、`UserContextFilter/Holder`、`UserContextTaskDecorator`、异常映射。
 
 ### 核心流程
 
@@ -107,12 +107,26 @@ Filter validates X-User-Id
 
 每次 HUMAN_RESPONSE重复以上流程，绝不复用挂起前 emitter。
 
+刷新查询独立于执行链：
+
+```text
+GET /api/sse/sessions/{sessionId}?agentKey=...
+  -> validate X-User-Id/path/query
+  -> SessionRepository.load(sessionId)
+  -> validate snapshot.userId + agentKey ownership
+  -> map status and persisted intervention
+  -> ApiResponse<SessionStateView>
+```
+
+它不调用 runtime `newAgent/resumeAgent`，不获取 lease，也不创建 emitter。
+
 ### 接口和数据结构
 
 - NEW：query非空、humanResponse可空。
 - HUMAN_RESPONSE：humanResponse非空、query不参与执行。
 - Header `X-User-Id` 必填，显式写入 AgentRequest/HumanResponseCommand。
 - `SseEmitterAgentEventPublisher.publish` 用 common JsonUtils 序列化并 `emitter.send(serializedString)`；实现请求级 closed 标识。发布 END 只负责 send，不在 `publish` 内调用 emitter.complete；complete 由 execution terminator 在状态已置 TERMINATED 后执行。取消执行由 `ApexAgentExecution` 独占，不在 Publisher 内另建 token。
+- `SessionStateView` 字段为 camelCase `sessionId`、`agentKey`、`executionStatus`、可空 `pendingInteraction`。pending 直接复用 protocol 的 `AgentMessage` 多态，仅允许 ASK_HUMAN/TOOL_CONFIRMATION；嵌套消息继续保持既有 snake_case。
 
 ### 关键实现逻辑
 
@@ -124,6 +138,10 @@ Filter validates X-User-Id
 - TaskDecorator捕获请求线程 userId，异步执行前 set，finally clear；core/runtime始终使用命令中的 userId，不读 ThreadLocal。
 - Coordinator 用 `AtomicReference<ApexAgentExecution>` 保存句柄。emitter completion/timeout/error 先把 Publisher 标记 closed，再对已绑定 execution 调用 `cancel()`；runtime 返回 execution 后写入引用，并在提交任务前再次检查 Publisher closed，已关闭则调用 `cancel()` 而不提交，闭合“callback 先于句柄绑定”的竞态。
 - callback 只发非阻塞取消命令，不能直接释放 lease、发布 END 或等待执行退出；RUNNING 的 lease 仍归 execution finally。底层模型、HTTP/MCP 和工具取消由请求 token 的已注册 command 完成。
+- 查询映射只读持久化 `SessionSnapshot`。状态为 HUMAN_IN_THE_LOOP 时，`SuspendedToolCall.intervention` 必须存在且能映射为一种既有交互消息；映射使用快照中已经固定的 question/display/editable/confirmation/tool/invocation ID，不生成新 ID。其他状态 `pendingInteraction=null`。
+- 前端 `ApexApiClient` 增加 `fetchSessionState(sessionId, agentKey, userId)`。store 用版本化键 `apex:active-session:v1` 保存 `{userId, agentKey, sessionId}`：NEW 分配 sessionId 时写入；一次传输收口后只有 waiting-human/waiting-confirmation 保留，completed/error/aborted 与 `resetSession()` 清除。切换 userId 时只接受 locator.userId 完全匹配的记录。JSON 损坏、字段为空或 404 都清除定位，不影响 Agent 列表初始化。
+- `initialize()` 在 Agent 列表完成后读取 locator；agentKey 仍存在时查询状态。返回 HITL 时恢复 `session.sessionId`/`selectedAgentKey`，建立同 session 的空视图模型，把 `pendingInteraction` 交给既有 `applyEnvelope`，并按 `executionStatus` 设置 waiting-human/waiting-confirmation。非 HITL 说明定位已过期，清除 locator 并保持新会话视图；网络/5xx 保留 locator 并显示可重试错误，不自动创建 NEW 或提交 HUMAN_RESPONSE。
+- 该流程只恢复待办卡片，不伪造丢失的完整消息历史；完整历史页面若需要，应另立查询需求。
 
 ### 异常处理
 
@@ -134,6 +152,7 @@ Filter validates X-User-Id
 - task rejection和Publisher错误不能重复 END/complete。
 - emitter callback 与 execution 绑定竞态由 closed 二次检查收口；回调本身的 cancel 异常只记录请求标识，不向已关闭连接写消息。
 - END send 成功与 emitter complete 分属 Once Publisher/terminator；不得让 Publisher 在 execution 尚为 RUNNING 时 complete 并触发反向 cancel。
+- 会话不存在或 userId/agentKey 不匹配统一返回 404；HITL 缺挂起对象、交互类型非法或持久化 ID 缺失属于服务端数据不变量破坏，记录 session/correlation 后返回 500，不返回半成品卡片。
 
 ### 测试方案
 
@@ -145,6 +164,9 @@ Filter validates X-User-Id
 - emitter 在 execution 绑定前/绑定后完成、超时或报错均会使 cancel 精确生效一次；RUNNING 场景不提前释放 lease。
 - 正常 END 后 terminator 先置 TERMINATED 再 complete，completion callback 的 cancel 返回 false且不触发 token。
 - Filter/TaskDecorator传播与请求/异步结束清理。
+- 会话查询：正确用户 HITL 的两类 payload 与实时事件规范化 JSON 相同；非 HITL pending 为空；不存在、跨用户、agentKey 不匹配均 404。
+- 查询期间 runtime/fake execution、lease、Hook、模型、工具和 Publisher 调用次数均为 0。
+- 前端刷新集成：locator 写入/终态清理/切用户隔离/损坏清理、HITL 两类卡片重建、非 HITL 与 404 清除、5xx 保留并可重试；不得自动提交 HUMAN_RESPONSE。
 - core/runtime无 ThreadLocal依赖、ApexAgentContext无 SseEmitter。
 
 ### 架构符合性
@@ -161,7 +183,7 @@ HTTP与异步调度仅适配 runtime执行句柄；并发和END正确性不在pl
 
 - platform POM、`application.yml`/环境变量、Flyway migration。
 - 表：`apex_agent_session`、`apex_agent_dialogue_message`、`apex_agent_dialogue_summary`。
-- 当前 `db/memory-schema-postgresql.sql` 属于 memory能力，不作为核心表 migration直接复用。
+- 当前 `db/memory-schema-postgresql.sql` 作为旧 memory 资料移入非标准 archive，不作为核心表 migration 复用，也不得进入 platform Flyway locations。
 
 ### 核心流程
 
@@ -363,7 +385,7 @@ Testcontainers PostgreSQL、Spring context/runtime fixture、Postgres Repositori
 
 ### 实现目标
 
-证明新platform可以替换legacy入口，HTTP/SSE/人在回路对前端零修改，PostgreSQL恢复和单实例部署边界有可复现证据。
+证明新 platform 可以替换 legacy 入口，既有 HTTP/SSE/人在回路消费保持兼容，刷新挂起交互可回显，PostgreSQL 恢复和单实例部署边界有可复现证据。
 
 ### 涉及模块/类
 
@@ -375,7 +397,7 @@ platform全部入口、runtime、PostgreSQL、PRO Golden Files、前端测试/bu
 2. 捕获实际SSE逐事件对比Golden File。
 3. 并发、线程池拒绝、模型/Hook/工具异常、最大Iteration。
 4. PostgreSQL重启恢复。
-5. 在前端源码零diff前提运行三项验证。
+5. 完成前端 session 定位和状态查询最小改动后运行三项验证，并审查 chat/SSE 既有处理没有语义回归。
 6. 通过G5后切默认启动入口，legacy仅回归。
 
 ### 接口和数据结构
@@ -386,12 +408,12 @@ platform全部入口、runtime、PostgreSQL、PRO Golden Files、前端测试/bu
 
 - 实际SSE不是仅测试AgentEventFactory，必须经过Controller、runtime Once和SseEmitter。
 - END精确且一次；HUMAN_IN_THE_LOOP的END不代表Turn完成；core 同步准备失败的完整响应只能包含 END。
-- 配置迁移是部署前置：虽然前端零改动，现有全局/workspace Agent配置不会被新Provider兼容，必须提供目标完整YAML。
+- 不执行任何旧配置迁移；部署环境必须直接提供符合新 schema 的完整 YAML，示例不是历史配置转换结果。
 - 默认platform不注册memory/session_search/learning Hook。
 
 ### 异常处理
 
-- 任一协议、恢复、409、数据库或前端验证失败都阻塞platform接管。
+- 任一协议、恢复、刷新回显、409、数据库或前端验证失败都阻塞 platform 接管。
 - 外部MCP/Skill测试使用Fake/临时资源，不依赖application.yml机器路径。
 - 未运行项必须写未验证，不能按通过统计。
 
@@ -401,7 +423,7 @@ platform全部入口、runtime、PostgreSQL、PRO Golden Files、前端测试/bu
 - Controller路径/Header/字段、NEW/HUMAN_RESPONSE、400/409、core构造/恢复失败END-only、emitter隔离、task reject。
 - 模型失败、Hook warn继续、工具异常ToolResult、最大Iteration。
 - `npm --prefix apex-frontend run test:run`、`typecheck`、`build`。
-- `git diff -- apex-frontend/src` 为空。
+- 前端新增 API/type/store/reducer 测试；审核 diff 只包含 session 定位、状态查询和回显所需最小变更。
 
 ### 架构符合性
 

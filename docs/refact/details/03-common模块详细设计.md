@@ -291,7 +291,7 @@ public final class JsonUtils {
 - `ProtocolJsonUtilsConsumerTest` 对全部 protocol Golden File 使用真实 `JsonUtils` round-trip，证明 DTO 显式注解优先；protocol reactor 项目依赖图中不存在 protocol→common。
 - save/load 双向别名测试所需的深层 Map/List/ToolCall 数据。
 - mapperCopy 修改配置不影响全局 mapper。
-- 源码扫描 common 无 Spring AI module；全项目最终无 Fastjson。
+- 源码扫描 common 无 Spring AI module；七个代码模块标准源码最终无 Fastjson，memory 非编译 archive 不计入。
 
 ### 架构符合性
 

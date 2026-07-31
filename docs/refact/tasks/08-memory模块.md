@@ -1,67 +1,65 @@
 # memory 模块任务
 
-> 模块职责：独立封存长期记忆、会话搜索和 Skill Learning；参与构建但不进入默认链路
-> 当前总体进度：未开始；现有 memory 包同时包含核心会话存储和可选长期能力
+> 模块职责：把长期 Memory、会话搜索、管理和 Skill Learning 的旧源码/资源保存为非编译历史归档
+> 当前总体进度：未开始；现有 memory 与 learning 代码仍混在生产源码和默认配置中
 
-## MEM-01 分离并迁移长期 Memory 与会话搜索
+## MEM-01 归档长期 Memory、会话搜索与管理代码
 
-- **任务名称**：把用户画像、事实、历史、经验、召回和 session_search 迁入独立 memory。
-- **任务目标**：保留现有可选能力的代码与测试，同时移除其对 core/runtime/platform 默认链路的塑形。
+- **任务名称**：分离主链职责并原样归档长期 Memory 相关旧代码。
+- **任务目标**：保留历史实现供后续整理，同时确保当前 Session/Conversation 正式实现不依赖归档。
 - **当前进度**：未开始。
-- **设计依据**：设计文档第 5.8、12.4、20 节阶段 7；架构文档第 5.8、15.3 节。
-- **涉及范围**：长期 Memory 实体、Repository、召回/抽取/写入/管理、pgvector、session_search；排除核心 Session/Conversation Repository。
-- **前置依赖**：FND-02、COM-01/04、EXT-01。
+- **设计依据**：已确认 Q-16；设计文档第 5.8、阶段 7；架构文档第 5.8、15.3 节。
+- **涉及范围**：长期 Memory model/recall/extract/write/manage/persistence、`session_search`、旧 SQL/Prompt/配置；排除主链 Session/Conversation 正式实现。
+- **前置依赖**：FND-02、CORE/RUN/PLAT 对 Session/Conversation 的替代任务。
 - **具体执行内容**：
-  1. 盘点 memory 包，区分核心会话连续性与长期记忆能力。
-  2. 核心 Session/Conversation 端口/实现分别迁往 core-extension、runtime/platform。
-  3. 将长期记忆、搜索和管理迁入 memory。
-  4. 适配中立 common/扩展接口，不反向依赖 runtime/platform/core 具体实现。
-  5. 从 platform 默认工具和配置中移除 session_search。
-- **预期产出**：独立长期 Memory 代码、迁移映射和回归测试。
+  1. 建立逐文件 `archive/move-to-production-module/delete-after-replacement` 清单。
+  2. 先完成主链 Session/Conversation 替代，再移除 legacy 对旧实现的运行依赖。
+  3. 将长期 Memory/search/manage 生产源码与资源原样移动到 `memory/archive/main`，不改 API/import 以追求编译。
+  4. 从 runtime/platform 默认工具、Bean、MapperScan、配置和依赖中移除 memory 与 `session_search`。
+  5. 在 MANIFEST 记录原路径、目标路径、类别、旧依赖与说明。
+- **预期产出**：非编译归档源码/资源、迁移清单、生产链路隔离证据。
 - **验收标准**：
-  - memory 不包含 runtime 必需的 Session/Conversation 默认实现。
-  - platform/runtime 默认启动时不注册 session_search。
-  - memory 独立编译与既有长期能力单元测试通过。
-  - 其他模块依赖树均无 memory。
-- **限制条件或注意事项**：本期是封存而非重新接入；不得删减现有长期能力，也不得为了默认可用新增集成模块。
+  - 清单中的归档文件均存在且原标准源码路径已清理。
+  - 七个代码模块无 memory/archive import、依赖或扫描配置；默认工具无 `session_search`。
+  - 父构建不编译归档 Java、不执行归档 SQL。
+- **限制条件或注意事项**：不做 common/core-extension 适配，不设计 memory schema/ingestion，不迁移或新增 memory 测试；归档源码存在旧引用或不可编译是已接受边界。
 
-## MEM-02 分离并封存 Skill Learning
+## MEM-02 归档 Skill Learning
 
-- **任务名称**：迁移 Skill 使用记录、经验抽取、调度和增强。
-- **任务目标**：让普通 Skill 留在 runtime，Skill Learning 全部归入 memory 且默认不装配。
+- **任务名称**：迁移 Skill Learning 历史源码并保留普通 Skill 生产能力。
+- **任务目标**：让 learning 代码退出生产构建，同时保证普通 Skill、资源读取和 `activate_skill` 继续由 runtime 工作。
 - **当前进度**：未开始。
-- **设计依据**：设计文档第 5.8、12.3～12.4 节；架构文档第 5.8、6.4 节。
-- **涉及范围**：`org.gemo.apex.skills.learning`、使用记录、经验抽取/调度/增强 Hook、相关 Repository 和配置。
+- **设计依据**：已确认 Q-16；设计文档第 5.8、阶段 7；架构文档第 5.8、6.4 节。
+- **涉及范围**：`org.gemo.apex.skills.learning`、使用记录、经验抽取/调度/增强 Hook、Repository、SQL、Prompt 和配置。
 - **前置依赖**：MEM-01、RUN-05。
 - **具体执行内容**：
-  1. 迁移全部 learning 子包与自有存储。
-  2. 从 runtime/platform 注册表和默认 Agent 配置移除 `skillExperienceAugmentHook`、`skillUsageRecorderHook`。
-  3. 保证普通 Skill 加载、activate_skill 和资源读取仍由 runtime 提供。
-  4. 保留 memory 内部单元测试，但不建立默认装配。
-- **预期产出**：独立 Skill Learning 子域和默认链路隔离测试。
+  1. 划分普通 Skill 与 learning 专属文件，共享生产逻辑先迁入 common/runtime。
+  2. 将 learning 旧生产源码/资源原样移动到 archive 并登记 MANIFEST。
+  3. 移除 platform/runtime 的 learning Bean、Hook Binding、scheduler、Mapper 和配置。
+  4. 运行 RUN-05 普通 Skill 回归，确认没有通过 archive 补依赖。
+- **预期产出**：Skill Learning 非编译归档和普通 Skill 隔离记录。
 - **验收标准**：
-  - runtime artifact 无 learning 包、经验记录和调度代码。
-  - platform 默认启动无 Skill Learning Hook Bean/Binding。
-  - RUN-05 普通 Skill 回归测试保持通过。
-  - memory 内 Skill Learning 测试独立通过。
-- **限制条件或注意事项**：activatedSkills 属于普通 session 运行状态，不得错误迁入 memory；不恢复历史经验注入到默认模型上下文。
+  - runtime artifact 无 learning class，platform 默认 context 无 learning Hook/scheduler/Mapper。
+  - 普通 Skill 生产测试通过。
+  - archive 未注册为 Maven source/resource。
+- **限制条件或注意事项**：不迁移或运行 Skill Learning 测试，不设计经验数据源或适配当前 Hook 框架；`activatedSkills` 仍是 common/runtime 的正式 session 状态。
 
-## MEM-03 完成 memory 独立 schema、构建与隔离验收
+## MEM-03 收口归档边界与 reactor 占位模块
 
-- **任务名称**：收口 memory 的独立构建和数据边界。
-- **任务目标**：使 memory 参与父 POM 编译/测试但不进入 platform 默认启动依赖图，其 schema 不复用核心会话表表达长期语义。
+- **任务名称**：建立无依赖、无字节码的 memory 占位模块和可审计归档。
+- **任务目标**：保留八模块目录，同时证明 memory 不参与生产编译、测试、资源打包或运行。
 - **当前进度**：未开始。
-- **设计依据**：设计文档第 5.8、20 节阶段 7、22 节；架构文档第 11.1、15.3、18.1 节。
-- **涉及范围**：memory POM、自有 schema/Repository、架构测试、默认应用依赖树。
-- **前置依赖**：MEM-01、MEM-02、FND-03A；PLAT-03A 仅用于确认 schema 边界，不形成依赖。
+- **设计依据**：已确认 Q-16；设计文档第 4.1、5.8、22 节；架构文档第 4.2、15.3、18.1 节。
+- **涉及范围**：memory POM/README/MANIFEST、父 POM、七个代码模块依赖树和发布物、FND/CLEAN 检查。
+- **前置依赖**：MEM-01、MEM-02、FND-03A。
 - **具体执行内容**：
-  1. 整理 memory 自有持久化 schema 和 Repository。
-  2. 检查 memory 只依赖 common + core-extension 及其自身基础设施依赖。
-  3. 增加“无模块依赖 memory”和“platform 默认上下文不装配 memory”的测试。
-  4. 在发布说明记录默认能力变化。
-- **预期产出**：可独立构建的 memory artifact、schema 和隔离报告。
+  1. memory POM 使用 `packaging=pom`，不声明 dependencies、编译/测试插件或额外 source/resource root。
+  2. 校验 MANIFEST 每个原路径恰好一条、目标存在且类别明确。
+  3. 运行父 reactor 和七个代码模块测试；检查 platform/runtime dependency tree 与 jar 内容。
+  4. 发布说明明确默认产品没有长期召回、`session_search`、Memory 管理或 Skill Learning，归档不表示能力可用。
+- **预期产出**：memory 占位 POM、README、完整 MANIFEST 和构建隔离报告。
 - **验收标准**：
-  - 父 POM 会编译/测试 memory，但 platform dependency tree 不含 memory。
-  - memory schema 与 `apex_agent_session/dialogue_*` 核心表职责分离。
-  - 默认 runtime/platform 运行不需要 memory 数据库或 pgvector。
-- **限制条件或注意事项**：若产品仍要求默认暴露 Memory 管理接口，属于范围变更，必须重新确认；不得在本任务中隐式恢复装配。
+  - memory 不含标准 `src/main`/`src/test`，不产出 class/jar，不运行测试。
+  - 无模块依赖 memory，发布物和运行 classpath 无 archive 文件。
+  - 报告明确写“memory 未编译、未测试”，父 reactor 成功不得误述为 memory 能力通过。
+- **限制条件或注意事项**：未来启用必须另立设计，将选定源码迁入标准 source root，并重新完成框架兼容、schema/data、依赖、安全和测试评审。

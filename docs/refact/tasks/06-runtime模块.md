@@ -194,8 +194,8 @@
 
 ## RUN-07 迁移 HTTP SubAgent 工具
 
-- **任务名称**：把任意远程 Agent 适配为普通 HTTP 工具。
-- **任务目标**：复用现有 chat/SSE 协议完成远端调用、流聚合、事件透传和递归防护。
+- **任务名称**：把可在单次 NEW 内自行完成的远程 Agent 适配为普通 HTTP 工具。
+- **任务目标**：复用现有 chat/SSE 协议完成远端调用、流聚合、事件透传和递归防护；不支持远程人工介入。
 - **当前进度**：未开始。现有实现仍使用 Fastjson 且与旧上下文/事件处理耦合。
 - **设计依据**：设计文档第 11.4、23 节；架构文档第 12.2 节。
 - **涉及范围**：HTTP 客户端、SSE parser、SubAgent Tool、子 session/调用链、STREAM_CONTENT 聚合、INVOCATION/ARTIFACT 处理。
@@ -209,6 +209,7 @@
   6. 使用 protocol + Jackson 解析，移除 Fastjson。
   7. SubAgent 初始化失败时记录 warn，关闭本次失败产生的资源并按 sourceId/工具名登记不可用状态；新绑定被拒绝，已有绑定只读留痕并退出有效集合，其他工具继续；不提供策略开关。
   8. HTTP future 与 response body/stream 向请求 token 注册 cancel/close；取消时停止读取和事件转发并抛 `CancellationRequestedException`。
+  9. 子流出现 ASK_HUMAN/TOOL_CONFIRMATION 时停止读取并取消子请求，抛普通工具执行异常，由父 core 生成“不支持子调用人工介入”结果；不向父 observer 透传交互事件。
 - **预期产出**：HTTP SubAgent AgentTool、SSE 解析器和集成测试。
 - **验收标准**：
   - 子调用使用独立 session，不复用父 session。
@@ -218,7 +219,8 @@
   - 单个 SubAgent 初始化失败不阻止 runtime 启动，对应工具不进入模型列表且无资源泄漏。
   - 依赖和源码中不再因该能力引入 Fastjson。
   - token 在发请求前、等待响应和读取 body 阶段取消都能主动终止底层调用，adapter 不生成模型可见失败 ToolResult；core 仅按统一取消收口规则补标准结果。
-- **限制条件或注意事项**：SubAgent 不是特殊 Agent 类型；不得改变远端协议；调用链信息只用于 runtime 观测和防递归，不进入前端协议。
+  - 两类远程交互均会 cancel/close 子请求、停止后续事件，父交互事件发布次数为 0，父 ToolCall 得到一次普通失败结果。
+- **限制条件或注意事项**：SubAgent 不是特殊 Agent 类型；不得改变远端协议；调用链信息只用于 runtime 观测和防递归，不进入前端协议。本期不设计父子 session 映射、嵌套 HUMAN_RESPONSE 或远程人工介入测试矩阵之外的恢复能力。
 
 ## RUN-08 完成资源生命周期、runtime-only 示例与集成验收
 

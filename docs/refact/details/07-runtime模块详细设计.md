@@ -501,7 +501,7 @@ MCP 完全停留 runtime，core 只看 AgentTool；资源生命周期由 runtime
 
 ### 实现目标
 
-把远程普通 Agent 通过现有 chat/SSE 协议适配为 AgentTool，使用独立子 session，聚合正文、透传允许事件，并防止递归闭环。
+把能在单次 NEW 内自行完成的远程普通 Agent 通过现有 chat/SSE 协议适配为 AgentTool，使用独立子 session，聚合正文、透传允许事件，并防止递归闭环；本期不支持子 Agent 人工介入。
 
 ### 涉及模块/类
 
@@ -529,7 +529,7 @@ SubAgentDefinition 含 targetAgentKey、endpoint、description、timeout；工�
 - 推荐使用 JDK HttpClient，避免 runtime 引入完整 Spring Web；HTTP client可外部借用或 runtime创建。
 - SSE decoder处理 `data:` 多行、空行事件边界、UTF-8、CRLF/LF和注释行；每个 data JSON交 protocol mapper。
 - 远端 END只结束子工具，不调用 observer。
-- 远端 ASK_HUMAN/TOOL_CONFIRMATION 无法由父请求安全恢复子 session；首版明确中止子调用并返回“子智能体请求人工介入，当前工具调用不支持透传恢复”的 ToolResult。不能把交互事件透传给父前端造成错误 session 关联；该限制列入风险 R-12。
+- 已确认：远端 ASK_HUMAN/TOOL_CONFIRMATION 不进入父 observer。收到后先停止解析与 INVOCATION 转发，主动取消/关闭子 HTTP 请求，再抛带稳定原因的 `ToolExecutionException`；父 core 按普通工具失败生成模型可见“子智能体请求人工介入，当前工具调用不支持透传恢复”结果。不得创建父子 session 映射或把子交互透传给父前端。
 - INVOCATION only经 core observer allowlist；STREAM_CONTENT不透传而聚合。
 - init失败关闭 client资源，按 `(SUB_AGENT, sourceId, exactToolName)` 更新 availability 并继续其他工具；runtime 不修改定义/session。新绑定由 core拒绝，旧绑定由 core迁移历史；调用期超时转换 ToolResult。
 - HTTP 请求创建后立即把 `CompletableFuture.cancel(true)` 与 response body/stream close 注册到请求 token；任一阶段收到命令都停止读取，不再转发 INVOCATION，并抛 `CancellationRequestedException`。
@@ -545,7 +545,7 @@ SubAgentDefinition 含 targetAgentKey、endpoint、description、timeout；工�
 
 - 独立 child session、agentKey、X-User-Id、NEW payload。
 - SSE多行/分片、content聚合、invocation observer、artifact ignore、remote END不结束父请求。
-- ASK_HUMAN/CONFIRMATION显式转失败结果。
+- ASK_HUMAN/CONFIRMATION 触发子请求 cancel/close、停止后续事件读取，并显式转父工具失败结果；父 Publisher 交互事件次数为 0。
 - depth/agent闭环、timeout、malformed JSON；token 在发请求前、等待响应和读取 body 三个阶段取消均主动 cancel/close 且停止事件转发。
 - init失败覆盖新绑定拒绝、旧绑定只读留痕/不可执行、健康 SubAgent 可用，以及 Fastjson源码/依赖清零。
 

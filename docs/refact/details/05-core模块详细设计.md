@@ -617,7 +617,7 @@ core 只看 AgentTool/ToolProvider，不感知工具来源；动态启用是 ses
 - 交互事件的数据从已保存挂起对象构造，保证事件与快照一致。
 - 确认的 invocationId/confirmationId 在挂起前由 IdGenerator 生成一次。
 - save 前不发布任何交互事件，避免用户拿到无法恢复的提示。
-- 事件发布失败时快照已挂起且无自动重放 API，这是风险 R-09；实现需记录可重放的完整 payload 和结构化错误，为后续确认的重放策略保留数据。
+- 挂起对象必须保存可完整重建 ASK_HUMAN/TOOL_CONFIRMATION 的 intervention payload；事件发布失败不回滚快照。已确认的刷新恢复由 platform 只读状态接口从该对象映射原交互，不要求 core 重放事件，也不重新执行 Hook。
 
 ### 异常处理
 
@@ -631,6 +631,7 @@ core 只看 AgentTool/ToolProvider，不感知工具来源；动态启用是 ses
 - 快照字段白名单、Hook ID 顺序、arguments 使用最终 Patch 值。
 - save 失败后 Publisher 0 次。
 - 成功后顺序严格 save -> interaction -> END；无 Tool/Post/IterationEnd/TurnEnd。
+- 对同一已保存快照分别映射实时事件与刷新查询事件，断言两者规范化 JSON 完全一致；查询过程不改变快照。
 
 ### 架构符合性
 

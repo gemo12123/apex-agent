@@ -16,7 +16,7 @@
   2. 将 Spring 配置转换为单一完整 AgentDefinition，不做字段级叠加。
   3. 移除 default-execution-mode、Plan Prompt、Skill Learning Hook 配置。
   4. 从 Provider `listAgents()` 获取 AgentMetadata 列表，不逐个加载完整定义。
-  5. 定义新的完整 YAML 属性结构，不提供现有全局/workspace 配置迁移映射。
+  5. 定义新的完整 YAML 属性结构；不读取、不转换旧 global/workspace 配置，不提供兼容层、迁移脚本或人工转换清单。
 - **预期产出**：platform 启动应用、Spring Provider、注册适配和兼容 Agent 列表。
 - **验收标准**：
   - platform 能以 Spring Boot 启动并创建单一 runtime。
@@ -28,10 +28,10 @@
 ## PLAT-02 接入 HTTP/SSE、用户上下文与异步执行
 
 - **任务名称**：迁移 chat 入口、请求级 SSE Publisher、409 映射和执行派发。
-- **任务目标**：保持现有接口不变，同时让 runtime 的 execution lease 和请求级 Publisher 成为唯一并发/END 正确性来源。
+- **任务目标**：保持既有 chat/agents 接口不变，让 runtime 的 execution lease 和请求级 Publisher 成为唯一并发/END 正确性来源，并新增刷新挂起交互所需的只读会话状态查询。
 - **当前进度**：未开始。当前 Coordinator 持有独立运行状态，`SuperAgentContext` 持有 SseEmitter。
 - **设计依据**：设计文档第 13、15.1、15.3、21.6 节；架构文档第 10 节。
-- **涉及范围**：ChatController、ChatService、ApexAgentCoordinator、SseEmitterAgentEventPublisher、X-User-Id Filter、TaskDecorator、异步 executor 和异常映射。
+- **涉及范围**：ChatController、ChatService、SessionStateController/QueryService/ViewMapper、ApexAgentCoordinator、SseEmitterAgentEventPublisher、X-User-Id Filter、TaskDecorator、异步 executor 和异常映射。
 - **前置依赖**：RUN-04A～04C、RUN-08、PRO-02、CORE-07C。
 - **具体执行内容**：
   1. 保持 `GET /api/sse/agents`、`POST /api/sse/chat`、`X-User-Id` 和 ChatRequest 字段不变。
@@ -42,6 +42,7 @@
   6. 删除 platform 私有 runningAgents/sessionLocks 正确性状态。
   7. emitter completion/timeout/error 通过请求级 execution 调用非阻塞 `cancel()`；用 closed 标志和 execution 原子引用的绑定后二次检查，覆盖 callback 先发生的竞态。
   8. END 发布只 send；由 execution terminator 在状态切为 TERMINATED 后 complete emitter，避免正常完成回调反向触发取消。
+  9. 新增 `GET /api/sse/sessions/{sessionId}?agentKey=...`；按 Header userId、agentKey、sessionId 校验归属，从 SessionSnapshot 映射 status 和既有 ASK_HUMAN/TOOL_CONFIRMATION，不调用 runtime 执行入口或 lease。
 - **预期产出**：兼容 HTTP/SSE 入口、请求级 Publisher、用户上下文和异步执行集成测试。
 - **验收标准**：
   - session 冲突在响应提交前返回 HTTP 409，且不发送 END。
@@ -52,6 +53,7 @@
   - emitter 在 execution 绑定前或 RUNNING 期间关闭都能发出一次取消命令；callback 不直接发布 END 或释放 lease。
   - 正常 END/complete 时 completion callback 不触发 token，执行 outcome 不被改成 CANCELLED。
   - 用户上下文在请求/异步结束后清理，core/runtime 不依赖 ThreadLocal。
+  - 状态查询对不存在、跨用户或 agentKey 不匹配统一 404；HITL 返回原挂起交互，其他状态 pending 为空，且无 Hook/模型/工具/Publisher/lease 调用。
 - **限制条件或注意事项**：platform 不维护第二套锁；本期仅单实例部署；`ApexAgentContext` 不得持有 SseEmitter。
 
 ## PLAT-03A 建立 PostgreSQL 配置与 Flyway schema
@@ -88,12 +90,14 @@
   3. 数据库实体不泄漏到 core，读取后必须转换为明确 common 类型。
   4. 覆盖长消息、长摘要、长工具结果和嵌套快照。
   5. 实现首版 `1.0.0` Snapshot Adapter 和 round-trip；不实现跨版本升级链或未知版本分支。
+  6. 保证读取快照能取得刷新查询所需的 userId、agentKey、executionStatus 与完整 suspended intervention，不另建重复状态表。
 - **预期产出**：两个 PostgreSQL Repository Adapter 和往返集成测试。
 - **验收标准**：
   - 全部 TEXT 载荷按明确类型往返且不截断。
   - 消息排序和唯一约束行为正确。
   - core/runtime 不引用 ORM 实体或数据库类型。
   - `1.0.0` 快照版本被明确保存并可完整往返。
+  - 两类挂起 interaction 从 PostgreSQL 往返后仍可映射为与实时事件一致的 protocol 消息。
 - **限制条件或注意事项**：本期不宣称跨版本快照兼容；单 Repository 操作可以使用本地事务，但不扩展为跨 Repository 事务。
 
 ## PLAT-03C 实现单 Repository 状态提交与跨 Repository 顺序编排
@@ -137,10 +141,10 @@
   - `1.0.0` 快照可在进程重启后恢复；未知版本不属于本期验收范围。
 - **限制条件或注意事项**：只验证已成功完成各 Repository 保存后的恢复；不把跨 Repository 部分提交场景描述为原子回滚成功。
 
-## PLAT-04 完成平台协议、并发与前端兼容验收
+## PLAT-04 完成平台协议、并发与前端刷新兼容验收
 
-- **任务名称**：执行 platform 端到端和现有前端零修改验证。
-- **任务目标**：证明新后端可无缝替换当前后端，同时明确单实例部署边界。
+- **任务名称**：执行 platform 端到端、既有契约兼容与前端刷新回显验证。
+- **任务目标**：证明新后端保持既有聊天契约，并能在刷新后重新展示持久化的人工介入，同时明确单实例部署边界。
 - **当前进度**：未开始。
 - **设计依据**：设计文档第 21.6～22 节；架构文档第 13、15.2、18.4 节。
 - **涉及范围**：Controller 集成测试、SSE Golden File、PostgreSQL 测试、前端 test/typecheck/build、部署说明。
@@ -148,14 +152,15 @@
 - **具体执行内容**：
   1. 覆盖 NEW/HUMAN_RESPONSE、用户校验、409、线程池拒绝、每请求 emitter 隔离。
   2. 对实际 SSE 运行 FND-01/PRO-02 Golden File。
-  3. 覆盖正常、失败、挂起、再次挂起和重启恢复。
+  3. 覆盖正常、失败、挂起、再次挂起、刷新查询和重启恢复。
   4. 覆盖模型异常直接失败、Hook 异常 warn 后跳过、工具异常回传模型和最大 Iteration 强制收口。
-  5. 在不修改 `apex-frontend/src` 的前提下运行现有前端测试、typecheck、build。
+  5. 前端以 `apex:active-session:v1` 持久化当前 `{userId, agentKey, sessionId}`，只在等待人工态保留；初始化查询会话状态，HITL 交互交给既有 reducer 重新展示，终态/切用户/损坏/404 清除、5xx 保留并可重试，且不自动提交 HUMAN_RESPONSE。
   6. 在部署文档中声明单实例，禁止把共享 PostgreSQL 描述为分布式 lease。
+  7. 运行前端测试、typecheck、build，并审查前端改动仅限状态 DTO、查询 API、session 定位和初始化回显。
 - **预期产出**：平台验收测试、前端兼容记录和单实例部署说明。
 - **验收标准**：
-  - Controller 路径、Header、请求字段和响应结构与基线一致。
+  - 既有 Controller 路径、Header、请求字段和响应结构与基线一致；新增只读状态接口通过归属与无副作用测试。
   - SSE Golden File 全部通过，END 精确且仅一次。
-  - 前端 `test:run`、`typecheck`、`build` 全部通过且 `git diff -- apex-frontend/src` 为空。
+  - 前端 `test:run`、`typecheck`、`build` 全部通过；刷新后两类 HITL 卡片回显且既有 chat/SSE reducer 测试无回归。
   - 单实例限制在配置/部署文档中可见。
-- **限制条件或注意事项**：不得为了通过验证修改前端源码；快照只验收 `1.0.0`，不扩展跨版本或未知版本场景。
+- **限制条件或注意事项**：前端只允许 Q-14 所需的最小增量，不新增完整历史查询或改变既有 SSE 事件；快照只验收 `1.0.0`，不扩展跨版本或未知版本场景。

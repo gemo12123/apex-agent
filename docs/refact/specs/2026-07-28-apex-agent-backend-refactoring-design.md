@@ -55,13 +55,13 @@ ChatController
 12. Agent 定义只配置 `enabledSkills`，不再配置 `availableSkills`；`activatedSkills` 是其 session 级子集，在同一 session 内跨 Turn 保留。
 13. Skill 集合不由生命周期 Hook 动态增删；`activate_skill` 是改变激活状态的唯一默认入口，Skill instructions 只作为普通对话消息存在。
 14. 对话摘要压缩保留在 runtime；只在 ReAct 循环即将调用业务模型时判断和执行，并且位于 `PRE_MODEL_CALL` 之前。
-15. 长期记忆、会话搜索和 Skill Learning 封存在 `memory`，其他模块不依赖 `memory`。
+15. 长期记忆、会话搜索和 Skill Learning 的旧源码/资源仅归档到 `memory` 非标准源码目录，其他模块不依赖 `memory`；本期不编译、不测试、不适配当前框架。
 16. runtime 提供内存存储、Print 消息出口和默认 Agent，使外部项目只依赖 runtime、通过 `new` 对象即可运行。
 17. MCP 进程管理和 HTTP SubAgent 都属于 runtime。
 18. platform 保留 Spring Boot、Web/SSE、并发协调和 PostgreSQL 持久化。
 19. Agent 数据库配置源本期不实现，只定义统一接口；本期提供 Java 对象、文件和 Spring 配置实现。
 20. platform 正式切换到 PostgreSQL，不考虑现有 MySQL 或历史表数据兼容。
-21. HTTP、SSE 和人在回路协议保持不变，不修改前端。
+21. 既有 Agent 列表、聊天 HTTP/SSE 和人在回路事件保持兼容；为刷新回显挂起交互，新增只读会话状态接口并允许前端增加会话定位与初始化查询逻辑。
 22. Agent 定义只允许来自一个完整配置源，不保留全局配置与 workspace 配置叠加。
 23. Hook 返回值按生命周期能力分型；涉及多个动作的生命周期再按动作定义不同 record，不使用一个包含全部可选字段的万能 `HookResult`。
 24. 工具确认与 `ask_human` 统一由 `PRE_TOOL_CALL` Hook 请求人工介入。
@@ -88,6 +88,13 @@ ChatController
 45. 只有 `AGENT_BUILD` 生命周期可以通过 `AgentDefinitionOperation` 修改 Agent 定义草稿，包括 Prompt、工具全集/默认集合、Hook Binding 和可规范化元数据。其余十个运行生命周期不得修改 Agent 定义或 Hook 链；它们对消息、session `enabledTools`、当前模型请求、工具参数/结果和压缩对象的修改属于运行态变化，不属于定义修改。
 46. 每个 `ApexAgentExecution` 持有唯一请求级 `CancellationToken` 和可写 source。`cancel()`/`close()` 在运行中只向 token 发出非阻塞取消命令，不等待、不提前释放 lease；模型 subscription、HTTP/SubAgent、MCP 和默认工具适配器必须注册底层取消动作。runtime close 向活动 execution 全部发出取消命令后返回，本期不设置取消超时或 grace period，也不保证不合作的自定义工具在有限时间内退出。若 Assistant ToolCall 已持久化，core 为未完成调用补固定“请求已取消，工具未执行完成”结果，保持未来模型历史完整。
 47. “用户拒绝执行”“达到最大轮次，强制结束”“请求已取消，工具未执行完成”等由执行状态机合成的 ToolResult 统一归 core 内部唯一 `ToolResultFactory` 所有。kit 只生成工具确认介入请求和通用 Hook Patch，不提供固定 ToolResult 工厂，避免 core -> kit 反向依赖或重复文案。
+48. 数据库 `AgentDefinitionProvider` 已接受为未来扩展，本期不得作为已交付能力宣传。
+49. 不兼容、不读取、不转换历史 global/workspace Agent 配置，不提供迁移脚本、兼容层或转换清单；只提供按目标 schema 新写的完整 YAML 示例。
+50. AGENT_BUILD 进入时按 `(order, id)` 固化不可变 Binding 分发快照；本次 Hook 对 AGENT_BUILD Binding 的修改只影响最终定义与后续生命周期。
+51. 不引入跨 Repository 事务、补偿或跨 HTTP 自动修复；稳定 `entryId`/`compactionId` 只保证单 Repository 与同一 execution 内确定性重试。
+52. platform 提供只读会话状态查询。前端持久化 `{userId, agentKey, sessionId}` 定位信息；刷新查询到 `HUMAN_IN_THE_LOOP` 时，从持久化挂起对象重新展示 ASK_HUMAN/TOOL_CONFIRMATION，不重跑 Agent。
+53. 远程 SubAgent 本期不得进入可恢复人工介入；子流出现 ASK_HUMAN/TOOL_CONFIRMATION 时取消子请求并转为父 ToolCall 的普通失败结果，不向父前端透传。
+54. memory 目录保留 `packaging=pom` 占位模块；相关旧源码/资源置于非标准归档目录并记录来源，不进入 compile/test，也不设计 schema、ingestion 或当前框架兼容层。
 
 ## 3. 目标与非目标
 
@@ -100,13 +107,12 @@ ChatController
 - 让 Agent 定义可以来自 Java 对象、配置文件或未来的数据库实现。
 - 让生命周期 Hook、工具、模型、消息出口和存储均可替换。
 - 完整保留 Turn、Iteration、人在回路、工具确认和多工具调用语义。
-- 保证现有前端在不修改任何代码的情况下继续工作。
+- 保证既有列表、聊天和 SSE 事件处理保持兼容，并补齐刷新后的挂起交互回显。
 - 将可选且暂不启用的 Memory/Skill Learning 从主运行链路中隔离。
 
 ### 3.2 非目标
 
-- 不修改 `apex-frontend`。
-- 不新增或修改外部 HTTP/SSE 字段。
+- 不改变既有 `/api/sse/agents`、`/api/sse/chat` 或 SSE 事件字段；只允许为刷新恢复新增只读会话状态接口及对应前端初始化代码。
 - 不修复 `END` 当前缺少 `execution_status` 的协议现状。
 - 不实现数据库版 Agent 定义。
 - 不保留 PlanExecutor 兼容执行路径。
@@ -138,8 +144,7 @@ flowchart TD
     C --> PL
     E --> PL
     R --> PL
-    C --> M["memory"]
-    E --> M
+    M["memory\npackaging=pom\narchive only"]
 
     classDef sealed fill:#f3f3f3,stroke:#777,stroke-dasharray:5 5;
     class M sealed;
@@ -154,10 +159,10 @@ core           -> protocol + common + core-extension
 kit            -> protocol + common + core-extension
 runtime        -> protocol + common + core-extension + core + kit
 platform       -> protocol + common + core-extension + runtime
-memory         -> common + core-extension
+memory         -> 无项目依赖（非编译归档模块）
 ```
 
-以上是源码真实直接依赖，不做传递边约简。任何模块直接 import 另一个项目模块的类型，都必须在自身 POM 声明该依赖；测试源码同样适用。父 POM 的 dependencyManagement 只管理版本，不提供依赖可见性。
+以上是标准 `src/main`/`src/test` 源码的真实直接依赖，不做传递边约简。任何模块直接 import 另一个项目模块的类型，都必须在自身 POM 声明该依赖；测试源码同样适用。memory 的归档目录不是 Maven source root，其中保留的旧 import 不参与依赖分析。父 POM 的 dependencyManagement 只管理版本，不提供依赖可见性。
 
 约束：
 
@@ -168,8 +173,8 @@ memory         -> common + core-extension
 - `kit` 不依赖 core 的具体实现。
 - `runtime` 不依赖 platform 和 memory。
 - `platform` 可以引入完整 Spring 与数据库依赖。
-- 没有任何模块依赖 `memory`。
-- 全部模块使用 Jackson；依赖树中不得出现 Fastjson。
+- `memory` 使用 `packaging=pom`，没有标准源码、测试和项目依赖；没有任何模块依赖或扫描其归档目录。
+- 七个代码模块标准源码统一使用 Jackson，依赖树中不得出现 Fastjson；memory archive 可原样保留旧调用，但不参与源码/依赖验收。
 
 ### 4.2 Maven 目录
 
@@ -231,6 +236,7 @@ artifactId: apex-agent-{module}
 
 - `ChatRequest`。
 - `RequestType`。
+- `SessionStateView`：刷新恢复用只读 DTO，包含 session/agent/status 和可空的既有交互消息。
 - `AgentEventType`。
 - `AgentMessage` 及全部具体消息。
 - `STREAM_CONTENT`、`STREAM_THINK`。
@@ -501,7 +507,7 @@ platform 不拥有核心循环，也不重新实现 runtime 的工具和 Hook �
 
 ### 5.8 memory
 
-职责：封存当前长期记忆与 Skill Learning 能力，使其可以独立编译和测试，但不进入默认产品链路。
+职责：归档当前长期记忆、会话搜索与 Skill Learning 的旧源码和资源，供未来整理历史思路；它不是本期可运行能力或可复用库。
 
 包含：
 
@@ -513,15 +519,15 @@ platform 不拥有核心循环，也不重新实现 runtime 的工具和 Hook �
 - `session_search`。
 - Skill 使用记录。
 - Skill 经验抽取、调度和增强。
-- Memory/Skill Learning 自有的仓储和 schema。
+- 旧仓储、SQL、配置等历史资源。
 
 边界：
 
-- 不包含 runtime 必需的 Session/Conversation 存储实现。
-- 不包含普通 Skill 定义、加载或 `activate_skill`。
-- platform、runtime、core 和 kit 均不依赖 memory。
-- platform 默认配置不再引用 `skillExperienceAugmentHook` 或 `skillUsageRecorderHook`。
-- memory 可以实现 core-extension 中的扩展接口，供未来显式集成，但本期不装配。
+- 所有归档文件放入 `archive/` 等非标准 Maven source root；允许保留对旧框架的引用，但不得进入 `src/main` 或 `src/test`。
+- POM 使用 `packaging=pom`，不声明 common/core-extension 或基础设施依赖，不产出可执行 class，不运行 memory 测试。
+- 不设计独立 schema、实时 ingestion、适配层或管理应用；旧 SQL 只作为归档资源，不能被 Flyway 自动发现。
+- platform、runtime、core 和 kit 均不依赖 memory，默认配置不再引用 `session_search` 或 Skill Learning Hook。
+- 归档清单记录原路径、类别与用途；未来恢复能力必须重新设计并迁入标准源码目录。
 
 ## 6. 核心领域模型
 
@@ -1262,13 +1268,14 @@ core 内部 `ToolResultFactory` 是状态机合成结果的唯一所有者，统
 
 ### 11.4 HTTP SubAgent
 
-- “SubAgent”不是单独的 Agent 类型。任意已注册 Agent 都可以独立处理用户请求，也可以被另一个 Agent 作为 HTTP 工具调用。
+- “SubAgent”不是单独的 Agent 类型。任意能在一次 NEW 内自行完成、不会进入人工介入的已注册 Agent，都可以被另一个 Agent 作为 HTTP 工具调用。
 - Agent 定义通过 SubAgent 工具配置声明目标 `agentKey`、名称、描述、服务地址、超时等；runtime 将其适配为普通 `AgentTool`，core 不感知父子关系。
 - 调用时 runtime 向目标平台的现有 `POST /api/sse/chat` 发送 `RequestType.NEW`，使用目标 `agentKey` 和独立的子 sessionId，不复用父 sessionId。
 - 用户身份继续通过 `X-User-Id` 传播；父调用链深度和 trace 信息只用于 runtime 侧防递归与观测，不改变前端协议。
 - runtime 负责 HTTP 请求、SSE 解析、业务超时、请求级主动取消和异常转换，protocol 提供消息反序列化模型；HTTP future 与 body/stream close 必须注册到父 execution token。
 - 子 Agent 的 `STREAM_CONTENT` 聚合为父 Agent 当前 ToolCall 的 ToolResult。
 - `INVOCATION_*` 由 HTTP SubAgent 工具通过本次工具调用的 `ToolExecutionObserver` 透传；core 校验事件类型后再发布到当前请求出口。
+- 子流出现 ASK_HUMAN/TOOL_CONFIRMATION 时，runtime 立即取消子请求，按普通工具失败交给父 core 生成模型可见结果；不透传交互事件，也不实现父子 session HUMAN_RESPONSE 路由。
 - `STREAM_CONTENT` 不通过 observer 透传；`ARTIFACT_*` 保持当前无生产者/忽略语义。远端 `END` 只结束当前工具调用，禁止通过 observer 发布为父请求的 `END`。
 - 子 Agent 请求与普通用户请求走同一个 chat 接口和同一套 ApexAgent 主循环，因此任何 Agent 都天然具备作为 SubAgent 的能力。
 - 必须限制最大调用深度，并拒绝目标 `agentKey` 已出现在当前 SubAgent 调用链中的递归调用，避免每层创建新 session 后仍形成 Agent 闭环。
@@ -1535,11 +1542,12 @@ SessionSnapshot copy = JsonUtils.deepCopy(snapshot, SessionSnapshot.class);
 
 ### 15.1 HTTP 边界
 
-保持不变：
+既有接口保持不变，并新增一个只读刷新恢复接口：
 
 ```text
 GET  /api/sse/agents
 POST /api/sse/chat
+GET  /api/sse/sessions/{sessionId}?agentKey={agentKey}
 Header: X-User-Id
 ```
 
@@ -1552,6 +1560,18 @@ agentKey
 type
 humanResponse
 ```
+
+会话状态响应沿用 `code/data/message` 外壳，`data` 为：
+
+```text
+SessionStateView
+  sessionId: String
+  agentKey: String
+  executionStatus: IN_PROGRESS | COMPLETED | FAILED | CANCELLED | HUMAN_IN_THE_LOOP
+  pendingInteraction: AgentMessage? // 仅 ASK_HUMAN 或 TOOL_CONFIRMATION
+```
+
+查询按 Header 用户、path sessionId 与 query agentKey 三者校验归属；不存在或不属于当前用户统一返回 404，避免泄露 session 是否存在。只有 `HUMAN_IN_THE_LOOP` 必须携带非空 `pendingInteraction`，其他状态必须为空；快照状态与挂起对象不满足该不变量时返回 500 并记录结构化数据错误。该接口不获取 execution lease，不创建 Turn/Iteration，不执行 Hook、模型、工具，也不发送 END。REST 响应外层沿用现有 camelCase，嵌套的 protocol `AgentMessage` 继续使用既有 snake_case。
 
 platform 处理：
 
@@ -1855,14 +1875,15 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - 切换 PostgreSQL。
 - 增加不含 JSONB、独立 Turn/Iteration 表的 Flyway schema，长内容与序列化快照使用 TEXT。
 - 删除 MySQL 依赖。
-- 验证现有前端无缝连接。
-- 新 platform 只有在 HTTP/SSE Golden File、NEW/HUMAN_RESPONSE、409、PostgreSQL 恢复和前端零修改验证均通过后，才可接管默认启动入口。
+- 验证现有聊天与 SSE 消费保持兼容，并实现刷新后的挂起交互查询回显。
+- 新 platform 只有在 HTTP/SSE Golden File、NEW/HUMAN_RESPONSE、409、PostgreSQL 恢复、只读会话状态查询和前端回显验证均通过后，才可接管默认启动入口。
 
 ### 阶段 7：memory 封存
 
 - 搬迁长期 Memory、搜索、管理和 Skill Learning。
 - 移除 platform/runtime 对 memory 的依赖和配置。
-- 保持 memory 独立编译与单元测试。
+- 原样放入 memory 非标准源码归档目录并生成来源清单；不做当前框架适配、schema 重构或测试迁移。
+- memory 使用 `packaging=pom`，归档文件不进入 compile/test。
 - `session_search` 不再进入默认工具。
 
 ### 阶段 8：清理
@@ -1968,7 +1989,8 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - 多配置源同时出现时失败，不执行全局/workspace 叠加。
 - 摘要压缩。
 - MCP stdio/SSE 资源关闭，调用只传工具参数且不泄露上下文。
-- 任意 Agent 作为 HTTP SubAgent 的协议解析、独立子 session、调用深度限制，以及通过 ToolExecutionObserver 透传 INVOCATION 事件。
+- 允许一次 NEW 内自行完成的 Agent 作为 HTTP SubAgent，覆盖协议解析、独立子 session、调用深度限制，以及通过 ToolExecutionObserver 透传 INVOCATION 事件。
+- 子流出现 ASK_HUMAN/TOOL_CONFIRMATION 时取消子请求、停止读取且转父 ToolCall 普通失败；不测试或实现嵌套人工恢复。
 - MCP/SubAgent 初始化失败记录 warn、关闭失败资源并登记不可用状态；新绑定被拒绝，已有绑定转只读历史且不进入模型/执行器，健康工具继续可用。
 - 远端 END 只结束 SubAgent 工具调用，不会通过 ToolExecutionObserver 结束父请求。
 - `newAgent`/`resumeAgent` 在返回 `ApexAgentExecution` 前同步取得 session lease；同一 session 的第二个 NEW 或 HUMAN_RESPONSE 在方法返回前抛出 `SessionBusyException`。
@@ -2018,6 +2040,8 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - `1.0.0` 快照版本可完整往返和重启恢复；跨版本与未知版本不属于本期测试范围。
 - 时间列统一为 `*_time`。
 - Agent 列表。
+- `GET /api/sse/sessions/{sessionId}?agentKey=...` 的归属校验、状态 DTO 和挂起交互映射；读取不获取 execution lease、不产生任何执行副作用。
+- 前端持久化当前 session 定位信息，刷新查询到 `HUMAN_IN_THE_LOOP` 后用既有 reducer 重建问题/确认卡片。
 
 PostgreSQL 集成测试建议使用 Testcontainers；纯规则测试不得依赖外部数据库。
 
@@ -2039,18 +2063,18 @@ PostgreSQL 集成测试建议使用 Testcontainers；纯规则测试不得依赖
 
 且 `END` 不额外增加字段。
 
-前端源码不修改。最终联调阶段运行现有前端测试、typecheck 和 build，只用于证明兼容性。
+前端仅增加 session 定位持久化、状态查询和初始化回显；既有 chat SSE 类型与 reducer 分支不得为此改变语义。最终联调运行前端测试、typecheck 和 build，既验证兼容性，也覆盖刷新回显。
 
 ## 22. 验收标准
 
 ### 模块
 
-- 八个目标模块全部可独立编译。
-- 父 POM 一次执行所有模块测试。
+- 七个代码模块可编译测试；memory 以 `packaging=pom` 参与 reactor，仅校验归档边界。
+- 父 POM 一次执行七个代码模块测试并处理 memory 占位模块。
 - 依赖图与本方案一致。
 - core-extension 中没有实现类。
 - common 没有 Spring 依赖。
-- memory 没有被任何模块依赖。
+- memory 没有被任何模块依赖，归档目录不进入 Maven source root。
 - common 提供统一 Jackson `JsonUtils`，依赖树中没有 Fastjson。
 
 ### runtime
@@ -2096,8 +2120,8 @@ PostgreSQL 集成测试建议使用 Testcontainers；纯规则测试不得依赖
 
 ### platform
 
-- 前端零修改。
-- HTTP/SSE 协议零变化。
+- 既有 Agent 列表、chat 与 SSE 协议零破坏；新增只读会话状态接口。
+- 前端刷新能按持久化 session 定位查询状态，并在 `HUMAN_IN_THE_LOOP` 时重新展示原问题或确认卡片。
 - session 冲突在 SSE 响应提交前同步映射为 HTTP 409。
 - 每个请求拥有独立 EventPublisher 和 END 幂等状态。
 - 本期 platform 明确只支持单实例部署；水平扩展前必须替换分布式 SessionExecutionCoordinator。
@@ -2171,7 +2195,7 @@ core 运行时发送 END，runtime 需要覆盖同步构造失败和线程池拒
 
 - 在发布说明中明确。
 - runtime 保持对话连续性和摘要。
-- memory 独立构建，未来通过扩展接口重新接入。
+- memory 仅作非编译源码/资源归档；未来若恢复能力，重新设计依赖、数据源和测试后再接入。
 
 ### 23.7 session 工具状态与定义漂移
 
@@ -2297,4 +2321,4 @@ runtime 负责提供开箱即用的端口实现、请求级事件绑定和 sessi
 
 platform 负责把 runtime 接入当前 Web 产品，在返回 SSE 响应前同步取得执行句柄；本期部署边界为单实例。
 
-memory 保持封存，不再反向塑造核心框架。
+memory 保持非编译归档，不再反向塑造核心框架。

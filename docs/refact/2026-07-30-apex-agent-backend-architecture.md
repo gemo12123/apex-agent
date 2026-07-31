@@ -32,15 +32,15 @@
 - Agent 的模型、工具、Hook、Skill、事件出口和存储都由接口屏蔽实现细节。
 - runtime 可以脱离 Spring ApplicationContext，通过普通 Java Builder 创建并运行 Agent。
 - platform 只负责 Web 产品接入、SSE、并发入口、Spring 配置和 PostgreSQL 持久化。
-- 长期记忆、会话搜索和 Skill Learning 封存在 memory，不进入默认执行链路。
-- 保持前端零改动兼容。
+- 长期记忆、会话搜索和 Skill Learning 的旧源码/资源归档在 memory 非标准源码目录，不进入编译或默认执行链路。
+- 保持既有聊天与 SSE 契约兼容，并新增刷新挂起交互所需的只读状态查询。
 
 ### 2.2 非目标
 
 - 不实现数据库版 AgentDefinitionProvider。
 - 不兼容历史 MySQL 配置和历史数据。
 - 不保留 PlanExecutor 的兼容执行路径。
-- 不恢复长期 Memory、`session_search` 或 Skill Learning 到默认运行链路。
+- 不恢复长期 Memory、`session_search` 或 Skill Learning 到默认运行链路，也不要求 memory 适配、编译或测试。
 - 不升级 Spring Boot、Spring AI 或模型供应商版本。
 - 不修改 `END` 当前缺少 `execution_status` 的线协议行为。
 - 本期不支持 platform 水平多实例部署；上线多实例前必须先实现分布式 session execution lease。
@@ -85,7 +85,7 @@ flowchart LR
 | 对话压缩位于 `AgentPromptAssembler.prepareWorkingMessages` 内 | 压缩时机和生命周期不可观察 | 在 core 的每次模型调用前建立显式压缩门 |
 | Session 存储位于 memory 包，长期 Memory 与会话连续性混在一起 | 可选能力反向成为核心依赖 | Session/Conversation 端口进入 core-extension，默认实现进入 runtime/platform |
 | 协议 DTO 依赖执行上下文和 Hook 类型 | protocol 无法独立发布 | protocol 只保留纯协议 DTO，消息工厂进入 core |
-| Fastjson 与 Jackson 并存 | 序列化规则分裂 | 全项目统一 Jackson 与 common `JsonUtils` |
+| 生产源码中 Fastjson 与 Jackson 并存 | 序列化规则分裂 | 七个代码模块统一 Jackson 与 common `JsonUtils`；memory archive 不参与编译 |
 | 当前并发保护只在 Web 协调器 | 独立 runtime 可能并发覆盖 session | runtime 增加最终 session 执行锁 |
 
 ## 4. 总体架构
@@ -104,7 +104,7 @@ flowchart LR
     Runtime --> Kit["kit<br/>基础工具与 Hook"]
     Protocol["protocol<br/>公共线协议"] --> Client
     Core --> Protocol
-    Memory["memory<br/>封存能力"] -. "本期不装配" .-> Ports
+    Memory["memory<br/>非编译历史归档"]
 ```
 
 核心控制方向是：
@@ -141,8 +141,7 @@ flowchart TD
     CE --> C
     CE --> P
     C --> P["protocol"]
-    M["memory"] --> CE
-    M --> C
+    M["memory\npackaging=pom\narchive only"]
 ```
 
 对应关系：
@@ -154,10 +153,10 @@ core           -> protocol + common + core-extension
 kit            -> protocol + common + core-extension
 runtime        -> protocol + common + core-extension + core + kit
 platform       -> protocol + common + core-extension + runtime
-memory         -> common + core-extension
+memory         -> 无项目依赖（非编译归档模块）
 ```
 
-这是生产源码的真实直接 Maven 依赖图，不是删除冗余边后的传递闭包简图。源码或测试直接引用哪个项目模块的类型，本模块 POM 就必须直接声明哪个模块；`dependencyManagement` 和其他模块的传递依赖不能替代直接声明。
+这是标准 Maven 生产/测试源码的真实直接依赖图，不是删除冗余边后的传递闭包简图。源码或测试直接引用哪个项目模块的类型，本模块 POM 就必须直接声明哪个模块；memory 的归档目录不是 source root，其中的历史 import 不参与依赖分析。`dependencyManagement` 和其他模块的传递依赖不能替代直接声明。
 
 禁止形成任何反向依赖或环：
 
@@ -168,6 +167,7 @@ memory         -> common + core-extension
 - kit 不依赖 core 具体实现。
 - runtime 不依赖 platform 或 memory。
 - platform、runtime、core、kit 均不依赖 memory。
+- memory 使用 `packaging=pom`，不声明项目依赖，不产出 class；其他模块不得扫描其归档目录。
 
 ### 4.3 模块目录
 
@@ -184,7 +184,7 @@ apex-agent/
 └── memory/
 ```
 
-最终态父 POM 只负责聚合、JDK 25、UTF-8、依赖版本和构建规则，只有 platform 生成 Spring Boot 可执行包。
+最终态父 POM 只负责聚合、JDK 25、UTF-8、依赖版本和构建规则，只有 platform 生成 Spring Boot 可执行包；memory 只作为归档目录占位模块参与 reactor。
 
 迁移期临时增加 `legacy` 模块：父 POM 切换为 `packaging=pom` 时，原根目录的 `src/main`、`src/test` 和资源整体迁入 `legacy`，由它继续运行旧测试和旧 Spring Boot 入口。迁移期允许 `legacy` 依赖已完成的目标模块，但禁止任何目标模块依赖 `legacy`。新 platform 通过协议、恢复、并发、PostgreSQL 和前端兼容切换门槛后接管默认入口，最终清理 `legacy`；因此上图和八模块目录仍表示最终态。
 
@@ -199,6 +199,7 @@ protocol 是前端、platform、core 事件工厂和远程 SubAgent 共用的协
 - `ChatRequest`、`RequestType`。
 - `AgentMessage` 及 Jackson 多态配置。
 - 全部 SSE 事件 DTO。
+- 刷新恢复用 `SessionStateView` 只读 HTTP DTO，其中 camelCase `pendingInteraction` 复用 ASK_HUMAN/TOOL_CONFIRMATION 消息。
 - `AgentEventType`、协议字段常量。
 - ASK_HUMAN 与 TOOL_CONFIRMATION 的展示、选项和可编辑字段 DTO。
 
@@ -332,6 +333,7 @@ platform 包含：
 - `ApexApplication`。
 - Spring Boot 自动装配。
 - `ChatController`、`ChatService`。
+- 只读 `SessionStateController/Service`，按用户、Agent、Session 查询当前状态和挂起交互。
 - `ApexAgentCoordinator`。
 - `X-User-Id` Filter、ThreadLocal 传播与清理。
 - 请求级 `SseEmitterAgentEventPublisher`，每个 NEW/HUMAN_RESPONSE 请求新建。
@@ -339,21 +341,21 @@ platform 包含：
 - Spring Bean 到 runtime 注册表的适配。
 - Controller 返回 emitter 前的同步 execution 准备、HTTP 409 映射和异步执行器。
 - PostgreSQL Session/Conversation Repository。
-- Agent 列表接口和 Flyway schema。
+- Agent 列表、会话状态查询接口和 Flyway schema。
 
 platform 不拥有主循环，不重新实现工具、Hook、恢复或 session lease 语义；本期只允许单实例部署。
 
-### 5.8 memory：封存能力
+### 5.8 memory：历史源码归档
 
-memory 保留：
+memory 归档：
 
 - 用户画像、事实、执行历史和 Agent 经验记忆。
 - 召回、抽取、写入和管理。
 - pgvector 会话搜索与 `session_search`。
 - Skill 使用记录、经验抽取、调度与增强。
-- 相关 Repository、实体和 schema。
+- 相关旧 Repository、实体、SQL 和配置资源。
 
-memory 可以实现 core-extension 的扩展接口，但本期不由 runtime 或 platform 装配。普通 Skill 定义、加载、激活和资源读取属于 runtime，不属于 memory。
+归档文件位于 `archive/` 等非标准 Maven source root，允许保留旧框架引用；memory POM 使用 `packaging=pom`，不声明依赖、不编译、不测试、不提供 schema migration 或可运行管理入口。归档清单记录原路径与用途。普通 Skill 定义、加载、激活和资源读取属于 runtime，不属于 memory；未来若恢复归档能力，必须重新设计后迁入标准源码目录。
 
 ## 6. 核心领域模型
 
@@ -526,6 +528,8 @@ AGENT_BUILD 属于构造生命周期；消息压缩前后属于条件生命周�
 Hook 只能接收与当前生命周期匹配的只读上下文视图，并通过显式结果请求 core 修改状态。Hook 不能持有或直接操作 core 实现对象。
 
 定义与运行态必须分开：只有 `AGENT_BUILD` 可以返回 `AgentDefinitionOperation` 并修改定义草稿。其他十个生命周期的结果族不暴露任何定义或 Hook Binding 修改入口；它们只能修改各自允许的运行态对象。session `enabledTools` 是运行态，不是定义，改变它不等于修改 `availableTools` 或 `defaultEnabledTools`。
+
+AGENT_BUILD 开始时，core 先复制当时启用的 Binding 并按 `(order, id)` 排序为不可变分发快照。本次 Hook 对 AGENT_BUILD Binding 的增删改仍原子进入最终定义，但不会改变正在遍历的快照；因此不会重复、跳过或递归执行，只对后续构造与生命周期生效。
 
 结果按生命周期分型：
 
@@ -1005,13 +1009,13 @@ platform 只支持 PostgreSQL，建议由 Flyway 管理：
 
 ### 11.3 序列化规则
 
-- 全项目使用 Jackson。
+- 七个代码模块标准源码使用 Jackson；memory archive 可保留历史序列化调用但不得进入 classpath。
 - common 提供唯一 `JsonUtils` 入口。
 - PostgreSQL 不使用 JSONB。
 - 快照、集合和扩展 payload 序列化为 JSON 字符串后存入 TEXT。
 - 需要查询、排序和索引的字段提升为独立标量列。
 - 定义与快照 schema 版本首版固定为字符串 `1.0.0`，本期只提供该版本 Adapter；不实现跨版本升级、版本跨度或未知版本分支。
-- Fastjson/fastjson2 依赖和调用全部删除。
+- 七个代码模块的 Fastjson/fastjson2 依赖和调用全部删除；非编译 archive 不纳入生产源码搜索。
 
 ### 11.4 存储提交顺序
 
@@ -1022,6 +1026,7 @@ platform 只支持 PostgreSQL，建议由 Flyway 管理：
 - 压缩结果先保存到 ConversationRepository，再保存 SessionSnapshot；两步都成功后才调用业务模型。
 - 每个 ToolResult 先追加到 ConversationRepository，再保存最新 SessionSnapshot；两步都成功后才继续后序 ToolCall。
 - 任一步失败都停止后续执行并传播错误。测试验证调用顺序和各 Repository 单次操作的一致性，不验证跨 Repository 回滚。
+- `entryId`/`compactionId` 只提供单 Repository 及同一 execution 内确定性幂等；没有客户端 requestId 时，不把新的 HTTP 请求猜测为上一次部分提交的重试，也不自动补偿或修复。
 
 ## 12. 外部集成
 
@@ -1046,6 +1051,7 @@ SubAgent 不是特殊 Agent 类型，而是一个指向普通远程 Agent 的工
 - INVOCATION 事件通过 core 为本次工具执行创建的 `ToolExecutionObserver` 透传到父请求。
 - ARTIFACT 事件保持当前无生产者/忽略语义。
 - 收到远端 END 后只结束当前工具调用；SubAgent 工具不得通过 observer 发布父请求 END。
+- 收到 ASK_HUMAN/TOOL_CONFIRMATION 时取消子请求并按父 ToolCall 普通失败返回模型可见结果；本期不建立父子 session 映射，不透传或恢复子 Agent 人工介入。
 - 通过最大调用深度与 agentKey 调用链检测阻止递归闭环。
 - HTTP future 和 response body/stream close 注册到父 execution token；取消时停止解析/转发并抛 `CancellationRequestedException`。
 
@@ -1053,8 +1059,8 @@ SubAgent 不是特殊 Agent 类型，而是一个指向普通远程 Agent 的工
 
 ### 13.1 兼容原则
 
-- 前端源码不修改。
-- HTTP 路径、Header 和请求字段不变。
+- 既有 `/api/sse/agents`、`/api/sse/chat` 路径、Header、请求字段和响应语义不变。
+- 新增 `GET /api/sse/sessions/{sessionId}?agentKey=...` 只读接口；前端只为 session 定位持久化与刷新回显增加代码。
 - SSE 信封 `event_type`、`context`、`messages` 不变。
 - 所有运行消息的 `context.mode` 固定为 `"react"`。
 - 不再输出 `stage_id`。
@@ -1082,7 +1088,7 @@ END 保持精确兼容：
 {"event_type":"END"}
 ```
 
-本次重构不新增 `execution_status`。
+本次重构不向 SSE `END` 新增 `execution_status`；只读状态接口另以 REST camelCase `executionStatus` 返回当前会话状态。
 
 ## 14. Agent 配置架构
 
@@ -1135,9 +1141,9 @@ platform 支持进程重启后的挂起恢复；外部 MCP、Skill 目录和远�
 
 本期 platform 只能运行一个应用实例。PostgreSQL 保证持久化恢复，不替代进程内 session lease；在提供分布式 `SessionExecutionCoordinator` 前，不得通过多副本、滚动重叠实例或并行消费者宣称水平扩展安全。
 
-### 15.3 memory 独立构建
+### 15.3 memory 归档模块
 
-memory 参与父 POM 编译与单元测试，但不进入 platform 默认启动依赖图。未来只有显式集成模块可以装配它。
+memory 以 `packaging=pom` 参与父 reactor，归档文件不进入 compile/test，也不进入 platform 默认启动依赖图。未来恢复使用前必须另立设计并补齐框架适配、数据源、安全和测试。
 
 ## 16. 当前代码到目标模块的迁移视图
 
@@ -1246,6 +1252,7 @@ memory 参与父 POM 编译与单元测试，但不进入 platform 默认启动�
 - 动态 AgentDefinitionProvider 不在 Builder 阶段加载；不同 agentKey 的定义均在请求构造时通过同一 Assembler 校验。
 - 生命周期结果族严格匹配：TURN_START、ITERATION_START、ITERATION_END 使用 `LoopHookResult`，TURN_END 只接受 `TurnEndHookResult`。
 - `AgentDefinitionProvider.listAgents()` 不触发完整定义加载；File Provider 只加载显式 YAML 资源一次且不热加载。
+- AGENT_BUILD 使用进入点不可变有序 Binding 快照；本次修改自身 Binding 不改变当前分发链。
 - MCP/SubAgent 初始化失败关闭失败资源并登记不可用状态；新绑定构造失败，已有绑定转只读历史且从有效工具集合移除，健康工具继续可用。
 
 ### 18.3 恢复测试
@@ -1260,6 +1267,7 @@ memory 参与父 POM 编译与单元测试，但不进入 platform 默认启动�
 - ask_human 与工具确认共用恢复管线。
 - 多 ToolCall 中前序结果保留。
 - 收口后清除唯一挂起对象。
+- 刷新读取 `HUMAN_IN_THE_LOOP` 快照时可从同一挂起对象重建原 ASK_HUMAN/TOOL_CONFIRMATION，且查询无执行副作用。
 - 工具确认拒绝结果固定为“用户拒绝执行”；END_TURN 补齐结果固定为“达到最大轮次，强制结束”，均保留原 toolCallId/name 且无自定义 code/payload。
 - 拒绝、强制结束和取消三类固定结果均由 core 同一 `ToolResultFactory` 生成；kit 只产生确认介入请求，源码/artifact 不包含等价固定结果工厂。
 
@@ -1268,6 +1276,7 @@ memory 参与父 POM 编译与单元测试，但不进入 platform 默认启动�
 必须覆盖：
 
 - 现有 Controller 路径与请求结构。
+- 只读会话状态接口按 `X-User-Id + agentKey + sessionId` 校验归属，非本用户与不存在统一 404；HITL 返回原交互，其他状态不返回伪造交互。
 - `X-User-Id` 校验和传播。
 - 并发请求映射为 409。
 - 并发冲突在 Controller 返回 emitter 前同步产生，NEW/HUMAN_RESPONSE 使用同一 lease 空间。

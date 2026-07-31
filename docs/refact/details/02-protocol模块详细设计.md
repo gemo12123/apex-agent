@@ -10,7 +10,8 @@
 org.gemo.apex.protocol
 ├── request
 │   ├── ChatRequest
-│   └── RequestType
+│   ├── RequestType
+│   └── SessionStateView
 ├── event
 │   ├── AgentMessage
 │   ├── AgentEventType
@@ -53,6 +54,18 @@ org.gemo.apex.protocol
 
 `ChatRequest` 的 JSON 字段保持 `query`、`sessionId`、`agentKey`、`type`、`humanResponse`。为保持现有 camelCase HTTP 请求，不施加全局 snake_case 策略；SSE 明确 snake_case 的字段继续用 `@JsonProperty`。
 
+新增只读响应 DTO：
+
+```java
+public record SessionStateView(
+        String sessionId,
+        String agentKey,
+        String executionStatus,
+        AgentMessage pendingInteraction) {}
+```
+
+`pendingInteraction` 只允许 ASK_HUMAN/TOOL_CONFIRMATION 两个现有子类；protocol 只表达外形，HITL 与空值不变量由 platform 映射器校验。该 DTO 是新增 GET 的响应 data，不进入 SSE 信封。
+
 `AgentMessage` 继续使用：
 
 ```java
@@ -90,6 +103,7 @@ public abstract class AgentMessage {
 - `AgentMessagePolymorphismTest`：13 种事件按 event_type 双向反序列化。
 - `ToolConfirmationDtoTest`：完整字段、空展示列表、editable 推导结果由上层设置后的 JSON。
 - `ChatRequestCompatibilityTest`：默认 type、默认 agentKey 和 HUMAN_RESPONSE Map。
+- `SessionStateViewTest`：HITL 两种多态交互、非 HITL 空 interaction、REST camelCase 外层、pending 消息 snake_case 内层和 round-trip。
 - `ProtocolInventoryTest`：当前事件常量与 `@JsonSubTypes` 一一对应。
 
 ### 架构符合性
@@ -125,6 +139,9 @@ stream-content.json
 ask-human.json
 tool-confirmation.json
 end.json
+session-state-ask-human.json
+session-state-tool-confirmation.json
+session-state-completed.json
 plan-declared.compat.json
 plan-change.compat.json
 task-think-declared.compat.json
@@ -162,4 +179,4 @@ artifact-change.compat.json
 
 ### 架构符合性
 
-精确契约测试将“前端零修改”转成自动证据，同时允许兼容 DTO 留存而不把已删除的 PlanExecutor 重新带入 core。
+精确契约测试把“既有聊天/SSE 零破坏”转成自动证据，同时允许新增只读状态 DTO，并让兼容 DTO 留存而不把已删除的 PlanExecutor 重新带入 core。

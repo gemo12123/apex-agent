@@ -18,12 +18,14 @@
   4. 提供可供静态定义预检复用的同一校验器，但请求期仍再次权威校验。
   5. 动态 Provider 不在 Builder 阶段加载；支持不同 agentKey 在请求时分别校验。
   6. 新 session/AGENT_BUILD 尝试绑定已登记不可用工具时拒绝构造；已有 session 的既有绑定迁移为只读历史并从有效定义和 `enabledTools` 移出，普通配置漂移仍失败。
+  7. AGENT_BUILD 进入时复制原始启用 Binding，按 `(order, id)` 形成不可变分发快照；本次 Hook 对自身 Binding 的修改只进入最终定义与后续生命周期。
 - **预期产出**：Assembler、Factory、唯一定义校验器和构造/恢复单元测试。
 - **验收标准**：
   - 测试精确验证加载、构造 Hook、校验、冻结顺序。
   - 恢复路径 Provider 调用次数与 AGENT_BUILD 调用次数均为 0。
   - 非法工具、Skill、Hook、Prompt 或不可用新绑定在 Agent 创建前失败，且不产生部分冻结快照；旧绑定迁移只生成新的不可变快照。
   - runtime 源码不存在复制的定义级校验规则。
+  - 增删当前/后续 AGENT_BUILD Binding 的测试证明本次链无重复、漏跑或递归，下一次构造才观察到修改。
 - **限制条件或注意事项**：数据库 Agent 定义源不在本期；Builder 只校验注册表和基础设施装配；首版定义快照 schema 版本固定为 `1.0.0`，本期不实现跨版本兼容。
 
 ## CORE-02 实现 11 生命周期调度器与原子结果应用
@@ -218,11 +220,13 @@
   3. 将挂起对象、HUMAN_IN_THE_LOOP、当前 Turn/Iteration 放入同一 SessionSnapshot 并一次保存。
   4. 发布 ASK_HUMAN/TOOL_CONFIRMATION 和本次传输 END。
   5. 挂起时不执行真实工具、POST_TOOL_CALL、ITERATION_END 或 TURN_END。
+  6. 保存足以重建原 ASK_HUMAN/TOOL_CONFIRMATION 的完整展示 payload，供 platform 刷新状态查询使用；core 不提供事件重放执行入口。
 - **预期产出**：统一挂起创建器、SessionSnapshot 保存逻辑和挂起测试。
 - **验收标准**：
   - 挂起快照不含 ToolCall index、重复 enabledTools/定义快照或其他生命周期 Hook 历史。
   - 两类介入使用同一挂起结构和保存入口。
   - SessionRepository 保存失败时不发布交互事件，也不继续执行。
+  - 实时发布事件与从同一快照映射的刷新回显事件规范化 JSON 一致，读取不修改状态。
 - **限制条件或注意事项**：挂起保存只涉及一次 SessionRepository 操作，不引入跨 Repository 事务；事件 END 只结束本次传输。
 
 ## CORE-07B 实现 HUMAN_RESPONSE 恢复校验与上下文重建

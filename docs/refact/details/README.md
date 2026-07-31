@@ -70,7 +70,7 @@
 | [06-kit模块详细设计](06-kit模块详细设计.md) | KIT-01～03 | ask_human、确认、截断和组合器 |
 | [07-runtime模块详细设计](07-runtime模块详细设计.md) | RUN-01～08 | Builder、适配器、存储、execution/取消、lease、Skill、MCP、SubAgent |
 | [08-platform模块详细设计](08-platform模块详细设计.md) | PLAT-01～04 | Spring Boot、HTTP/SSE、PostgreSQL 和切换验收 |
-| [09-memory模块详细设计](09-memory模块详细设计.md) | MEM-01～03 | 长期 Memory 与 Skill Learning 封存 |
+| [09-memory模块详细设计](09-memory模块详细设计.md) | MEM-01～03 | 长期 Memory 与 Skill Learning 非编译历史归档 |
 | [10-清理与整体验收详细设计](10-清理与整体验收详细设计.md) | CLEAN-01～03 | 删除旧链路、命名收口和交付证据 |
 | [11-冲突风险与待确认项](11-冲突风险与待确认项.md) | 全部 | 上游冲突、补充决策、阻塞条件和缓解措施 |
 
@@ -83,7 +83,7 @@
 3. PRO/COM/EXT 先冻结公共契约；下游不得复制同义 DTO。
 4. core 每个任务只用 Fake 端口完成，不能等待 Spring、MCP 或 PostgreSQL 才可测试。
 5. runtime 完成后先证明无 Spring IoC 可执行，再进入 platform。
-6. platform 切换必须同时通过 HTTP/SSE、恢复、409、数据库和前端零修改门槛。
+6. platform 切换必须同时通过既有 HTTP/SSE、恢复、409、数据库、新增只读状态查询和前端刷新回显门槛。
 7. CLEAN 只删除已被新链路覆盖且有测试证据的旧代码。
 
 共享文件的唯一所有者沿用任务 README；对 `apex-agent/pom.xml`、公共 record 和数据库 migration 的并行修改必须串行合并。
@@ -108,5 +108,10 @@
 - 请求级 Publisher 已绑定后，core 同步构造/恢复准备失败由 platform 返回仅含一个既有 END 的 SSE；参数错误仍为 400，session busy 仍为 409 且无 END。
 - 只有 AGENT_BUILD 可以修改 Agent 定义；其他生命周期只能修改各自结果族允许的运行态。
 - 运行中 `cancel()`/`close()` 只发请求级取消命令并立即返回，不设置超时或 grace period；默认 adapter 主动取消底层调用，END 与 lease 由实际执行 finally 收口。
+- 数据库 AgentDefinitionProvider 不在本期；旧 global/workspace 配置不兼容且不迁移。
+- AGENT_BUILD 使用进入点 Binding 快照；本次修改自身 Binding 只影响最终定义和后续生命周期。
+- 不做跨 Repository 事务、补偿或跨 HTTP 自动修复，只保留单 Repository 幂等。
+- 刷新通过新增只读会话状态接口回显持久化 HITL，前端允许为 session 定位与初始化查询做最小修改。
+- 远程 SubAgent 不支持人工介入；memory 仅保存非编译历史源码/资源，不适配、不测试。
 
 其余仍待确认的条目见 [冲突、风险与待确认项](11-冲突风险与待确认项.md)。

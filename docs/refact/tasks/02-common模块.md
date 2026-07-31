@@ -95,6 +95,6 @@
   - 泛型集合、时间、record、枚举和 SessionSnapshot round-trip 测试通过。
   - deepCopy 后修改源对象或副本互不影响。
   - common 不注册 Spring AI、数据库或 platform 专用类型模块。
-  - 最终父工程依赖树与源码搜索均无 Fastjson/fastjson2。
+  - 最终父工程依赖树和七个代码模块标准源码均无 Fastjson/fastjson2；memory 非编译 archive 不计入生产源码搜索。
   - common 的消费者测试覆盖全部 protocol Golden File，且 Maven 图保持单向 common→protocol。
 - **限制条件或注意事项**：protocol 的显式字段注解优先于全局命名策略；数据库与 Spring AI 类型必须先由所属模块转换为 common DTO。

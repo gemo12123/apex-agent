@@ -27,7 +27,7 @@
 | 5 | [kit 模块](05-kit模块.md) | `ask_human`、工具确认、截断等通用扩展 | protocol、common、core-extension；部分能力与 core 联调 |
 | 6 | [runtime 模块](06-runtime模块.md) | Builder、默认实现、Spring AI 适配、内存存储、Skill、MCP、SubAgent、lease | protocol、common、core-extension、core、kit |
 | 7 | [platform 模块](07-platform模块.md) | Spring Boot、HTTP/SSE、配置、用户上下文、PostgreSQL | protocol、common、core-extension、runtime |
-| 8 | [memory 模块](08-memory模块.md) | 长期记忆、搜索、Skill Learning 独立封存 | common、core-extension |
+| 8 | [memory 模块](08-memory模块.md) | 长期记忆、搜索、Skill Learning 非编译历史归档 | 无（`packaging=pom`） |
 | 9 | [清理与整体验收](09-清理与整体验收.md) | 删除 PlanExecutor/legacy、重命名、文档与全量验收 | 全部模块 |
 
 ## 3. 推荐实施波次
@@ -88,7 +88,7 @@
 | G2：基础契约完成 | PRO/COM/EXT 专项测试通过；legacy 基线继续通过 | legacy |
 | G3：core/kit 完成 | core Fake 端口测试覆盖 ReAct、压缩、工具、挂起与五分支恢复；legacy 基线继续通过 | legacy |
 | G4：runtime 完成 | runtime-only 无 Spring IoC 执行、lease、Once Publisher、Skill/MCP/SubAgent 测试通过；legacy 基线继续通过 | legacy |
-| G5：platform 接管 | PLAT-04 的 HTTP/SSE Golden File、NEW/HUMAN_RESPONSE、409、PostgreSQL 重启恢复和前端零修改验证通过 | 新 platform；legacy 仅作回归对照 |
+| G5：platform 接管 | PLAT-04 的 HTTP/SSE Golden File、NEW/HUMAN_RESPONSE、409、PostgreSQL 重启恢复、只读状态查询和前端刷新回显验证通过 | 新 platform；legacy 仅作回归对照 |
 | G6：删除 legacy | 无目标模块/测试依赖 legacy；CLEAN-01/02 完成；FND-03B 全部规则通过 | 新 platform，且只有八个目标模块 |
 
 ## 4. 跨模块共享边界与合并顺序
@@ -97,8 +97,8 @@
 | --- | --- | --- | --- |
 | `apex-agent/pom.xml`、临时 `legacy`、父级依赖管理、模块清单 | FND-02；删除由 CLEAN-02 | 全部模块 | FND-02 先迁旧源码再切父 POM；后续 reactor 变更串行合并；G5 前 legacy 保持可运行 |
 | protocol DTO 与 JSON 字段 | PRO-01/02 | core、runtime、platform | Golden File 冻结后下游适配 |
-| common 领域模型、快照、Hook 结果 record | COM-01/02/03 | core-extension、core、runtime、platform、memory | common 契约先合并；下游不得复制同义 DTO |
-| core-extension 接口 | EXT-01/02 | core、kit、runtime、platform、memory | 接口先冻结；ToolExecutionObserver 由 EXT-01 定义，core 绑定，runtime 工具消费 |
+| common 领域模型、快照、Hook 结果 record | COM-01/02/03 | core-extension、core、runtime、platform | common 契约先合并；下游不得复制同义 DTO；memory archive 不参与编译 |
+| core-extension 接口 | EXT-01/02 | core、kit、runtime、platform | 接口先冻结；ToolExecutionObserver 由 EXT-01 定义，core 绑定，runtime 工具消费；memory archive 不参与编译 |
 | AgentDefinition 校验规则 | CORE-01 | runtime Builder、platform Provider | core 先提供唯一校验器；下游不得复制规则 |
 | 工具执行期事件 | EXT-01、CORE-06 | RUN-07、RUN-04C | core 创建请求级 observer 并校验 allowlist；SubAgent 只经 observer 透传 INVOCATION；工具不能发布 END |
 | 人工介入状态机 | CORE-07A～07C | KIT-01/02、RUN-04C、PLAT-02/03D | kit 先提供介入请求语义，core 分挂起、校验、五分支实现，下游再接入 |
@@ -107,7 +107,7 @@
 | session execution lease | RUN-04B/04C | PLAT-02 | runtime 是唯一正确性来源；platform 不维护第二套锁表 |
 | 请求级取消 | COM-01、RUN-04A/04C | EXT-01、CORE-03/04/05B/06、RUN-02/06/07/08、PLAT-02 | runtime source 发命令；observer/context 共享 token；默认adapter主动取消；finally 独占 END/lease 收口 |
 | Repository 提交顺序 | CORE-03/05C/06/07A | PLAT-03C | core 定义调用顺序；各 Adapter 保证单次操作；本期不提供跨 Repository 原子事务 |
-| PostgreSQL schema 与 Repository | PLAT-03A/03B | PLAT-03C/03D、MEM-03 | schema、Adapter、顺序、重启测试依次合并；memory 不复用核心会话表 |
+| PostgreSQL schema 与 Repository | PLAT-03A/03B | PLAT-03C/03D | schema、Adapter、顺序、重启测试依次合并；旧 memory SQL 只进 archive，不参与迁移 |
 | 旧 PlanExecutor/SuperAgent 文件 | CLEAN-01/02 | 所有迁移任务 | 新链路通过后最后删除 |
 
 ## 5. 覆盖完整性检查
@@ -139,7 +139,7 @@
 
 ## 6. 设计确认结果
 
-Q-01～Q-09 已于 2026-07-31 确认，以下结论是对应任务的实施与验收依据：
+Q-01～Q-16 已于 2026-07-31 确认，以下结论是对应任务的实施与验收依据：
 
 | 编号 | 已确认决策 | 影响任务 |
 | --- | --- | --- |
@@ -152,5 +152,12 @@ Q-01～Q-09 已于 2026-07-31 确认，以下结论是对应任务的实施与�
 | Q-07 | Header/请求字段错误返回 HTTP 400；session busy 返回 HTTP 409 且不发 END。请求级 Publisher 已绑定、lease 已取得后，core 同步构造或恢复准备失败由 runtime 发布唯一且载荷不变的 END、释放 lease；platform 返回 HTTP 200 的仅 END SSE，不追加错误事件或文本。 | RUN-04C、PLAT-02/04 |
 | Q-08 | 只有 AGENT_BUILD 可以通过 `AgentDefinitionOperation` 修改 Agent 定义。其他生命周期不得修改定义或 Hook 链；消息、session `enabledTools`、当前模型/工具/压缩对象仍按各自结果族修改，且属于运行态。 | COM-02、CORE-01/02 |
 | Q-09 | 每个 execution 使用唯一请求级取消 token。运行中 `cancel()`/`close()` 只发非阻塞取消命令，不等待、不提前释放 lease；默认模型、HTTP/SubAgent、MCP adapter 必须主动取消底层调用。runtime close 向全部活动 execution 发命令后返回，不设置取消超时或 grace period；最终 END、请求资源和 lease 只由实际执行 finally 收口。若 Assistant ToolCall 已持久化，core 为未完成调用按原ID/name补“请求已取消，工具未执行完成”且 metadata 为空的结果后结束，不运行后续 Hook/真实工具/模型。 | COM-01、EXT-01、CORE-03/04/05B/06、RUN-02/04A/04C/06/07/08、PLAT-02 |
+| Q-10 | 接受本期不实现数据库 `AgentDefinitionProvider`；只交付接口及 Java、YAML、Spring Properties 实现，不宣称数据库配置已可用。 | EXT-01、RUN-01、PLAT-01、CLEAN-03 |
+| Q-11 | 不兼容、不读取、不转换历史 global/workspace Agent 配置，不提供迁移脚本、兼容层或人工转换清单；只提供按新 schema 编写的完整 YAML 示例。 | RUN-01、PLAT-01/04、CLEAN-03 |
+| Q-12 | AGENT_BUILD 进入时对原始启用 Binding 制作不可变有序快照；本次分发期间对自身 Binding 的修改只进入最终定义和后续生命周期，不改变当前链。 | COM-02、CORE-01/02 |
+| Q-13 | 本期不引入跨 Repository 事务、补偿、UnitOfWork 或跨 HTTP 自动修复；保留 entryId/compactionId 的单 Repository 幂等，同一 execution 外的部分提交由明确错误和人工修复处理。 | COM-01/03、CORE-03/05C/06、PLAT-03B/03C |
+| Q-14 | 前端刷新时按持久化的 `{userId, agentKey, sessionId}` 查询当前会话；若状态为 `HUMAN_IN_THE_LOOP`，从持久化挂起对象重新映射并展示 ASK_HUMAN/TOOL_CONFIRMATION。新增只读状态接口和前端初始化逻辑，既有 `/agents`、`/chat` 与 SSE 事件保持兼容。 | PRO-01/02、CORE-07A、PLAT-02/03B/04、前端 |
+| Q-15 | 本期不支持远程 SubAgent 人工介入；子流出现 ASK_HUMAN/TOOL_CONFIRMATION 时取消子请求，按父工具普通失败返回模型可见结果，不透传交互事件。 | RUN-07、PLAT-04 |
+| Q-16 | memory 仅迁移相关旧源码/资源到非标准源码归档目录，供后续整理历史思路；不适配当前框架、不设计 schema/ingestion、不迁移或新增测试、不产出可执行 class。memory 目录以 `packaging=pom` 占位且不被其他模块依赖。 | FND-02/03B、MEM-01～03、CLEAN-03 |
 
-这些确认不改变模块边界；所有原受阻任务均可按上述结论进入实施和最终签收。
+这些确认保留八个顶层模块目录，但将 memory 明确降为非编译归档模块；Q-14 也把“前端零修改”收窄为“既有聊天接口与 SSE 契约零破坏”。其余模块边界不变。
