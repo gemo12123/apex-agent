@@ -9,7 +9,7 @@
 - **任务目标**：使 core 只能通过端口访问模型、工具、工具进度事件、定义、事件、会话、对话、Skill、ID 和时间。
 - **当前进度**：未开始。现有 `IAgentDefinitionLoader` 等接口尚未形成目标端口集合。
 - **设计依据**：设计文档第 5.3、7.2、13.1 节；架构文档第 5.3 节。
-- **涉及范围**：`AgentDefinitionProvider`、`ModelGateway`/observer、`AgentTool`、`ToolExecutionObserver`、`ToolProvider`、`AgentEventPublisher`/Factory、Session/Conversation Repository、SkillProvider/Activator、IdGenerator、TimeProvider。
+- **涉及范围**：`AgentDefinitionProvider`、`ModelGateway`/observer、`AgentTool`、`ToolExecutionObserver`、`ToolProvider`、`ToolAvailabilityProvider`、`AgentEventPublisher`/Factory、Session/Conversation Repository、SkillProvider/Activator、IdGenerator、TimeProvider。
 - **前置依赖**：COM-01、COM-03、PRO-01。
 - **具体执行内容**：
   1. 依据 common 类型定义端口签名，不携带 Spring AI、SSE、数据库或实现对象。
@@ -18,7 +18,8 @@
   4. 明确 observer 本期只允许 INVOCATION_DECLARED/INVOCATION_CHANGE，不能发布 END、交互事件、流内容或其他事件，也不暴露底层 AgentEventPublisher。
   5. 区分单工具执行、工具集合解析和 Agent 定义加载。
   6. `AgentDefinitionProvider` 同时声明 `load(agentKey)` 与 `listAgents()`；后者直接返回 `List<AgentMetadata>`，不得通过逐个加载完整定义实现。
-  7. 给每个端口编写编译契约测试或 Fake 示例，证明 core 可独立替换实现。
+  7. `ToolAvailabilityProvider` 只返回 common 的不可变健康快照，结构化区分精确工具名、来源 scope 和普通配置漂移；端口本身不得修改定义或 session。
+  8. 给每个端口编写编译契约测试或 Fake 示例，证明 core 可独立替换实现。
 - **预期产出**：基础端口接口和接口契约测试。
 - **验收标准**：
   - 接口参数/返回值只来自 JDK、protocol 或 common。
@@ -26,6 +27,7 @@
   - Fake 实现可在 core 测试中使用且不启动 Spring。
   - AgentTool 可在执行期间通过 observer 上报允许的进度事件，且接口层没有 Publisher 或 SSE 依赖。
   - Agent 列表通过 `listAgents()` 获取轻量元数据，无需 platform 读取具体 Spring 配置对象或完整 AgentDefinition。
+  - availability 快照不可变；ToolProvider 发现初始化失败后先发布快照再返回健康工具，core 不会观察到“缺失但无原因”的中间态。
 - **限制条件或注意事项**：数据库版 AgentDefinitionProvider 本期不实现；端口不得为当前实现便利而暴露 `ApplicationContext`、`SseEmitter`、`ToolCallback` 或 ORM 实体。
 
 ## EXT-02 定义生命周期与对话压缩端口

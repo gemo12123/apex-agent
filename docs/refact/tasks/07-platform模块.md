@@ -36,13 +36,14 @@
 - **具体执行内容**：
   1. 保持 `GET /api/sse/agents`、`POST /api/sse/chat`、`X-User-Id` 和 ChatRequest 字段不变。
   2. 每次 NEW/HUMAN_RESPONSE 新建 SseEmitter 和 Publisher。
-  3. Controller 返回 emitter 前同步调用 runtime newAgent/resumeAgent；SessionBusyException 映射 409。
+  3. Controller 返回 emitter 前同步调用 runtime newAgent/resumeAgent；SessionBusyException 映射 409；其他 core 同步构造/恢复准备异常返回 runtime 已收口的仅 END SSE。
   4. 取得 execution 后再异步 `run()`；线程池拒绝调用 `cancelBeforeStart()`。
   5. Filter/TaskDecorator 传播并清理用户上下文；传给 core/runtime 的命令显式携带 userId。
   6. 删除 platform 私有 runningAgents/sessionLocks 正确性状态。
 - **预期产出**：兼容 HTTP/SSE 入口、请求级 Publisher、用户上下文和异步执行集成测试。
 - **验收标准**：
-  - session 冲突在响应提交前返回 HTTP 409。
+  - session 冲突在响应提交前返回 HTTP 409，且不发送 END。
+  - Header/字段非法返回 400；core 构造/恢复准备失败返回 HTTP 200 `text/event-stream`，消息序列严格等于单个既有 END。
   - NEW 与 HUMAN_RESPONSE 使用同一 lease 空间，但各有新 emitter/Publisher。
   - 并发不同 session 事件不串写；每次传输 END 恰好一次。
   - 线程池拒绝时 END 与 lease 各收口一次。

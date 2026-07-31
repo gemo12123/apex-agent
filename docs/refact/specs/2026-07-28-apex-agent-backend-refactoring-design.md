@@ -81,9 +81,11 @@ ChatController
 38. Hook 执行异常统一记录 warn，丢弃该 Hook 的全部修改后继续后续 Hook；不提供 `FAIL_FAST` 或其他运行时错误策略配置。Hook 静态类型、Binding 或动作契约非法仍在注册或定义校验阶段失败。
 39. 工具执行异常转换为当前 ToolCall 的模型可见 ToolResult，随后继续 ReAct 循环。最后一个允许的 Iteration 提示模型直接输出最终结论且不再调用工具；若模型仍返回 ToolCall，则不执行工具，按原调用逐个补齐“达到最大轮次，强制结束”。
 40. `AgentDefinitionProvider` 同时提供按 `agentKey` 加载完整定义和直接枚举 `AgentMetadata` 列表的能力。File Provider 默认只支持调用方显式指定的 YAML 资源，初始化时加载一次并缓存，不扫描目录、不热加载，也不设计现有配置迁移。
-41. MCP/SubAgent 初始化失败时记录 warn，释放本次失败产生的资源，从注册表、Agent 定义的可用/默认启用集合及 session `enabledTools` 中移除受影响工具后继续；不提供 fail-fast/降级策略开关。
+41. MCP/SubAgent 初始化失败时记录 warn，释放本次失败产生的资源并登记结构化不可用状态；健康集成和 runtime 启动不受影响。不可用工具禁止建立新的活动绑定：新 session 或 AGENT_BUILD 新增该工具时定义构造失败。已有 session 的既有绑定转为只读历史记录并从有效 `availableTools`、`defaultEnabledTools`、`enabledTools` 和请求级 ToolCatalog 中移出；历史 ToolCall/ToolResult 不删除，恢复中的挂起调用转换为模型可见“工具不可用”结果。不可用绑定不得进入模型列表或执行器，健康恢复后也不得自动重新启用。
 42. 首版定义/快照 schema 版本固定为字符串 `1.0.0`，本期只实现该版本读写；跨版本升级、版本跨度和未知版本处理不在本期范围。
 43. 工具确认拒绝产生内容为“用户拒绝执行”的 ToolResult。禁用工具不进入模型工具列表；`END_TURN` 尚有 ToolCall 时按原 toolCallId/name 补齐内容为“达到最大轮次，强制结束”的 ToolResult。两类结果不增加自定义 code 或 payload。
+44. 参数/Header 校验失败仍返回 HTTP 400，session lease 冲突仍返回 HTTP 409 且不发送 END。请求级 Publisher 已绑定且 lease 已取得后，如果 core 同步构造或恢复准备失败，runtime 必须通过同一 Once Publisher 只发送既有精确载荷的 `END` 并释放 lease，platform 完成本次 emitter 并返回仅含该 `END` 的 SSE；不得追加错误事件、文本消息或新的协议字段。
+45. 只有 `AGENT_BUILD` 生命周期可以通过 `AgentDefinitionOperation` 修改 Agent 定义草稿，包括 Prompt、工具全集/默认集合、Hook Binding 和可规范化元数据。其余十个运行生命周期不得修改 Agent 定义或 Hook 链；它们对消息、session `enabledTools`、当前模型请求、工具参数/结果和压缩对象的修改属于运行态变化，不属于定义修改。
 
 ## 3. 目标与非目标
 
@@ -449,7 +451,8 @@ runtime 可以使用最小范围的 Spring AI 依赖，但不得要求 Spring Io
 MCP 和 SubAgent 是 runtime 的可选能力：
 
 - 未配置时不得启动外部进程或创建 HTTP 客户端。
-- 初始化失败时记录 warn，关闭本次失败产生的资源，从工具注册表、相关 Agent 定义的可用/默认启用集合及 session `enabledTools` 中移除受影响工具后继续；不提供策略开关。
+- 初始化失败时记录 warn，关闭本次失败产生的资源并登记不可用来源/工具；健康集成和 runtime 启动继续，不提供策略开关。
+- 不可用工具禁止建立新的活动绑定；新 session 或 AGENT_BUILD 新增绑定时由 core 构造失败。已有 session 的旧绑定迁移为只读历史记录，从有效定义、session `enabledTools` 和请求级 ToolCatalog 中移出，但既有 ToolCall/ToolResult 保持可展示且不能再次执行。
 - 资源必须由 runtime 实例负责关闭，建议实现 `AutoCloseable`。
 
 ### 5.7 platform
@@ -680,10 +683,11 @@ hooks:
 1. 从 Provider 加载原始定义。
 2. 创建可变构造草稿。
 3. 执行 `AGENT_BUILD` Hook。
-4. 执行请求级权威校验：包括 `defaultEnabledTools ⊆ availableTools ⊆ registeredTools`、Skill/Hook 可解析性、HookPoint 与结果族匹配以及 Prompt 完整性。
-5. 冻结为不可变 `AgentDefinitionSnapshot`。
-6. 该快照作为当前 Turn 的运行定义。
-7. 在 SessionSnapshot 中保存当前活动 Turn 使用的恢复投影，挂起时只更新会话运行快照，不在挂起工具对象中重复保存。
+4. 读取 `ToolAvailabilitySnapshot`，拒绝不可用新绑定，或把已有 session 的既有不可用绑定迁移为 `HistoricalToolBinding` 并生成新的有效集合。
+5. 执行请求级权威校验：包括 `defaultEnabledTools ⊆ availableTools ⊆ registeredTools`、Skill/Hook 可解析性、HookPoint 与结果族匹配以及 Prompt 完整性。
+6. 冻结为不可变 `AgentDefinitionSnapshot`。
+7. 该快照作为当前 Turn 的运行定义。
+8. 在 SessionSnapshot 中保存当前活动 Turn 使用的恢复投影和历史绑定，挂起时只更新会话运行快照，不在挂起工具对象中重复保存。
 
 runtime 不直接执行上述步骤。它先取得 session execution lease、绑定请求级事件出口，再把 AgentRequest 和已经装配好的端口交给 core `ApexAgentFactory`。HUMAN_RESPONSE 则调用 `ApexAgentFactory.createResumed(...)`，直接加载定义快照恢复投影，不进入 `AgentDefinitionAssembler` 的 `AGENT_BUILD` 分支。
 
@@ -696,6 +700,7 @@ runtime 不直接执行上述步骤。它先取得 session execution lease、绑
 - `prompt.system` 文本或稳定资源版本。
 - 消息压缩策略参数。
 - 可用工具名；`defaultEnabledTools` 是 session 初始化参数，不进入 SessionSnapshot 的恢复投影。
+- `historicalToolBindings` 作为 SessionSnapshot 一级只读审计状态保存，不属于定义快照或 `enabledTools`；只用于保留曾绑定但已不可用的 MCP/SubAgent 名称、来源、原因和时间。
 - Skill 定义或稳定引用。
 - Hook Binding ID、name、顺序、匹配规则和 options。
 - 定义版本，首版固定为字符串 `1.0.0`。
@@ -855,6 +860,13 @@ public record EndTurnFromPreToolCall(
 - 当前工具结果。
 - 构造阶段的 Agent 定义草稿，包括工具全集、默认启用工具和 Hook 配置。
 - Skill 定义的元数据或说明内容可以在构造阶段规范化，但不允许运行期通过 Hook 动态增删 `enabledSkills`/`activatedSkills`。
+
+定义修改边界：
+
+- 只有 `AGENT_BUILD` 的 `AgentBuildHookResult` 可以携带 `AgentDefinitionOperation`。
+- 其他十个生命周期的结果类型在 common 层即不暴露定义操作或 Hook Binding Patch；core 运行时仍做防御性拒绝。
+- `ToolActivationDelta` 只改变当前 session 的 `enabledTools`，不改变 Agent 定义中的 `availableTools`/`defaultEnabledTools`，也不能绕过不可用绑定检查。
+- `AGENT_BUILD` 进入时冻结本次分发链；对自身 Binding 的修改只影响冻结后的定义和后续生命周期，不回溯改变当前分发。
 
 工具启用变更规则：
 
@@ -1182,7 +1194,7 @@ sequenceDiagram
 2. `availableTools`：当前 Agent 定义允许使用的工具全集。
 3. `enabledTools`：当前 session 实际启用的工具。
 
-Agent 定义保存 `availableTools` 和 `defaultEnabledTools`。SessionSnapshot 只保存 `enabledTools`，没有独立的 `defaultEnabledTools` 字段。
+Agent 定义保存 `availableTools` 和 `defaultEnabledTools`。SessionSnapshot 保存 `enabledTools` 和只读 `historicalToolBindings`，没有独立的 `defaultEnabledTools` 字段；历史绑定不是第四层可执行状态。
 
 规则：
 
@@ -1194,6 +1206,7 @@ Agent 定义保存 `availableTools` 和 `defaultEnabledTools`。SessionSnapshot 
 - 新 session 的首个 Turn 使用定义快照中的 `defaultEnabledTools` 初始化 `enabledTools`。
 - 同一 session 后续 Turn 和 HUMAN_RESPONSE 都直接沿用 SessionSnapshot 中的 `enabledTools`。
 - 若新 Turn 构造出的 Agent 定义已无法解析 session 中某个已启用工具，则构造失败并报告配置漂移；不得静默重置为默认集合。
+- 外部集成已登记为不可用是配置漂移规则的唯一特例：新 session/新绑定仍构造失败；已有 session 的既有绑定创建 `HistoricalToolBinding` 后从有效三层集合移除并继续，且不得自动恢复。普通注册缺失仍按上一条失败。
 - `defaultEnabledTools` 是初始化参数，不随 SessionSnapshot 单独持久化，也不参与后续 Turn 的恢复或重置。
 
 ### 11.2 工具来源
@@ -1439,6 +1452,7 @@ runtime 必须独立保证同一 `sessionId` 只能有一个活跃执行，不�
 - `runtime.newAgent(...)` 与 `runtime.resumeAgent(...)` 在返回 `ApexAgentExecution` 前同步调用 `SessionExecutionCoordinator.acquire(sessionId)`；NEW 与 HUMAN_RESPONSE 使用同一租约空间。
 - 获取租约失败时同步抛出中立 `SessionBusyException`。platform 必须在 Controller 返回 `SseEmitter` 前调用上述 API，因此仍能映射为 HTTP 409。
 - 取得租约后才允许调用 core `ApexAgentFactory`；由该 core 入口通过存储端口加载 SessionSnapshot、解释恢复状态并构造 Agent。从取得租约到执行最终保存、挂起、失败或取消都持有同一 `SessionExecutionLease`。
+- core 同步构造/恢复准备失败时 runtime 使用已绑定的请求级 Once Publisher 发布唯一精确 END，释放 lease 后抛 `AgentPreparationException(endPublished=true)`；platform 捕获后完成并返回该 emitter。同步准备阶段不得发布其他事件。
 - `ApexAgentExecution` 是租约所有者。`run()` 的 `finally` 释放租约；线程池拒绝或执行尚未启动时由 `cancelBeforeStart()` 发布幂等 END 并释放；`close()` 作为最后的幂等兜底。
 - 创建 core Agent 失败、Publisher 异常和所有取消路径都必须释放租约。
 - 锁表使用稳定 LockEntry 或引用计数清理，禁止在仍有等待者/持有者时从 Map 删除并创建第二把同 key 锁。
@@ -1505,6 +1519,7 @@ platform 处理：
 - 创建请求级 SSE Publisher。
 - 在 Controller 返回 emitter 前同步调用 `runtime.newAgent(request, requestPublisher)` 或 `runtime.resumeAgent(command, requestPublisher)`，取得持有 session lease 的 `ApexAgentExecution`。
 - 同步捕获 `SessionBusyException` 并映射为 HTTP 409。
+- 同步捕获 `AgentPreparationException(endPublished=true)`，记录服务端错误并完成 emitter，以 HTTP 200 `text/event-stream` 返回仅含一个 END 的流；不得使用 `completeWithError` 或追加错误消息。Header/请求字段错误仍为 400。
 - 异步执行。
 - 线程池拒绝时调用 `execution.cancelBeforeStart()`，保证 END 和 lease 都只收口一次。
 - Emitter 完成和异常兜底。
@@ -1905,13 +1920,13 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - Print Publisher 输出协议 JSON。
 - 显式传入的请求级 Publisher 分别绑定 NEW 与 HUMAN_RESPONSE；并发请求、不同恢复请求之间不串写事件。
 - Builder 的默认 `AgentEventPublisherFactory` 每次执行创建独立 Publisher，不复用带 END 状态的 Publisher 实例。
-- 请求级 `OnceAgentEventPublisher` 在 core、构造失败和 `cancelBeforeStart` 竞争时仍只发送一次 END。
+- 请求级 `OnceAgentEventPublisher` 在 core、构造失败和 `cancelBeforeStart` 竞争时仍只发送一次 END；core 同步构造/恢复准备失败的 SSE 只能包含该 END，不得含其他事件。
 - 显式 classpath/文件系统 YAML Agent 配置，初始化加载一次且不热加载。
 - 多配置源同时出现时失败，不执行全局/workspace 叠加。
 - 摘要压缩。
 - MCP stdio/SSE 资源关闭，调用只传工具参数且不泄露上下文。
 - 任意 Agent 作为 HTTP SubAgent 的协议解析、独立子 session、调用深度限制，以及通过 ToolExecutionObserver 透传 INVOCATION 事件。
-- MCP/SubAgent 初始化失败记录 warn、移除受影响工具后继续，且失败资源无泄漏。
+- MCP/SubAgent 初始化失败记录 warn、关闭失败资源并登记不可用状态；新绑定被拒绝，已有绑定转只读历史且不进入模型/执行器，健康工具继续可用。
 - 远端 END 只结束 SubAgent 工具调用，不会通过 ToolExecutionObserver 结束父请求。
 - `newAgent`/`resumeAgent` 在返回 `ApexAgentExecution` 前同步取得 session lease；同一 session 的第二个 NEW 或 HUMAN_RESPONSE 在方法返回前抛出 `SessionBusyException`。
 - NEW 与 HUMAN_RESPONSE 使用同一个 `SessionExecutionCoordinator`，不形成两套互不一致的锁状态。
@@ -1942,6 +1957,7 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - Controller 路径、请求和响应不变。
 - `X-User-Id` 校验和传播。
 - Controller 在返回 `SseEmitter` 前同步准备 `ApexAgentExecution`；session 冲突在响应提交前返回 HTTP 409。
+- core 同步构造/恢复准备失败返回仅含一个精确 END 的 SSE；参数 400 和 busy 409 均不发送 END。
 - 线程池拒绝执行时调用 `cancelBeforeStart`，精确发送一次 END 并释放 lease。
 - 并发请求分别使用独立 emitter；任一请求的事件和 END 不会写入其他请求。
 - 每次 HUMAN_RESPONSE 都绑定本次 HTTP 请求新建的 emitter，不复用挂起前 emitter。
@@ -2092,13 +2108,13 @@ Skill instructions 只存在于对话消息，可能在窗口压缩后不再以�
 
 ### 23.5 双重 END
 
-core 发送 END，platform 又需要覆盖构造失败和线程池拒绝路径，容易重复。
+core 运行时发送 END，runtime 需要覆盖同步构造失败和线程池拒绝路径，platform 还负责 emitter 完成，容易重复。
 
 控制：
 
 - Publisher 包装一次性终止状态。
 - core 接管后由 core 发送。
-- core 未接管时由 platform 兜底。
+- core 同步准备失败或执行未开始时由 runtime Once Publisher 发送；platform 只完成 emitter，不再补发 END。
 - 用并发测试锁定。
 
 ### 23.6 Memory 封存后的行为变化
@@ -2120,6 +2136,7 @@ core 发送 END，platform 又需要覆盖构造失败和线程池拒绝路径�
 - 新 session 只初始化一次默认集合。
 - 后续 Turn 不静默重置或求交集。
 - 若 session 的已启用工具无法由新定义解析，NEW 构造失败并给出具体工具名，由调用方显式修复配置或会话状态。
+- 仅当 `ToolAvailabilityProvider` 明确证明该名称属于 MCP/SubAgent 初始化故障时，既有绑定转 `HistoricalToolBinding` 并退出有效定义/`enabledTools`；对话中的旧 ToolCall/ToolResult 不删除且不能重放。新 session 或 AGENT_BUILD 新增同一不可用绑定仍构造失败，健康恢复也不自动启用旧 session。
 
 ### 23.8 内存锁与对象别名
 

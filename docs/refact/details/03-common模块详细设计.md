@@ -29,6 +29,7 @@
 3. 在构造器中校验必填字段并复制所有嵌套集合。
 4. 为定义态、session 态和请求态建立不同类型，不把 defaultEnabledTools、enabledTools 混在同一对象。
 5. 为本地 ToolExecutionContext 只保留显式中立信息和可选 human submission，不引用 observer/publisher。
+6. 定义 `ToolOrigin`、`UnavailableToolSource` 和 `ToolAvailabilitySnapshot`，让 runtime 报告 MCP/SubAgent 初始化故障而不携带客户端或框架异常。
 
 ### 接口和数据结构
 
@@ -59,6 +60,7 @@ record SubAgentCallTrace(String traceId, List<String> agentKeys, int maxDepth) {
 - `ToolSetDefinition` 校验 defaultEnabled ⊆ available；registered 子集要依赖运行注册表，留给 core Assembler。
 - session enabledTools、activatedSkills 用保持确定顺序的不可变集合；建议内部 `LinkedHashSet` 后复制为 unmodifiableSet，序列化顺序稳定。
 - `AgentMessageEntry.payload` 不允许 null Map，外部“无 payload”由 record 使用空 Map，数据库 Adapter 写 null 以节省存储时做映射转换。
+- availability 对精确工具名使用不可变 Set，对来源使用不可变 List；来源匹配只允许 `(origin, sourceId)` 加稳定工具名前缀，不能使用任意 contains/正则扩大影响范围。
 - 模型异常只由 core 状态机把三层改为 FAILED；common 枚举本身不实现状态迁移方法，避免隐藏副作用。
 
 ### 异常处理
@@ -71,6 +73,7 @@ record SubAgentCallTrace(String traceId, List<String> agentKeys, int maxDepth) {
 
 - `ToolCallRoundTripTest`：多工具顺序、ID、参数、metadata。
 - `ToolSetDefinitionTest`、`SkillSetDefinitionTest`：子集与重复名。
+- `ToolAvailabilitySnapshotTest`：精确名称、来源 scope、不可变性、稳定前缀边界与健康来源隔离。
 - `ImmutableDomainModelTest`：修改输入集合/Map 或 getter 返回对象不影响 record。
 - `ModelConversationRoundTripTest`：user/assistant/tool 全角色消息。
 - 架构测试确保 common 无 Spring/Spring AI/Servlet/ORM import。
@@ -98,6 +101,7 @@ record SubAgentCallTrace(String traceId, List<String> agentKeys, int maxDepth) {
 3. 为每个动作建立独立 record，让 Java 类型表达流控，而非再加一个万能 action enum。
 4. Operation/Patch 构造时做局部校验；整体状态校验仍由 core 原子应用器完成。
 5. 提供 `HookTypeDescriptor`，解决运行注册表在泛型擦除后无法可靠判断 Context/Result 类型的问题。
+6. 让 `AgentDefinitionOperation` 只出现在 `AgentBuildHookResult` 类型闭包中；其他十个结果族的字段图不得引用定义、定义草稿或 Hook Binding Patch。
 
 ### 接口和数据结构
 
@@ -128,17 +132,20 @@ record ToolActivationDelta(Set<String> enable, Set<String> disable) {}
 - 禁止同一 ToolActivationDelta 同时 enable/disable 同一名称。
 - RequestHumanIntervention 必须带非空 request；BlockTool 必须有非空 reason；ReturnToolResult 必须带与当前 ToolCall 匹配的结果，匹配检查由 core 做。
 - Context 内集合和模型对象都是不可变快照；Hook 无法直接修改运行态。
-- AGENT_BUILD 只接受 AgentDefinitionOperation，不接受 HookMutations。
+- AGENT_BUILD 只接受 AgentDefinitionOperation，不接受 HookMutations；反向地，其他十个生命周期只接受各自运行态 mutation/patch，不接受 AgentDefinitionOperation。
+- `ToolActivationDelta` 改的是 session `enabledTools`，不能修改定义的 available/default，也不能 enable `ToolAvailabilitySnapshot` 标记不可用的名称。
 
 ### 异常处理
 
 - null 必填载荷、重复操作键、负 index 在 record 工厂阶段拒绝。
 - 结果族错误属于 `HookContractException`，不是可忽略的 Hook 执行异常。
 - 运行期 enable 不在 availableTools 的名称由 core 整体校验并拒绝整个 Hook 修改。
+- 运行期 enable 历史/不可用工具同样整体拒绝；不能借同名工具绕过新绑定禁令。
 
 ### 测试方案
 
 - 为每个 HookPoint 参数化验证合法/非法结果族。
+- 反射遍历十个运行生命周期结果类型，断言字段传递闭包不包含 AgentDefinition、AgentDefinitionDraft、AgentDefinitionOperation 或 HookBinding 修改类型。
 - 验证 TURN_END 无法返回 END_TURN，目标源码不存在 SKIP_ITERATION。
 - `HookMutationAtomicityFixture` 验证一个 Patch 后半部分非法时原对象完全不变。
 - 序列化测试确保 Hook Binding ID/name/order/options 可进入定义快照。
@@ -158,13 +165,13 @@ Hook 只通过 common 数据表达意图，core 统一解释，kit/runtime 实�
 
 源类型：`SuperAgentContext` 可持久化字段、`PendingHumanInteraction`、`PendingToolExecution`、`AgentTurn`、`AgentIteration`、`memory/model/SessionRuntimeSnapshot`。
 
-目标：`SessionSnapshot`、`TurnSnapshot`、`IterationSnapshot`、`AgentDefinitionRecoverySnapshot`、`SuspendedToolCall`、`HumanInterventionRequest`、压缩 check/request/result/commit。
+目标：`SessionSnapshot`、`TurnSnapshot`、`IterationSnapshot`、`AgentDefinitionRecoverySnapshot`、`HistoricalToolBinding`、`ToolAvailabilitySnapshot`、`SuspendedToolCall`、`HumanInterventionRequest`、压缩 check/request/result/commit。
 
 ### 核心流程
 
 1. 先从恢复算法反推必须字段，不把当前上下文所有字段整体序列化。
 2. 挂起前保存当前 ModelResponse、全部 ToolCall、已完成 ToolResult、当前 ToolCall 和 stable pre-hook IDs。
-3. 将活动定义冻结成 recovery snapshot，与 session 工具/Skill 状态分别保存。
+3. 将活动定义冻结成 recovery snapshot，与 session 工具/Skill 状态分别保存；不可用的既有 MCP/SubAgent 绑定从执行态移入只读 `historicalToolBindings`。
 4. 通过 versioned adapter 序列化为显式 DTO；Repository 不直接 serialize core 上下文。
 5. load 后先验证 schemaVersion 和聚合不变量，再交 core。
 
@@ -198,6 +205,8 @@ record TurnSnapshot(
 - 读取非 1.0.0 抛 `UnsupportedSnapshotVersionException`。这不是升级兼容实现，而是防止 silent corruption 的最低安全行为。
 - recovery snapshot 解析 Hook name/id/options，但不解析实现对象；Tool/Hook 实例由 runtime registry 重建。
 - defaultEnabledTools 不进入 recovery snapshot；activeDefinition.availableTools 仍必须保留，用于恢复时校验 session enabledTools。
+- `HistoricalToolBinding` 只保存 toolName、origin、sourceId、reasonCode、disabledTime，以三元组去重且保留首次禁用时间；不得保存 AgentTool/Client，也不得参与 ToolCatalog 或 enable 校验。
+- 已有 ToolCall/ToolResult 对话条目永不因绑定不可用而删除；“历史可显示”使用既有消息投影，本期不扩展 HTTP/SSE 协议。不可用绑定健康恢复后也不能自动回填旧 session 的 enabledTools。
 - ToolCall 用 ID 定位；ordinal 只用来继续剩余调用顺序。
 - 人工提交类型与挂起类型必须匹配，确认 ID/toolCall ID 必须同时校验。
 
@@ -205,6 +214,7 @@ record TurnSnapshot(
 
 - snapshot 缺失活动 Turn、挂起状态和 SessionStatus 不一致、ToolCall ID 找不到均抛 `InvalidSnapshotException`，不修补后继续。
 - Hook/Tool 名在 registry 中无法解析属于恢复配置错误，core 拒绝恢复，不重新加载最新 AgentDefinition。
+- 已登记外部不可用且属于既有绑定时不按普通缺失失败，由 core 迁移为历史；来源不明的缺失仍按恢复配置错误失败。
 - 反序列化 JSON 错误包装为 `SnapshotDecodingException` 并保留 sessionId/版本，不记录敏感正文。
 
 ### 测试方案
@@ -213,6 +223,7 @@ record TurnSnapshot(
 - 禁止字段扫描：SseEmitter、Spring Bean、Tool 实例、客户端、index、通用 Hook 历史均不存在。
 - 多 ToolCall 前序完成、后序挂起样本恢复定位。
 - 重复 pre-hook ID、定义/工具重复状态、错误确认 ID 测试。
+- 不可用旧绑定迁移 round-trip：`enabledTools` 不含该名称、历史记录仍在、消息 ToolCall/ToolResult 不变、反序列化后无法从历史记录取得执行对象。
 - 未知版本显式拒绝测试，不做升级成功测试。
 
 ### 架构符合性

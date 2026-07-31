@@ -16,7 +16,7 @@
 
 源接口：`IAgentDefinitionLoader`、`SessionContextStore`、`AgentExecutionStore`、`AgentToolExecutor`、旧消息发送工具的抽象需求。源接口不直接搬迁签名，需改用 common 类型。
 
-目标接口采用 [跨模块契约](00-跨模块契约.md) 第 3 节，并新增 `ToolAvailabilityProvider` 作为外部集成健康降级的设计补充。
+目标接口采用 [跨模块契约](00-跨模块契约.md) 第 3 节，并按已确认决策提供 `ToolAvailabilityProvider`，支持“不可用工具禁止新绑定、旧绑定只读留痕”的 core 判定。
 
 ### 核心流程
 
@@ -76,7 +76,7 @@ interface ConversationRepository {
 - `AgentDefinitionProvider.listAgents()` 是独立操作，接口注释明确不得默认遍历 key 后调用 load。
 - Repository 方法按单次操作一致性定义；不增加 begin/commit/UnitOfWork。
 - `ToolProvider` 返回 AgentTool 列表，core 在请求内建立按名称索引的 ToolCatalog，加载时拒绝重复名；两个重载分别处理 AGENT_BUILD 后的定义候选和恢复投影，AgentTool 实例不进入快照。
-- `ToolAvailabilityProvider.current()` 返回“已知不可用工具 -> 原因类型”的不可变快照，只有外部集成初始化失败进入该集合。
+- `ToolAvailabilityProvider.current()` 返回精确工具名和 `UnavailableToolSource(origin, sourceId, stableNamePrefix, reasonCode, observedAt)` 的不可变快照，只有 MCP/SubAgent 初始化失败进入该集合。它只报告事实，不自行改定义或 session。
 - SkillProvider 返回完整注册集合；SkillActivator 根据 session 状态返回 instructions 和新 activated set 的中立结果。
 
 ### 异常处理
@@ -90,6 +90,7 @@ interface ConversationRepository {
 - `ExtensionApiCompileTest` 用纯 JDK Fake 实现全部接口。
 - 反射检查参数/返回值只属于 JDK、protocol、common或同模块其他interface，后者只用于端口组合。
 - `AgentDefinitionProviderContractTest` 的 Fake 统计 load/list 调用，证明列表不必加载定义。
+- `ToolAvailabilityProviderContractTest` 验证快照不可变、精确名/稳定前缀匹配和健康来源不受影响；同一调用内不得出现 ToolProvider 已剔除而 availability 尚未更新的中间态。
 - Observer Fake 验证取消语义和事件回调异常可见。
 - Repository Fake 验证 append/compact 命令包含稳定幂等 ID。
 

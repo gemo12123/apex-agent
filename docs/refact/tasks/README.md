@@ -137,15 +137,17 @@
 
 ## 6. 设计确认结果
 
-原 Q-01～Q-06 已于 2026-07-31 确认，以下结论是对应任务的实施与验收依据：
+Q-01～Q-06 及补充决策 Q-07～Q-08 已于 2026-07-31 确认，以下结论是对应任务的实施与验收依据：
 
 | 编号 | 已确认决策 | 影响任务 |
 | --- | --- | --- |
 | Q-01 | 模型调用异常时立即结束本次执行，当前 Iteration、Turn、Session 记为 `FAILED`，不再执行后续 Hook、工具或模型调用；请求仍通过既有 `END` 收口，不新增错误事件。Hook 执行异常统一记录 warn，丢弃该 Hook 的全部修改后跳过，不提供 `FAIL_FAST` 配置；静态契约非法仍在注册或定义校验阶段失败。工具执行异常转换为当前 ToolCall 的 ToolResult 告诉模型，Turn 继续。最后一个允许的 Iteration 必须提示模型直接输出最终结论且不再调用工具；若仍返回 ToolCall，则按 Q-06 强制结束。 | COM-01/02、CORE-02/03、CORE-05A/05B、CORE-06、PLAT-04 |
 | Q-02 | `AgentDefinitionProvider` 同时提供按 `agentKey` 加载完整定义和 `listAgents()` 获取 `List<AgentMetadata>` 的能力；列表接口直接返回轻量元数据，不通过逐个加载完整定义实现。 | EXT-01、RUN-01、PLAT-01 |
 | Q-03 | `FileAgentDefinitionProvider` 默认只支持 YAML；资源由调用方显式指定，可来自 classpath 或文件系统，Provider 初始化时加载一次并缓存，不扫描目录、不热加载。本期不设计现有全局/workspace 配置的迁移映射。 | RUN-01、PLAT-01 |
-| Q-04 | MCP 或 SubAgent 初始化失败时记录 warn，关闭该失败初始化产生的资源，从注册表、Agent 定义的可用/默认启用集合及 session `enabledTools` 中移除受影响工具，然后继续启动和执行；不提供 fail-fast/降级策略开关。 | RUN-06、RUN-07、RUN-08 |
+| Q-04 | MCP 或 SubAgent 初始化失败时记录 warn、关闭失败资源并登记不可用状态，健康集成和 runtime 继续启动。不可用工具禁止新活动绑定；新 session 或 AGENT_BUILD 新增该绑定时构造失败。已有 session 的旧绑定转为只读历史记录并从有效定义、`enabledTools` 和 ToolCatalog 移出；既有 ToolCall/ToolResult 保留展示但不可执行，也不自动重新启用。 | COM-03、EXT-01、CORE-01/06/07B、RUN-06/07/08 |
 | Q-05 | 首版快照/定义 schema 版本固定为字符串 `1.0.0`，本期只实现该版本的读写与 round-trip；跨版本升级、版本跨度和未知版本处理均不在本期范围，不宣称跨版本兼容。 | COM-03、PLAT-03B/03D、CLEAN-03 |
 | Q-06 | 工具确认拒绝映射为 `RETURN_TOOL_RESULT`，模型可见结果文本固定为“用户拒绝执行”。禁用工具不进入模型工具列表，执行前仍做二次校验以阻止伪造或过期调用。`END_TURN` 遇到当前或剩余 ToolCall 时，逐个按原 toolCallId/name 补齐结果文本“达到最大轮次，强制结束”。这两类结果不增加自定义 code 或 payload。 | PRO-02、CORE-06、CORE-07C、KIT-02 |
+| Q-07 | Header/请求字段错误返回 HTTP 400；session busy 返回 HTTP 409 且不发 END。请求级 Publisher 已绑定、lease 已取得后，core 同步构造或恢复准备失败由 runtime 发布唯一且载荷不变的 END、释放 lease；platform 返回 HTTP 200 的仅 END SSE，不追加错误事件或文本。 | RUN-04C、PLAT-02/04 |
+| Q-08 | 只有 AGENT_BUILD 可以通过 `AgentDefinitionOperation` 修改 Agent 定义。其他生命周期不得修改定义或 Hook 链；消息、session `enabledTools`、当前模型/工具/压缩对象仍按各自结果族修改，且属于运行态。 | COM-02、CORE-01/02 |
 
 这些确认不改变模块边界；所有原受阻任务均可按上述结论进入实施和最终签收。

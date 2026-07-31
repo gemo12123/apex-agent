@@ -354,6 +354,7 @@ classDiagram
         status
         enabledTools
         activatedSkills
+        historicalToolBindings
         activeDefinitionSnapshot
         suspendedToolCall
     }
@@ -411,6 +412,8 @@ AgentDefinition 是配置源返回的完整定义，至少包含：
 load definition
   -> create mutable draft
   -> run AGENT_BUILD
+  -> classify unavailable bindings against existing session
+  -> reject new binding / migrate old binding to history
   -> validate tools / skills / hooks / prompt
   -> freeze AgentDefinitionSnapshot
   -> ApexAgentFactory.createNew
@@ -418,7 +421,7 @@ load definition
 
 runtime 只提供 `AgentDefinitionProvider`、Hook/Tool Resolver、Store 等端口实现并调用 core 入口，不直接编排 AGENT_BUILD、校验或冻结。
 
-Assembler 在 `AGENT_BUILD` 完成后执行请求级权威校验，包括 `defaultEnabledTools ⊆ availableTools ⊆ registeredTools`、Skill/Hook 可解析性、HookPoint 与结果族匹配以及 Prompt 完整性。动态 Provider 可以按 `agentKey` 返回不同定义，因此这组校验不能前移到 runtime Builder。
+Assembler 在 `AGENT_BUILD` 完成后先读取 `ToolAvailabilitySnapshot`：新 session 或 AGENT_BUILD 新增的不可用绑定直接拒绝；已有 session 的旧绑定转为 `HistoricalToolBinding` 并退出有效集合。随后执行请求级权威校验，包括 `defaultEnabledTools ⊆ availableTools ⊆ registeredTools`、Skill/Hook 可解析性、HookPoint 与结果族匹配以及 Prompt 完整性。动态 Provider 可以按 `agentKey` 返回不同定义，因此这组规则不能前移到 runtime Builder。
 
 HUMAN_RESPONSE 由 `ApexAgentFactory.createResumed` 从 SessionSnapshot 加载挂起前的定义快照恢复投影，并按快照中的稳定名称重新解析工具和 Hook，不重新执行 AGENT_BUILD。
 
@@ -444,6 +447,7 @@ enabledTools     当前 session 实际启用的工具
 - 模型只看见 `enabledTools`。
 - 真实执行前再次校验工具仍启用。
 - 定义更新后无法解析 session 已启用工具时显式失败，不静默重置。
+- 已登记 MCP/SubAgent 初始化故障是唯一例外：既有绑定移入只读 `historicalToolBindings` 后继续；历史绑定不属于第四层工具状态，不可被模型看到或执行。新绑定仍失败，健康恢复也不自动启用旧 session。
 
 ### 6.4 Skill 状态
 
@@ -503,6 +507,8 @@ AGENT_BUILD 属于构造生命周期；消息压缩前后属于条件生命周�
 ### 7.2 Hook 上下文与结果
 
 Hook 只能接收与当前生命周期匹配的只读上下文视图，并通过显式结果请求 core 修改状态。Hook 不能持有或直接操作 core 实现对象。
+
+定义与运行态必须分开：只有 `AGENT_BUILD` 可以返回 `AgentDefinitionOperation` 并修改定义草稿。其他十个生命周期的结果族不暴露任何定义或 Hook Binding 修改入口；它们只能修改各自允许的运行态对象。session `enabledTools` 是运行态，不是定义，改变它不等于修改 `availableTools` 或 `defaultEnabledTools`。
 
 结果按生命周期分型：
 
@@ -566,7 +572,7 @@ sequenceDiagram
     Assembler->>Definition: load(agentKey)
     Definition-->>Assembler: complete definition
     Assembler->>Assembler: draft -> AGENT_BUILD -> validate -> freeze
-    Assembler-->>Factory: AgentDefinitionSnapshot
+    Assembler-->>Factory: AgentAssemblyResult(definition/effective tools/history)
     Factory-->>Runtime: ApexAgent
     Runtime-->>Caller: ApexAgentExecution(agent, publisher, lease)
     Caller->>Execution: run()（异步线程）
@@ -578,7 +584,7 @@ sequenceDiagram
     Execution->>Lease: release() in finally
 ```
 
-`newAgent` 在返回执行句柄前同步取得 lease；失败时同步抛出 `SessionBusyException`，因此 platform 仍可在响应提交前返回 HTTP 409。取得 lease 后才允许 core 工厂通过端口加载 session；runtime 不解释其业务状态。core 工厂构造失败时也必须关闭请求 Publisher 并释放 lease。新 session 的首个 Turn 从 `defaultEnabledTools` 初始化 `enabledTools`；已有 session 的新 Turn 沿用 session 工具和 Skill 状态。
+`newAgent` 在返回执行句柄前同步取得 lease；失败时同步抛出 `SessionBusyException`，因此 platform 仍可在响应提交前返回 HTTP 409。取得 lease 后才允许 core 工厂通过端口加载 session；runtime 不解释其业务状态。core 工厂同步构造或恢复准备失败时，runtime 通过请求级 Once Publisher 发布且只发布既有 `END`、完成 Publisher 并释放 lease，再向 platform 抛出带 `endPublished=true` 的准备异常；platform 捕获后返回已完成的 emitter，不映射为 HTTP 4xx/5xx。新 session 的首个 Turn 从 `defaultEnabledTools` 初始化 `enabledTools`；已有 session 的新 Turn 沿用 session 工具和 Skill 状态。
 
 ### 8.2 ReAct 主循环
 
@@ -860,7 +866,9 @@ runtime 实现 `AutoCloseable`，拥有并关闭自身创建的：
 - HTTP Client。
 - 内部调度器或执行器。
 
-未配置 MCP/SubAgent 时不得创建对应资源。单个 MCP/SubAgent 初始化失败时记录 warn，关闭本次失败产生的资源，从注册表、相关 Agent 定义的 available/defaultEnabled 集合及 session enabledTools 移除受影响工具后继续；不提供策略开关，健康集成不受影响。
+未配置 MCP/SubAgent 时不得创建对应资源。单个 MCP/SubAgent 初始化失败时记录 warn，关闭本次失败产生的资源并在 `ToolAvailabilityProvider` 中登记来源范围、工具名和原因；不提供策略开关，健康集成和 runtime 启动不受影响。
+
+不可用工具不得形成新的活动绑定。新 session 的定义或 AGENT_BUILD 新增绑定命中不可用状态时，core 构造失败；已有 session 的旧绑定转为 `HistoricalToolBinding`，从有效定义、session `enabledTools` 和请求级 ToolCatalog 移除。历史定义投影及既有 ToolCall/ToolResult 只读保留，不向模型暴露、不允许执行，也不在健康恢复后自动启用。
 
 ## 10. platform 架构
 
@@ -889,6 +897,7 @@ platform 负责参数校验、用户提取、请求级 SSE Publisher 创建、�
 - NEW -> 在 Controller 返回 emitter 前调用 `runtime.newAgent(request, requestPublisher)`。
 - HUMAN_RESPONSE -> 在 Controller 返回 emitter 前调用 `runtime.resumeAgent(command, requestPublisher)`。
 - 两个 API 同步返回持有 lease 的 `ApexAgentExecution`；同步抛出的 `SessionBusyException` 在响应尚未提交时映射为 HTTP 409。
+- core 同步构造/恢复准备失败时，runtime 已通过当前 Once Publisher 发布唯一 `END` 并释放 lease；platform 记录错误、完成 emitter 并以 HTTP 200 `text/event-stream` 返回该仅含 END 的流。Header/请求字段错误仍为 HTTP 400，busy 仍为 409 且不发送 END。
 - 取得 execution 后才提交 SSE 响应并异步调用 `execution.run()`。
 - 线程池拒绝时调用 `execution.cancelBeforeStart()`，确保 END 和 lease 各自只收口一次。
 - platform 不保存另一套 session 并发占用状态。
@@ -1210,7 +1219,7 @@ memory 参与父 POM 编译与单元测试，但不进入 platform 默认启动�
 - 动态 AgentDefinitionProvider 不在 Builder 阶段加载；不同 agentKey 的定义均在请求构造时通过同一 Assembler 校验。
 - 生命周期结果族严格匹配：TURN_START、ITERATION_START、ITERATION_END 使用 `LoopHookResult`，TURN_END 只接受 `TurnEndHookResult`。
 - `AgentDefinitionProvider.listAgents()` 不触发完整定义加载；File Provider 只加载显式 YAML 资源一次且不热加载。
-- MCP/SubAgent 初始化失败只移除受影响工具、记录 warn 并继续，且失败资源全部关闭。
+- MCP/SubAgent 初始化失败关闭失败资源并登记不可用状态；新绑定构造失败，已有绑定转只读历史且从有效工具集合移除，健康工具继续可用。
 
 ### 18.3 恢复测试
 
@@ -1238,6 +1247,7 @@ memory 参与父 POM 编译与单元测试，但不进入 platform 默认启动�
 - 线程池拒绝调用 `cancelBeforeStart`，END 与 lease 均只收口一次。
 - SSE Golden File。
 - END 只发送一次且精确 JSON 不变。
+- core 同步构造/恢复准备失败返回 HTTP 200 的仅 END SSE；断言无 STREAM_CONTENT、交互、工具或错误事件。参数错误 400、busy 409 两条路径均不发送 END。
 - PostgreSQL Repository、提交顺序、单 Repository 一致性和进程重启恢复；不要求跨 Repository 原子回滚。
 - TEXT 长内容往返不截断。
 - `1.0.0` 定义/快照版本可完整往返和重启恢复；跨版本与未知版本不属于本期验收范围。
@@ -1261,7 +1271,7 @@ memory 参与父 POM 编译与单元测试，但不进入 platform 默认启动�
 12. 前端协议保持兼容，END 精确载荷保持不变。
 13. 模型异常使当前 Iteration、Turn、Session 进入 `FAILED` 并立即返回；Hook 异常 warn 后跳过；工具异常以 ToolResult 告诉模型。
 14. `AgentDefinitionProvider.listAgents()` 是 Agent 列表的唯一来源；File Provider 只加载显式 YAML 资源一次，不扫描、不热加载。
-15. MCP/SubAgent 初始化失败只移除受影响工具并继续；禁用或降级移除的工具不进入模型工具列表。
+15. MCP/SubAgent 初始化失败不阻止 runtime 与健康集成启动；不可用工具禁止新活动绑定，已有绑定只读留痕并从有效工具集合移除，绝不进入模型工具列表或执行器，也不自动重新启用。
 16. 首版定义/快照 schema 版本固定为 `1.0.0`，本期不承诺跨版本兼容。
 17. PostgreSQL 是 platform 唯一数据库，序列化快照使用 TEXT 和 Jackson。
 18. `SuperAgent` 后端概念最终统一更名为 `ApexAgent`。
@@ -1269,3 +1279,5 @@ memory 参与父 POM 编译与单元测试，但不进入 platform 默认启动�
 20. 每次 NEW/HUMAN_RESPONSE 都拥有独立 Publisher、Once END 状态和 `ApexAgentExecution`。
 21. session lease 在 runtime API 返回前同步取得，由 execution 在所有结束路径幂等释放。
 22. 默认 lease 只保证单进程安全；本期 platform 只支持单实例部署。
+23. 只有 AGENT_BUILD 可以修改 Agent 定义；其他生命周期只能修改其结果类型允许的运行态对象。
+24. 请求参数错误返回 400、session busy 返回 409；Publisher 已绑定后的 core 构造/恢复准备失败返回只含一个精确 END 的 SSE。

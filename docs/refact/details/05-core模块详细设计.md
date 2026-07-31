@@ -28,7 +28,7 @@ org.gemo.apex.core
 
 ### 实现目标
 
-将“加载定义 -> AGENT_BUILD -> 权威校验 -> 冻结”收敛到唯一 Assembler，并由 Factory 明确分开 NEW 与 HUMAN_RESPONSE。runtime 只能提供端口和调用入口，不能预先执行构造语义。
+将“加载定义 -> AGENT_BUILD -> 不可用绑定判定 -> 权威校验 -> 冻结”收敛到唯一 Assembler，并由 Factory 明确分开 NEW 与 HUMAN_RESPONSE。runtime 只能提供端口和调用入口，不能预先执行构造语义。任何生命周期中只有 AGENT_BUILD 可以修改定义。
 
 ### 涉及模块/类
 
@@ -48,25 +48,35 @@ org.gemo.apex.core
 NEW 构造采用两阶段校验：
 
 ```text
-Provider.load(agentKey)
+Factory.load optional SessionSnapshot
+  -> Provider.load(agentKey)
   -> structural precheck（版本、metadata、AGENT_BUILD Binding 可解析）
   -> create AgentDefinitionDraft
   -> snapshot and dispatch AGENT_BUILD bindings
   -> materialize candidate and ToolProvider.loadTools(candidate)
-  -> refresh/apply known external-tool availability pruning
+  -> refresh availability and classify new versus existing unavailable bindings
+  -> reject new binding / migrate existing binding to history
   -> full validate
   -> freeze runtime snapshot + recovery projection
 ```
 
-Factory 随后加载/创建 session，校验 NEW 状态并创建 Turn。恢复路径直接读取 `activeDefinition` recovery snapshot，验证 1.0.0、解析 Hook/Tool，不调用 Provider 或 AGENT_BUILD。
+Factory 先校验已加载 session 的用户、agentKey 和 NEW 状态，再把它传给 Assembler 区分“新绑定”与“既有绑定”；Assembler 成功后才创建/更新 Turn 和 SessionSnapshot。恢复路径直接读取 `activeDefinition` recovery snapshot，验证 1.0.0、解析 Hook/Tool，不调用 Provider 或 AGENT_BUILD。
 
 ### 接口和数据结构
 
 ```java
 final class AgentDefinitionAssembler {
-    AgentDefinitionSnapshot assemble(String agentKey, AgentPorts ports);
+    AgentAssemblyResult assemble(
+            String agentKey,
+            Optional<SessionSnapshot> existingSession,
+            AgentPorts ports);
     ValidationReport validate(AgentDefinitionDraft draft, AgentPorts ports);
 }
+
+record AgentAssemblyResult(
+        AgentDefinitionSnapshot definition,
+        Set<String> effectiveEnabledTools,
+        List<HistoricalToolBinding> historicalToolBindings) {}
 
 final class ApexAgentFactory {
     ApexAgent createNew(AgentRequest request, AgentPorts ports);
@@ -74,14 +84,16 @@ final class ApexAgentFactory {
 }
 ```
 
-`AgentPorts` 持有 DefinitionProvider、ToolProvider、ToolAvailabilityProvider、HookResolver、ModelGateway、repositories、compaction ports、Skill ports、Publisher、IdGenerator、TimeProvider 和 maxIterations/hardLimit 配置。它是 core 内不可变类，不进入 common 或快照。
+`AgentAssemblyResult` 是 core 内部结果，Factory 必须把其中三项作为一次 session candidate 使用；任一步校验或持久化失败都不能只提交定义或只提交历史记录。`AgentPorts` 持有 DefinitionProvider、ToolProvider、ToolAvailabilityProvider、HookResolver、ModelGateway、repositories、compaction ports、Skill ports、Publisher、IdGenerator、TimeProvider 和 maxIterations/hardLimit 配置。它是 core 内不可变类，不进入 common 或快照。
 
 ### 关键实现逻辑
 
 - structural precheck 只保证能安全运行 AGENT_BUILD，不要求初始 Prompt/工具已完整，因为构造 Hook可能补齐。
 - AGENT_BUILD Binding 列表进入时拍快照，按 order/id 排序；当前 Hook 修改 agent-build 列表不影响本次剩余分发。
+- `AgentDefinitionOperationApplier` 只能由 AGENT_BUILD 调用；其他生命周期结果类型没有该字段，dispatcher 发现自定义/反序列化结果夹带定义操作时抛 `HookContractException`。
 - full validate 包含 schema 1.0.0、agentKey 一致、Prompt 非空、Hook ID 点内唯一、descriptor 匹配、Skill 可解析、default ⊆ available、available ⊆ 本次 ToolProvider 返回的健康工具名。
-- 已知 MCP/SubAgent 初始化失败的工具先依据 ToolAvailabilityProvider 从 draft available/default 中删除；其他注册缺失仍报配置漂移。
+- 对不可用工具先比较 `existingSession.activeDefinition.availableTools`：新 session 或上一版不存在的名称属于新绑定，抛 `UnavailableToolBindingException`；上一版已存在的名称属于旧绑定，写入 `HistoricalToolBinding` 并从候选 available/default、session enabled 和请求 ToolCatalog 移出。判断以精确名称或已声明稳定来源前缀完成，禁止模糊 contains。
+- 旧绑定迁移通过创建新的 candidate/session snapshot 完成，不修改 Provider 定义、旧 recovery snapshot 或对话记录；相同三元组幂等去重。健康恢复不自动重启旧绑定，普通工具漂移仍显式失败。
 - 新 session 首 Turn用 snapshot.defaultEnabledTools 初始化；已有 session 新 Turn保留 enabledTools。已激活 Skill 不再 enabled 时移除并 warn；session enabled tool 普通漂移不求交集，显式失败。
 - recovery snapshot 不含 defaultEnabledTools；运行 snapshot 与 recovery projection 通过独立类型避免 null/可选字段。
 - 静态预检调用同一个 validator，但每个 NEW 仍重新 assemble/validate。
@@ -89,17 +101,19 @@ final class ApexAgentFactory {
 ### 异常处理
 
 - Provider 返回 null/未知 key：`AgentDefinitionNotFoundException`。
+- 新 session/AGENT_BUILD 尝试绑定不可用工具：`UnavailableToolBindingException(toolName, origin, sourceId)`；Factory 不保存部分 session，交 runtime 按仅 END SSE 收口。
 - structural/full validation：`InvalidAgentDefinitionException`，包含字段路径和全部可确定错误；不冻结部分 snapshot。
 - AGENT_BUILD 普通异常 warn 后继续；返回错误结果族/非法 operation 是 `HookContractException`。
 - createResumed 通过 ToolProvider 的 recovery snapshot 重载解析工具；遇到 snapshot 非 1.0.0、Hook/Tool 无法解析时失败，绝不回退最新 Provider。
 
 ### 测试方案
 
-- `AgentDefinitionAssemblerTest` 精确断言 load、precheck、AGENT_BUILD、availability、validate、freeze 顺序。
+- `AgentDefinitionAssemblerTest` 精确断言 load、precheck、AGENT_BUILD、availability、classify、validate、freeze 顺序。
 - 构造 Hook 补 Prompt、删工具、增 Hook；自改 agent-build 链不在当前请求重跑。
+- 参数化覆盖非 AGENT_BUILD 结果不能修改定义/Binding，`ToolActivationDelta` 只改变 session `enabledTools`。
 - dynamic Provider 在 Builder 阶段 0 次、每个 NEW 1 次；不同 agentKey 独立定义。
 - createResumed 的 Provider/AGENT_BUILD 调用均 0。
-- 普通工具漂移失败、已知外部故障工具剔除成功的对照测试。
+- 新 session/AGENT_BUILD 不可用绑定失败；已有 session 旧绑定迁移历史后健康工具可运行；历史消息不删、模型/执行器不可见、健康恢复不自动启用；普通工具漂移失败的对照测试。
 
 ### 架构符合性
 
@@ -155,6 +169,7 @@ final class LifecycleDispatcher {
 - END_TURN 在普通生命周期停止剩余 Hook；若 Iteration 已创建，统一交 `TurnFinalizer` 执行一次 IterationEnd/TurnEnd。
 - 在 ITERATION_END 返回 EndTurn 只停止剩余 iteration-end Hook 后进入 TURN_END；TURN_END 不接受 EndTurn。
 - 只有 PRE_TOOL_CALL resume 可以传 skipped IDs；其他生命周期传非空集合即契约错误。
+- 只有 AGENT_BUILD dispatcher 接受 `AgentBuildHookResult`/`AgentDefinitionOperation`；其他点即使通过原始类型或自定义实现绕过编译约束也必须防御性拒绝，不能把定义变化混入 `HookMutations`。
 - PRE_TOOL_CALL 每次调用具体 Binding 前由 core IdGenerator 生成 `proposedInterventionId` 放入只读Context；当前 ToolCall的 `invocationId` 在开始处理该调用时只生成一次并跨挂起恢复保留。
 - Hook 审计只写日志/trace/metrics；不保存通用执行列表。
 
@@ -279,7 +294,7 @@ final class AgentEventFactory {
 - END 使用空 EndMessage 并依赖 protocol/common mapper 的 NON_NULL，实际幂等由 runtime Once 装饰器完成。
 - contentId 在一次模型调用开始时生成，所有 delta 复用；下一模型调用用新 ID。
 - ToolConfirmation 的 display/editable DTO 在 kit 构造 spec 后由 factory 复制，不让 protocol 依赖 kit。
-- core 可在每条控制路径至多调用一次 `requestEnd`，但即使构造失败/平台取消竞争仍依赖 Once 保证实际一次。
+- core 可在每条已构造 Agent 的控制路径至多调用一次 `requestEnd`；同步构造失败和执行前取消由 runtime 使用同一 Once 收口，保证实际一次。
 
 ### 异常处理
 
@@ -507,7 +522,7 @@ set current call
 
 ### 接口和数据结构
 
-`ToolCatalog` 提供 registered name -> AgentTool；`ToolStateManager` 持有 available/enabled 的 session 状态。模型请求只投影 enabled 集合中的 ToolDefinition，顺序按 available 定义顺序稳定。
+`ToolCatalog` 提供本请求可执行 name -> AgentTool；`ToolStateManager` 持有 effective available/enabled 的 session 状态，并单独只读持有 historical bindings。模型请求只投影 enabled 集合中的 ToolDefinition，顺序按 available 定义顺序稳定；历史绑定绝不参与投影。
 
 内部 `ToolCallOutcome`：Completed、Suspended、EndTurn。BLOCK/RETURN 最终都转 Completed ToolResult。
 
@@ -523,7 +538,7 @@ set current call
 
 ### 异常处理
 
-- 找不到/禁用工具不真实执行，但补 ToolResult；已知外部工具故障按同一不可用结果处理。
+- 找不到/禁用工具不真实执行，但补 ToolResult；已知外部工具故障固定生成内容“工具不可用”的 ToolResult。只有 availability 中有结构化记录时走该分支，普通缺失仍视为契约/配置错误。
 - ToolResult ID/name 不匹配是 ToolContractException，执行失败而非交给模型。
 - Observer 非 allowlist 事件抛 IllegalToolEventException，作为该工具执行异常转换 ToolResult；父 END 不受影响。
 - append/save 失败停止剩余 ToolCall。
@@ -532,6 +547,7 @@ set current call
 
 - registered/available/default/enabled 子集、跨 Iteration/Turn 保留。
 - 模型工具列表只含 enabled；伪造、过期、Hook 中途禁用均不执行。
+- 历史绑定不在 ToolCatalog/模型列表；伪造同名调用得到不可用结果且执行器调用次数为 0。
 - CONTINUE/BLOCK/RETURN/END_TURN 和工具异常。
 - 多 ToolCall 前序持久化、后序失败/挂起，结果顺序一一对应。
 - observer allowlist、关联 ID、跨请求隔离和 END 拒绝。
@@ -629,7 +645,7 @@ ToolConfirmationSubmission 必须含 interaction_type=TOOL_CONFIRMATION、confir
 - confirmationId、toolCallId、intervention type 同时匹配。当前旧实现未校验 confirmationId，目标实现按前端已经回传的字段加强验证，不改协议。
 - 批准时这里只验证 editable key，实际合并在 CORE-07C；拒绝也先构造 typed submission。
 - Hook/Tool 从 recovery snapshot 的稳定 name 解析；不加载 Provider。
-- 已知外部故障导致挂起工具不可用时，恢复器仍能构造上下文，由 CORE-07C 转为不可用 ToolResult；普通 name 漂移则失败。
+- 已知外部故障导致挂起工具不可用时，恢复器保留原 ToolCall/交互历史并构造“不可执行”上下文，由 CORE-07C 生成“工具不可用”ToolResult、迁移历史绑定后继续；普通 name 漂移仍失败。
 
 ### 异常处理
 
@@ -690,6 +706,7 @@ editable 参数合并算法：以 suspended.resolvedArguments 为基准，只覆
 - updated args schema 非法拒绝恢复并保持挂起，允许用户重新提交；不执行 Hook/工具。
 - 剩余 Hook 普通异常 warn 后继续，契约异常失败。
 - 工具普通异常转 ToolResult；存储失败停止剩余调用。
+- 恢复前工具已转不可用时不执行剩余 PRE Hook 或真实工具；生成固定“工具不可用”结果，执行 POST、追加结果、把绑定幂等迁入历史并从 enabled 移除后继续剩余 ToolCall。
 - POST Hook END_TURN 使用标准 finalizer，对剩余调用补强制结束结果。
 
 ### 测试方案
@@ -700,6 +717,7 @@ editable 参数合并算法：以 suspended.resolvedArguments 为基准，只覆
 - 再次挂起对象替换、IDs 累计、END 一次。
 - 多 ToolCall 前序结果、当前恢复、后序继续；最终挂起对象清空。
 - append/save 故障与幂等重试。
+- 挂起工具转不可用：历史交互/ToolCall 保留、执行次数 0、固定结果一次、historical binding 一条、健康恢复不自动启用。
 
 ### 架构符合性
 

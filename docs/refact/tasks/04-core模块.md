@@ -12,16 +12,17 @@
 - **涉及范围**：core `AgentDefinitionAssembler`、定义校验器、`ApexAgentFactory.createNew/createResumed`、AgentDefinitionSnapshot 恢复投影。
 - **前置依赖**：COM-01～03、EXT-01～02。
 - **具体执行内容**：
-  1. 按“Provider 加载 → 可变草稿 → AGENT_BUILD → 权威校验 → 冻结”顺序实现 Assembler。
+  1. 按“Provider 加载 → 可变草稿 → AGENT_BUILD → 不可用绑定判定 → 权威校验 → 冻结”顺序实现 Assembler；只有 AGENT_BUILD 能修改定义。
   2. 校验工具三层子集、Skill/Hook 可解析性、HookPoint/Context/Result 族、Hook ID 唯一性和 Prompt 完整性。
   3. `createNew` 每个 NEW 只执行一次 AGENT_BUILD；`createResumed` 只使用持久化定义快照，禁止执行 AGENT_BUILD。
   4. 提供可供静态定义预检复用的同一校验器，但请求期仍再次权威校验。
   5. 动态 Provider 不在 Builder 阶段加载；支持不同 agentKey 在请求时分别校验。
+  6. 新 session/AGENT_BUILD 尝试绑定已登记不可用工具时拒绝构造；已有 session 的既有绑定迁移为只读历史并从有效定义和 `enabledTools` 移出，普通配置漂移仍失败。
 - **预期产出**：Assembler、Factory、唯一定义校验器和构造/恢复单元测试。
 - **验收标准**：
   - 测试精确验证加载、构造 Hook、校验、冻结顺序。
   - 恢复路径 Provider 调用次数与 AGENT_BUILD 调用次数均为 0。
-  - 非法工具、Skill、Hook 或 Prompt 在 Agent 创建前失败，且不产生部分冻结快照。
+  - 非法工具、Skill、Hook、Prompt 或不可用新绑定在 Agent 创建前失败，且不产生部分冻结快照；旧绑定迁移只生成新的不可变快照。
   - runtime 源码不存在复制的定义级校验规则。
 - **限制条件或注意事项**：数据库 Agent 定义源不在本期；Builder 只校验注册表和基础设施装配；首版定义快照 schema 版本固定为 `1.0.0`，本期不实现跨版本兼容。
 
@@ -36,7 +37,7 @@
 - **具体执行内容**：
   1. 支持 AGENT_BUILD、TURN_START、ITERATION_START、PRE/POST_MESSAGE_COMPRESSION、PRE/POST_MODEL_CALL、PRE/POST_TOOL_CALL、ITERATION_END、TURN_END。
   2. 按 Hook Binding order 和稳定 ID 分发，运行时再次校验 Context/Result 类型。
-  3. 先验证整个 record，再原子应用消息、工具、参数、结果或压缩修改。
+  3. 先验证整个 record，再原子应用消息、工具、参数、结果或压缩修改；非 AGENT_BUILD 结果一律不能携带定义/Hook 链修改。
   4. 所有 Hook 执行异常统一记录 warn，丢弃当前 Hook 的全部修改并继续后续 Hook；不提供 `FAIL_FAST` 配置。
   5. 实现 END_TURN 的非递归结束语义，禁止 SKIP_ITERATION 和非法动作。
   6. 审计写日志/Tracing/Metrics，不写通用 Hook 执行历史到快照。
@@ -44,7 +45,7 @@
 - **验收标准**：
   - 11 个生命周期的顺序和条件执行可由 Fake Hook 精确断言。
   - `TURN_END` 返回非 Continue、结果族不匹配或动作载荷非法会明确失败。
-  - 单 Hook 修改失败后，消息、工具集合、参数和结果均无部分残留。
+  - 单 Hook 修改失败后，消息、工具集合、参数和结果均无部分残留；运行期 Hook 尝试修改定义或 Binding 被类型系统或防御校验拒绝。
   - 每个生命周期的 Hook 异常均只产生 warn、无部分修改，并继续后续 Hook；静态类型或定义契约非法仍明确失败。
 - **限制条件或注意事项**：AGENT_BUILD 只由 CORE-01 编排；PRE_TOOL_CALL 的恢复游标只由 CORE-07A 持久化；结束 Hook 不得递归重入。
 

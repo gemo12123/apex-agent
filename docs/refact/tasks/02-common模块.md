@@ -9,7 +9,7 @@
 - **任务目标**：用中立 DTO/record 表达 AgentDefinition、Session/Turn/Iteration、模型消息、工具和 Skill，使 core-extension 与 core 不依赖具体框架类型。
 - **当前进度**：未开始。
 - **设计依据**：设计文档第 5.2、6、7.1、11、12 节；架构文档第 5.2、6.1～6.4 节。
-- **涉及范围**：AgentDefinition/草稿/快照/元数据，请求命令，Session/Turn/Iteration 与状态，中立消息和模型流，ToolDefinition/ToolCall/ToolResult/ToolExecutionContext，工具三层状态，SkillDefinition/SkillSetDefinition。
+- **涉及范围**：AgentDefinition/草稿/快照/元数据，请求命令，Session/Turn/Iteration 与状态，中立消息和模型流，ToolDefinition/ToolCall/ToolResult/ToolExecutionContext，工具三层状态、ToolOrigin/ToolAvailabilitySnapshot，SkillDefinition/SkillSetDefinition。
 - **前置依赖**：PRO-01、FND-02。
 - **具体执行内容**：
   1. 定义跨模块唯一的数据模型，保留 ToolCall ID、顺序、参数和 metadata 的无损表达能力。
@@ -18,11 +18,13 @@
   4. 对跨边界集合使用不可变副本或防御性复制。
   5. ToolExecutionContext 只保存本地工具所需中立数据，不引用 core-extension 的 ToolExecutionObserver 或 AgentEventPublisher。
   6. 为状态转换定义明确枚举；模型异常时当前 Iteration、Turn、Session 进入 `FAILED`，Hook/工具异常不改变三层状态。
+  7. 定义不可用工具的精确名称/来源 scope 快照；它只表达 MCP/SubAgent 健康事实，不把历史绑定误作第四层可执行工具状态。
 - **预期产出**：common 基础领域模型和构造/不变量单元测试。
 - **验收标准**：
   - common 不包含 Spring、Spring AI、Servlet、ORM 或数据库类型。
   - ToolCall/ToolResult 的 ID、名称、参数和顺序可完整往返。
   - 工具与 Skill 子集关系能被独立校验。
+  - availability 集合与来源 scope 均不可变，稳定前缀匹配规则可独立测试。
   - 集合不可通过调用方引用修改内部状态。
 - **限制条件或注意事项**：中立模型不得简化到丢失现有协议或 Spring AI 必需信息，也不得用 `Map<String,Object>` 代替已明确的核心领域结构。
 
@@ -46,7 +48,7 @@
   - 不属于当前生命周期的结果族可被编译期或运行期明确拒绝。
   - 必填动作载荷为 null、越界工具启用变更或非法 Patch 会在应用前失败。
   - 结果对象创建后不可被外部修改。
-- **限制条件或注意事项**：目标态不存在 `SKIP_ITERATION`；Skill 集合不能通过运行期 Hook 动态增删；AGENT_BUILD 只允许定义操作，执行异常同样记录 warn 后跳过，最终定义仍必须通过 Assembler 校验。
+- **限制条件或注意事项**：目标态不存在 `SKIP_ITERATION`；Skill 集合不能通过运行期 Hook 动态增删；只有 AGENT_BUILD 结果族可以携带定义操作，其他生命周期的类型中不得出现 AgentDefinition/Hook Binding Patch。AGENT_BUILD 执行异常同样记录 warn 后跳过，最终定义仍必须通过 Assembler 校验。
 
 ## COM-03 建立快照、人工介入与版本化持久化模型
 
@@ -57,7 +59,7 @@
 - **涉及范围**：SessionSnapshot、活动 Turn/Iteration runtime snapshot、AgentDefinitionSnapshot 恢复投影、HumanInterventionRequest、SuspendedToolCall、SuspensionPoint、ConversationCompaction 数据。
 - **前置依赖**：COM-01、COM-02。
 - **具体执行内容**：
-  1. 定义 SessionSnapshot 的一级状态：当前 Turn/Iteration、enabledTools、activatedSkills、活动定义快照和唯一挂起对象。
+  1. 定义 SessionSnapshot 的一级状态：当前 Turn/Iteration、enabledTools、activatedSkills、活动定义快照、只读 `historicalToolBindings` 和唯一挂起对象。
   2. `SuspendedToolCall` 只保存当前工具信息、交互信息和 `executedPreToolHookIds`。
   3. 明确禁止保存 emitter、Bean、Tool 实例、客户端、ToolCall index、重复 enabledTools/定义快照和通用 Hook 历史。
   4. 为快照加入字符串版本字段，首版固定为 `1.0.0`。
@@ -66,7 +68,7 @@
 - **验收标准**：
   - 挂起样本能定位原 session/turn/iteration/toolCall，并且只有 PRE_TOOL_CALL Hook ID 执行进度。
   - 通过 `toolCallId` 而非数组 index 表达恢复定位。
-  - 快照不包含任何禁止类型或重复状态。
+  - 快照不包含任何禁止类型或重复状态；历史工具绑定只含中立标识/原因/时间，不含 AgentTool 实例，且不能回填 `enabledTools`。
   - `1.0.0` 版本 round-trip 保持等价。
 - **限制条件或注意事项**：`defaultEnabledTools` 是初始化参数，不进入恢复投影；挂起对象不重复保存 AgentDefinitionSnapshot；跨版本升级、版本跨度和未知版本处理不在本期范围，不宣称跨版本兼容。
 

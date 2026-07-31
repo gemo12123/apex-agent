@@ -123,14 +123,14 @@
   1. 显式 Publisher 绑定本次请求；缺省时 Factory 每次创建独立 Print Publisher。
   2. 用请求级 Once 装饰器保证父请求 END 实际只发布一次。
   3. runtime 先 acquire lease，再调用 core Factory，最后返回持有三者的 ApexAgentExecution。
-  4. core 构造失败时通过同一 Once Publisher 和 lease 收口。
+  4. core 同步构造/恢复准备失败时通过同一 Once Publisher 发布且只发布精确 END，释放 lease 后抛出带 `endPublished=true` 的准备异常供 platform 返回已完成 emitter。
   5. 让 ToolExecutionObserver 最终写入当前请求的 Once Publisher，但禁止工具发布 END。
   6. 覆盖并发不同 session、连续恢复、构造失败、线程池拒绝和 Publisher 异常。
 - **预期产出**：请求级 Publisher、runtime 准备 API 和端到端并发测试。
 - **验收标准**：
   - newAgent/resumeAgent 返回前已取得 lease；冲突同步抛出。
   - 每次 NEW/HUMAN_RESPONSE 使用独立 Publisher 和 END 状态。
-  - 正常、失败、挂起、构造失败和 cancelBeforeStart 均只发送一次 END、释放一次 lease。
+  - 正常、失败、挂起、构造失败和 cancelBeforeStart 均只发送一次 END、释放一次 lease；构造/恢复准备失败流中不存在 END 以外的事件。
   - ToolExecutionObserver 进度事件不串请求且不能结束父传输。
 - **限制条件或注意事项**：Builder 不接受共享有状态 Publisher 实例；platform 不得维护第二套 session 锁或 END 状态。
 
@@ -170,15 +170,16 @@
   2. 调用只发送最终工具参数，不传 session、用户、Agent 或 ToolExecutionContext。
   3. Client 缓存按 runtime 实例和 server 定义隔离。
   4. 未配置时不启动进程/连接；关闭 runtime 时释放全部自有资源。
-  5. server 初始化失败时记录 warn，关闭本次失败产生的资源，从注册表、相关 Agent 定义的 available/defaultEnabled 集合及 session enabledTools 移除受影响工具后继续；不提供策略开关。
+  5. server 初始化失败时记录 warn，关闭本次失败产生的资源，并按 server sourceId/稳定工具名前缀登记不可用状态；健康 server 和 runtime 启动继续，不提供策略开关。
+  6. 不为不可用工具建立新活动绑定；已有 session 的既有绑定只读留痕并退出有效集合，既有 ToolCall/ToolResult 不删除且不能重放执行。
 - **预期产出**：可选 MCP 集成、资源生命周期测试和参数泄漏测试。
 - **验收标准**：
   - stdio/SSE 工具发现和调用契约测试通过。
   - 发送载荷只含工具参数。
   - runtime close 后进程、连接和调度资源全部关闭。
   - 未配置 MCP 时无相关资源创建。
-  - 单个 MCP server 初始化失败不阻止其他 server/runtime 启动，受影响工具不进入模型列表且无资源泄漏。
-- **限制条件或注意事项**：不得把 MCP 类型放入 common/core；降级只移除失败 server 影响的工具，不扩大到健康集成。
+  - 单个 MCP server 初始化失败不阻止其他 server/runtime 启动；不可用新绑定被拒绝、旧绑定只读留痕，受影响工具不进入模型列表且无资源泄漏。
+- **限制条件或注意事项**：不得把 MCP 类型放入 common/core；不可用范围只覆盖失败 server 的 sourceId/稳定前缀，不扩大到健康集成，也不得在恢复健康时自动启用旧 session。
 
 ## RUN-07 迁移 HTTP SubAgent 工具
 
@@ -195,7 +196,7 @@
   4. 保持 ARTIFACT 当前忽略语义；远端 END 只结束当前工具调用，不调用 observer 发布 END。
   5. 实现超时、取消、异常转换、最大深度和 agentKey 调用链闭环检测。
   6. 使用 protocol + Jackson 解析，移除 Fastjson。
-  7. SubAgent 初始化失败时记录 warn，关闭本次失败产生的资源，从注册表、相关 Agent 定义的 available/defaultEnabled 集合及 session enabledTools 移除对应工具后继续；不提供策略开关。
+  7. SubAgent 初始化失败时记录 warn，关闭本次失败产生的资源并按 sourceId/工具名登记不可用状态；新绑定被拒绝，已有绑定只读留痕并退出有效集合，其他工具继续；不提供策略开关。
 - **预期产出**：HTTP SubAgent AgentTool、SSE 解析器和集成测试。
 - **验收标准**：
   - 子调用使用独立 session，不复用父 session。
@@ -219,13 +220,13 @@
   2. 未配置可选能力时不创建相关客户端、进程或线程。
   3. 提供最小 Builder、显式 Publisher、HUMAN_RESPONSE 恢复示例。
   4. 运行无 Spring IoC 集成测试，覆盖默认内存、Print JSON、工具、压缩和恢复。
-  5. 覆盖 MCP/SubAgent 单项初始化失败，验证 warn、受影响工具从三层集合和 session 状态清理、健康工具继续可用及失败资源关闭。
+  5. 覆盖 MCP/SubAgent 单项初始化失败，验证 warn、新绑定拒绝、旧绑定转历史、有效集合清理、历史消息保留、健康工具继续可用及失败资源关闭。
   6. 检查 runtime artifact 不依赖 platform/memory。
 - **预期产出**：runtime-only 示例、集成测试、资源关闭报告。
 - **验收标准**：
   - 普通 Java 测试不启动 ApplicationContext 并完整执行一次 Agent。
   - runtime close 多次安全，所有自有线程/客户端/进程释放。
   - 默认 Print 输出满足 protocol Golden File。
-  - MCP/SubAgent 初始化失败不会阻止 runtime-only 执行，受影响工具不出现在模型列表或 session enabledTools。
+  - MCP/SubAgent 初始化失败不会阻止健康 Agent 的 runtime-only 执行；受影响工具不出现在模型列表或 session enabledTools，历史记录不能被执行。
   - 依赖树无 platform/memory，且只有最小 Spring AI 依赖。
-- **限制条件或注意事项**：外部注入资源是否由 runtime 关闭必须在 Builder 契约中显式；MCP/SubAgent 初始化失败固定采用 warn、移除受影响工具并继续的策略。
+- **限制条件或注意事项**：外部注入资源是否由 runtime 关闭必须在 Builder 契约中显式；MCP/SubAgent 初始化失败固定采用 warn、禁止新绑定、旧绑定只读留痕、健康能力继续的策略。

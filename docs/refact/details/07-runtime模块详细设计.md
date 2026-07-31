@@ -78,7 +78,7 @@ ApexAgentRuntime.builder()
 
 - 多/零 Provider、多/零 model entry、重名、非法 descriptor 在 build 阶段抛 `RuntimeConfigurationException`，聚合全部错误。
 - YAML 资源不存在、重复 agentKey、prompt 无法读取在 File Provider 初始化失败。
-- 可选 MCP/SubAgent 初始化失败由 RUN-06/07 记录 unavailable，不让整个 build 失败。
+- 可选 MCP/SubAgent 初始化失败由 RUN-06/07 记录 unavailable，不让整个 runtime build 失败；但受影响 Agent 的新活动绑定会在 core 构造时失败，不能被 Builder 静默删掉。
 
 ### 测试方案
 
@@ -325,7 +325,7 @@ acquire lease
   -> return ApexAgentExecution
 ```
 
-任一步失败按相反顺序 END best-effort、关闭请求 publisher（若可关闭）、release lease，再传播。
+lease 冲突在 Publisher 创建前直接传播。Publisher 已创建且 core factory 同步构造/恢复准备失败时，runtime 通过 Once 发布唯一 END、完成/关闭请求 publisher、release lease，再抛 `AgentPreparationException(endPublished=true)`；同步准备阶段不得先发布其他事件，因此 platform 可保证返回仅 END SSE。Publisher 自身创建失败因没有可用出口，释放 lease 后按基础设施异常传播，不伪称已发送 END。
 
 ### 接口和数据结构
 
@@ -338,25 +338,27 @@ ApexAgentExecution resumeAgent(HumanResponseCommand command, AgentEventPublisher
 
 Once 状态 OPEN/ENDED；首个 END CAS 后转发，后续 END no-op，END 后非 END 抛 EventStreamClosedException。
 
+`AgentPreparationException` 至少携带 `sessionId`、`agentKey`、`phase`、`endPublished` 和 cause；不得携带用户 query、工具参数或将异常文本写入 SSE。platform 只对 `endPublished=true` 使用“返回已完成 emitter”分支。
+
 ### 关键实现逻辑
 
 - lease 必须最先获取，使同 session 的构造读取也串行。
 - Factory 每次调用创建新 Print Publisher，Builder 不接受共享有状态 Publisher。
 - ToolExecutionObserver 绑定本次 Once，不持有 runtime 默认 Publisher。
-- core 构造失败 runtime 已发送 END后抛 PreparationException。platform 对非 busy 准备失败的兼容策略见 PLAT-02：返回已完成的 emitter，而不是把异常映射为新协议错误；该策略需风险 R-05 确认。
+- core 构造/恢复准备失败时 runtime 只能发送 protocol 既有的精确 END，随后抛 `AgentPreparationException(endPublished=true)`。platform 必须返回已完成 emitter，不得映射为新协议错误、HTTP 4xx/5xx 或追加 STREAM_CONTENT。
 - Once 的 END delegate 失败也标记 ENDED，防止多路重复写坏连接。
 
 ### 异常处理
 
 - SessionBusyException 在创建 Publisher/core 前同步抛，不发送 END。
-- publisher factory/core factory失败执行 best-effort END/release，主异常保留。
+- publisher factory 失败只 release 并传播；core factory 失败执行 best-effort END、publisher complete/close、release，主异常作为 `AgentPreparationException` cause 保留。
 - cancelBeforeStart 复用 execution terminator。
 
 ### 测试方案
 
 - new/resume 返回前 lease 已持有；同 session 冲突。
 - 显式/默认 Publisher每请求独立，连续 HUMAN_RESPONSE 不复用 END状态。
-- core/构造失败/cancel/正常/挂起竞争下 END和release各一次。
+- core 构造/恢复准备失败断言事件列表精确等于 `[END]`、`endPublished=true`、release一次；publisher factory失败断言无虚假 END标志。cancel/正常/挂起竞争下 END和release各一次。
 - Tool observer 事件进当前 Publisher，禁止 END。
 
 ### 架构符合性
@@ -399,7 +401,7 @@ Once 状态 OPEN/ENDED；首个 END CAS 后转发，后续 END no-op，END 后�
 ### 异常处理
 
 - Skill 不 enabled/不存在/资源越界转模型可见 ToolResult，不泄漏绝对路径。
-- Skill 解析失败在 Provider 初始化时明确失败；若作为可选外部资源，可单项 unavailable 并从定义剔除，但需与工具健康策略一致。
+- Skill 解析失败在 Provider 初始化时明确失败；本期不可借用 MCP/SubAgent 的不可用绑定例外将 Skill 从定义中静默剔除。
 - instructions 读取编码固定 UTF-8。
 
 ### 测试方案
@@ -446,7 +448,8 @@ Once 状态 OPEN/ENDED；首个 END CAS 后转发，后续 END no-op，END 后�
 - client cache key 包含 runtime instance + server definition fingerprint，不使用 static cache。
 - stdio 用 ProcessBuilder 参数列表，不拼接 shell字符串；只传显式环境变量。
 - SSE endpoint 校验 URI scheme，连接/重连有上限和退避，close 取消调度。
-- 初始化失败关闭该 server 已创建资源，记录 unavailable tool pattern；通过 ToolAvailabilityProvider 让 Assembler/Session 特殊清理，健康 server 继续。
+- 初始化失败关闭该 server 已创建资源，按 `(MCP, serverId, stableNamePrefix)` 和已知精确工具名原子更新 ToolAvailabilitySnapshot，健康 server 继续。
+- runtime 不直接改 AgentDefinition 或 SessionSnapshot。core 对新绑定抛 `UnavailableToolBindingException`；对已有 session 的旧绑定生成 `HistoricalToolBinding` 并退出有效集合。历史消息和旧定义投影保留，只读且不可执行。
 - 失败工具不能进入模型列表；已挂起该工具恢复时由 core生成不可用 ToolResult。
 
 ### 异常处理
@@ -461,7 +464,7 @@ Once 状态 OPEN/ENDED；首个 END CAS 后转发，后续 END no-op，END 后�
 - Fake stdio process/SSE server 的 initialize/list/call/timeout/close。
 - 参数泄漏测试：请求 JSON只有工具 arguments。
 - cache隔离、未配置零资源、runtime close。
-- 一个 server init失败、另一个正常，定义/session剔除与健康工具可用。
+- 一个 server init失败、另一个正常：新绑定拒绝；旧绑定历史记录幂等、有效集合清理、历史消息不变；健康工具可用。
 - 命令参数含空格不经 shell解释。
 
 ### 架构符合性
@@ -502,7 +505,7 @@ SubAgentDefinition 含 targetAgentKey、endpoint、description、timeout；工�
 - 远端 END只结束子工具，不调用 observer。
 - 远端 ASK_HUMAN/TOOL_CONFIRMATION 无法由父请求安全恢复子 session；首版明确中止子调用并返回“子智能体请求人工介入，当前工具调用不支持透传恢复”的 ToolResult。不能把交互事件透传给父前端造成错误 session 关联；该限制列入风险 R-12。
 - INVOCATION only经 core observer allowlist；STREAM_CONTENT不透传而聚合。
-- init失败关闭 client资源、标 unavailable并继续其他工具；调用期超时转换 ToolResult。
+- init失败关闭 client资源，按 `(SUB_AGENT, sourceId, exactToolName)` 更新 availability 并继续其他工具；runtime 不修改定义/session。新绑定由 core拒绝，旧绑定由 core迁移历史；调用期超时转换 ToolResult。
 
 ### 异常处理
 
@@ -517,7 +520,7 @@ SubAgentDefinition 含 targetAgentKey、endpoint、description、timeout；工�
 - SSE多行/分片、content聚合、invocation observer、artifact ignore、remote END不结束父请求。
 - ASK_HUMAN/CONFIRMATION显式转失败结果。
 - depth/agent闭环、timeout/cancel、malformed JSON。
-- init失败单项降级、Fastjson源码/依赖清零。
+- init失败覆盖新绑定拒绝、旧绑定只读留痕/不可执行、健康 SubAgent 可用，以及 Fastjson源码/依赖清零。
 
 ### 架构符合性
 
@@ -548,7 +551,7 @@ Builder 每个可关闭依赖必须显式 `ownedXxx` 或 `borrowedXxx`，默认�
 - close 用 AtomicBoolean 幂等；close 后 new/resume 抛 RuntimeClosedException。
 - 未配置能力的 lazy supplier 不求值，线程/客户端为 0。
 - 活动 execution 的处理策略必须在 Builder契约明确；推荐 grace period 后触发 observer cancellation，但不能释放仍运行代码持有的 lease，最终 release仍由 execution。
-- integration初始化失败产生 unavailable snapshot，验证三层工具清理后运行继续。
+- integration初始化失败产生 unavailable snapshot；验证受影响新绑定失败、旧绑定转历史且从有效三层工具状态移除，健康 Agent 运行继续。恢复健康后旧 session 不自动回填 enabledTools。
 - artifact dependency tree 只含 core/kit及最小 Spring AI/JSON/HTTP需要，不含 platform/memory/Spring Boot starter。
 
 ### 异常处理

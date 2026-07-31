@@ -63,7 +63,7 @@ MCP server、Skill roots 等 runtime 外部资源配置放独立 `apex.platform.
 ### 异常处理
 
 - 多定义源、重复 key、资源不存在、properties结构非法在应用启动失败。
-- 单个 MCP/SubAgent运行初始化失败按 runtime健康降级，不等同于 properties解析失败。
+- 单个 MCP/SubAgent运行初始化失败由 runtime 登记 availability，不等同于 properties解析失败，也不阻止应用启动；但请求构造含该新绑定的 Agent 时按已确认策略返回仅 END SSE，platform 不在 properties 层静默删除绑定。
 - Agent列表 Provider异常映射 500 标准响应，不能逐个跳过隐藏配置问题。
 
 ### 测试方案
@@ -97,6 +97,7 @@ Filter validates X-User-Id
   -> create SseEmitter + request Publisher
   -> synchronously runtime.newAgent/resumeAgent
   -> busy: discard emitter, HTTP 409
+  -> AgentPreparationException(endPublished=true): complete and return HTTP 200 END-only emitter
   -> success: dispatch execution.run
   -> task rejected: execution.cancelBeforeStart
   -> return emitter
@@ -115,7 +116,8 @@ Filter validates X-User-Id
 
 - runtime API在返回前已获取 lease，platform删除 `runningAgents/sessionLocks`。
 - SessionBusyException 不发送 END，直接由 `@ExceptionHandler` 映射 409；此时 SSE尚未提交。
-- 其他 core准备异常的兼容推荐：runtime已向本次 emitter best-effort写 END，Coordinator捕获后 complete emitter并返回它，保持当前“构造失败用空 END收口”行为。若改 HTTP 4xx/5xx需先确认 R-05。
+- 已确认：`AgentPreparationException(endPublished=true)` 表示 core 同步构造/恢复准备失败且 runtime 已写入唯一精确 END、释放 lease。Coordinator 记录 correlation/phase/cause，调用 emitter.complete 并返回 HTTP 200 `text/event-stream`；不得调用 `completeWithError`、映射 4xx/5xx、发送异常文本或增加第二个 END。
+- `endPublished=false` 说明 Publisher 创建/发送本身失败，无法满足 END-only 契约；此时才按平台基础设施异常处理并记录告警，不能返回一个声称已正常收口的空 SSE。
 - 取得 execution 后才提交异步任务。TaskRejectedException立即 cancelBeforeStart，Once确保 END一次。
 - TaskDecorator捕获请求线程 userId，异步执行前 set，finally clear；core/runtime始终使用命令中的 userId，不读 ThreadLocal。
 - emitter completion/timeout/error标记 Publisher取消；运行中模型在下一 observer检查时取消。不能由 emitter callback直接释放 lease，lease仍归 execution finally。
@@ -124,6 +126,7 @@ Filter validates X-User-Id
 
 - Header缺失/请求字段非法在同步边界返回 400。
 - busy 409；不创建运行任务。
+- core 构造/恢复准备失败由上述 END-only 分支返回；SSE 对外不暴露异常类型、message 或 stack trace。
 - Sse send失败抛 AgentEventPublishException，background结束并释放 lease。
 - task rejection和Publisher错误不能重复 END/complete。
 
@@ -131,6 +134,7 @@ Filter validates X-User-Id
 
 - MockMvc/Controller：路径、media type、Header、NEW/HUMAN_RESPONSE路由。
 - 同 session NEW/恢复冲突在 Controller返回前409；不同 session并行。
+- 参数错误 400、busy 409 均无 END；core 构造失败和恢复快照校验失败均返回 200，解析出的事件序列严格等于一个 Golden File END。
 - 每请求 emitter隔离、连续恢复新 emitter、事件不串写。
 - executor拒绝 END/release各一次。
 - Filter/TaskDecorator传播与请求/异步结束清理。
@@ -374,7 +378,7 @@ platform全部入口、runtime、PostgreSQL、PRO Golden Files、前端测试/bu
 ### 关键实现逻辑
 
 - 实际SSE不是仅测试AgentEventFactory，必须经过Controller、runtime Once和SseEmitter。
-- END精确且一次；HUMAN_IN_THE_LOOP的END不代表Turn完成。
+- END精确且一次；HUMAN_IN_THE_LOOP的END不代表Turn完成；core 同步准备失败的完整响应只能包含 END。
 - 配置迁移是部署前置：虽然前端零改动，现有全局/workspace Agent配置不会被新Provider兼容，必须提供目标完整YAML。
 - 默认platform不注册memory/session_search/learning Hook。
 
@@ -387,7 +391,7 @@ platform全部入口、runtime、PostgreSQL、PRO Golden Files、前端测试/bu
 ### 测试方案
 
 - `mvn -f apex-agent/pom.xml test`及platform Testcontainers suite。
-- Controller路径/Header/字段、NEW/HUMAN_RESPONSE、409、emitter隔离、task reject。
+- Controller路径/Header/字段、NEW/HUMAN_RESPONSE、400/409、core构造/恢复失败END-only、emitter隔离、task reject。
 - 模型失败、Hook warn继续、工具异常ToolResult、最大Iteration。
 - `npm --prefix apex-frontend run test:run`、`typecheck`、`build`。
 - `git diff -- apex-frontend/src` 为空。
