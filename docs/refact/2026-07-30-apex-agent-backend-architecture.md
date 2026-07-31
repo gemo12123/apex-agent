@@ -2,6 +2,7 @@
 
 > 状态：目标态架构
 > 日期：2026-07-30
+> 最近修订：2026-07-31
 > 范围：`apex-agent` 后端模块化重构
 > 输入：[原始需求](原始需求.md)、[后端模块化重构设计](specs/2026-07-28-apex-agent-backend-refactoring-design.md)
 > 源码基线：当前单 Maven 模块，248 个生产 Java 文件、44 个测试 Java 文件
@@ -99,6 +100,7 @@ flowchart LR
     Core --> Ports["core-extension<br/>扩展端口"]
     Ports --> RuntimeImpl["runtime 默认实现"]
     Ports --> PlatformImpl["platform 平台实现"]
+    RuntimeImpl -. "工具进度经 ToolExecutionObserver" .-> Core
     Runtime --> Kit["kit<br/>基础工具与 Hook"]
     Protocol["protocol<br/>公共线协议"] --> Client
     Core --> Protocol
@@ -170,7 +172,9 @@ apex-agent/
 └── memory/
 ```
 
-父 POM 只负责聚合、JDK 25、UTF-8、依赖版本和构建规则。只有 platform 生成 Spring Boot 可执行包。
+最终态父 POM 只负责聚合、JDK 25、UTF-8、依赖版本和构建规则，只有 platform 生成 Spring Boot 可执行包。
+
+迁移期临时增加 `legacy` 模块：父 POM 切换为 `packaging=pom` 时，原根目录的 `src/main`、`src/test` 和资源整体迁入 `legacy`，由它继续运行旧测试和旧 Spring Boot 入口。迁移期允许 `legacy` 依赖已完成的目标模块，但禁止任何目标模块依赖 `legacy`。新 platform 通过协议、恢复、并发、PostgreSQL 和前端兼容切换门槛后接管默认入口，最终清理 `legacy`；因此上图和八模块目录仍表示最终态。
 
 ## 5. 模块职责
 
@@ -223,6 +227,7 @@ core-extension 严格只声明接口。接口参数和返回值只能来自 JDK�
 | `AgentDefinitionProvider` | 按 `agentKey` 返回完整 Agent 定义 |
 | `ModelGateway` | 流式调用模型并返回中立响应 |
 | `AgentTool` | 声明并执行单个工具 |
+| `ToolExecutionObserver` | 接收工具执行期允许透传的进度事件 |
 | `ToolProvider` | 为定义快照解析工具实例 |
 | `LifecycleHook<C,R>` | 执行单个生命周期扩展 |
 | `HookResolver` | 按生命周期点和注册名解析 Hook |
@@ -256,6 +261,7 @@ core 负责：
 - 生命周期 Hook 调度、类型校验、结果校验与原子应用。
 - 模型请求编排和模型调用前压缩门。
 - 工具可见性、工具执行编排和执行前二次校验。
+- 为每次工具执行创建请求级 `ToolExecutionObserver`，校验允许的进度事件并转发到当前 `AgentEventPublisher`。
 - 多 ToolCall 的顺序处理与 ToolResult 对齐。
 - 人工介入挂起和 HUMAN_RESPONSE 恢复状态机。
 - 协议消息工厂。
@@ -658,6 +664,7 @@ resolve ToolCall
   -> apply ToolCallPatch
   -> handle flow action
   -> verify enabledTools
+  -> create request-bound ToolExecutionObserver
   -> AgentTool.execute
   -> POST_TOOL_CALL
   -> apply ToolResultPatch
@@ -666,6 +673,8 @@ resolve ToolCall
 ```
 
 模型只提供工具参数。MCP 不接收 sessionId、用户信息、Agent 信息或其他隐式 ToolExecutionContext；本地工具可以通过显式中立 ToolExecutionContext 获得必要上下文。
+
+`ToolExecutionObserver` 是 core-extension 接口，由 core 在调用工具前创建并绑定当前请求的 `AgentEventPublisher`。本期 allowlist 仅包含 `INVOCATION_DECLARED`、`INVOCATION_CHANGE`；`END`、`ASK_HUMAN`、`TOOL_CONFIRMATION`、流内容和其他事件均被拒绝。工具不能取得底层 Publisher。observer 不进入 SessionSnapshot，跨请求恢复时由 core 重新创建。
 
 ### 8.5 HUMAN_RESPONSE 恢复
 
@@ -962,13 +971,15 @@ platform 只支持 PostgreSQL，建议由 Flyway 管理：
 - 快照带版本，DTO 演进通过版本化 Adapter 处理。
 - Fastjson/fastjson2 依赖和调用全部删除。
 
-### 11.4 事务边界
+### 11.4 存储提交顺序
 
-- 新 Turn、用户消息和 SessionSnapshot 在一个事务内创建。
-- 人工介入对象与 Session `HUMAN_IN_THE_LOOP` 状态在一个事务内保存。
-- 压缩摘要、压缩标记、边界和 SessionSnapshot 在一个事务内提交，并早于业务模型调用。
-- 每个 ToolResult 追加后及时提交，保证多工具调用中途挂起可恢复前序结果。
-- Turn/Iteration 结束状态与 Session 状态保持一致。
+本期不提供跨 `SessionRepository` 与 `ConversationRepository` 的事务端口，也不保证两个 Repository 调用原子提交。core 只规定顺序和失败传播：
+
+- 新 Turn 先追加用户消息，再保存 SessionSnapshot。
+- 人工介入对象、Session `HUMAN_IN_THE_LOOP` 状态和当前 Turn/Iteration 位于同一个 SessionSnapshot，通过一次 SessionRepository 保存。
+- 压缩结果先保存到 ConversationRepository，再保存 SessionSnapshot；两步都成功后才调用业务模型。
+- 每个 ToolResult 先追加到 ConversationRepository，再保存最新 SessionSnapshot；两步都成功后才继续后序 ToolCall。
+- 任一步失败都停止后续执行并传播错误。测试验证调用顺序和各 Repository 单次操作的一致性，不验证跨 Repository 回滚。
 
 ## 12. 外部集成
 
@@ -989,9 +1000,9 @@ SubAgent 不是特殊 Agent 类型，而是一个指向普通远程 Agent 的工
 - 子调用使用独立 sessionId，不复用父 session。
 - 通过 `X-User-Id` 传播用户身份。
 - runtime 聚合子 Agent 的 STREAM_CONTENT 为父 ToolResult。
-- INVOCATION 事件保持现有透传语义。
+- INVOCATION 事件通过 core 为本次工具执行创建的 `ToolExecutionObserver` 透传到父请求。
 - ARTIFACT 事件保持当前无生产者/忽略语义。
-- 收到 END 后结束当前工具调用。
+- 收到远端 END 后只结束当前工具调用；SubAgent 工具不得通过 observer 发布父请求 END。
 - 通过最大调用深度与 agentKey 调用链检测阻止递归闭环。
 
 ## 13. 协议兼容
@@ -1170,6 +1181,7 @@ memory 参与父 POM 编译与单元测试，但不进入 platform 默认启动�
 - 没有任何主链路模块依赖 memory。
 - protocol DTO 不依赖执行上下文。
 - 依赖树不含 Fastjson。
+- 迁移期任何目标模块都不依赖 legacy；最终 reactor 不包含 legacy 模块。
 - runtime 不自行分发 AGENT_BUILD，不复制 core Assembler/Factory 的构造状态机。
 
 ### 18.2 核心行为测试
@@ -1180,6 +1192,7 @@ memory 参与父 POM 编译与单元测试，但不进入 platform 默认启动�
 - ReAct 多 Iteration、多 ToolCall 和最大 Iteration。
 - 工具三层状态和执行前二次校验。
 - Hook 分型结果、原子修改、错误策略和 END_TURN。
+- ToolExecutionObserver 只转发 allowlist 内的进度事件，并拒绝 END。
 - 每个 Iteration 的压缩门只判定一次。
 - `enabledTools`、`activatedSkills` 跨 Turn 保留。
 - `AgentDefinitionAssembler` 的加载、AGENT_BUILD、校验与冻结顺序，以及 `ApexAgentFactory` 的 NEW/恢复分流。
@@ -1211,7 +1224,7 @@ memory 参与父 POM 编译与单元测试，但不进入 platform 默认启动�
 - 线程池拒绝调用 `cancelBeforeStart`，END 与 lease 均只收口一次。
 - SSE Golden File。
 - END 只发送一次且精确 JSON 不变。
-- PostgreSQL Repository、事务和进程重启恢复。
+- PostgreSQL Repository、提交顺序、单 Repository 一致性和进程重启恢复；不要求跨 Repository 原子回滚。
 - TEXT 长内容往返不截断。
 - 现有前端测试、typecheck 和 build 在不改前端源码的情况下通过。
 

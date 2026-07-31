@@ -1,0 +1,252 @@
+# core 模块任务
+
+> 模块职责：实现 Agent 定义构造、Session/Turn/Iteration、生命周期、唯一 ReAct 循环、工具编排、压缩门和恢复状态机
+> 当前总体进度：未开始；现有 `SuperAgent` 仍直接依赖 Spring AI、Web、Memory、工具实现和 Spring Hook 解析
+
+## CORE-01 实现 AgentDefinitionAssembler 与 ApexAgentFactory
+
+- **任务名称**：实现 Agent 定义构造、权威校验、冻结和 NEW/恢复工厂分流。
+- **任务目标**：把 AGENT_BUILD、定义级校验和不可变快照冻结收敛到 core，runtime 只提供端口并调用入口。
+- **当前进度**：未开始。现有构造语义仍位于 `SuperAgentFactory` 和配置 Loader。
+- **设计依据**：设计文档第 2.30、2.32、5.4、7.3 节；架构文档第 5.4、6.2、8.1 节。
+- **涉及范围**：core `AgentDefinitionAssembler`、定义校验器、`ApexAgentFactory.createNew/createResumed`、AgentDefinitionSnapshot 恢复投影。
+- **前置依赖**：COM-01～03、EXT-01～02。
+- **具体执行内容**：
+  1. 按“Provider 加载 → 可变草稿 → AGENT_BUILD → 权威校验 → 冻结”顺序实现 Assembler。
+  2. 校验工具三层子集、Skill/Hook 可解析性、HookPoint/Context/Result 族、Hook ID 唯一性和 Prompt 完整性。
+  3. `createNew` 每个 NEW 只执行一次 AGENT_BUILD；`createResumed` 只使用持久化定义快照，禁止执行 AGENT_BUILD。
+  4. 提供可供静态定义预检复用的同一校验器，但请求期仍再次权威校验。
+  5. 动态 Provider 不在 Builder 阶段加载；支持不同 agentKey 在请求时分别校验。
+- **预期产出**：Assembler、Factory、唯一定义校验器和构造/恢复单元测试。
+- **验收标准**：
+  - 测试精确验证加载、构造 Hook、校验、冻结顺序。
+  - 恢复路径 Provider 调用次数与 AGENT_BUILD 调用次数均为 0。
+  - 非法工具、Skill、Hook 或 Prompt 在 Agent 创建前失败，且不产生部分冻结快照。
+  - runtime 源码不存在复制的定义级校验规则。
+- **限制条件或注意事项**：数据库 Agent 定义源不在本期；Builder 只校验注册表和基础设施装配；快照版本行为受 Q-05 约束。
+
+## CORE-02 实现 11 生命周期调度器与原子结果应用
+
+- **任务名称**：统一生命周期分发、排序、类型防御、错误策略和流控。
+- **任务目标**：用一套 core 调度器替代现有重复 Hook Runtime，并严格执行各生命周期允许的结果族与动作。
+- **当前进度**：未开始。当前 Hook 仍通过 Spring `ApplicationContext`/Bean 名解析，并使用通用结果对象。
+- **设计依据**：设计文档第 8 节、第 21.2 节；架构文档第 7 节。
+- **涉及范围**：core 生命周期调度器、Hook Binding 排序、上下文视图构造、结果校验/原子应用、错误与审计日志。
+- **前置依赖**：CORE-01、COM-02、EXT-02。
+- **具体执行内容**：
+  1. 支持 AGENT_BUILD、TURN_START、ITERATION_START、PRE/POST_MESSAGE_COMPRESSION、PRE/POST_MODEL_CALL、PRE/POST_TOOL_CALL、ITERATION_END、TURN_END。
+  2. 按 Hook Binding order 和稳定 ID 分发，运行时再次校验 Context/Result 类型。
+  3. 先验证整个 record，再原子应用消息、工具、参数、结果或压缩修改。
+  4. AGENT_BUILD 固定 fail-fast；其他 Hook 默认 CONTINUE，显式 FAIL_FAST 时终止。
+  5. 实现 END_TURN 的非递归结束语义，禁止 SKIP_ITERATION 和非法动作。
+  6. 审计写日志/Tracing/Metrics，不写通用 Hook 执行历史到快照。
+- **预期产出**：单一生命周期调度器、动作处理器、结构化日志和完整单元测试。
+- **验收标准**：
+  - 11 个生命周期的顺序和条件执行可由 Fake Hook 精确断言。
+  - `TURN_END` 返回非 Continue、结果族不匹配或动作载荷非法会明确失败。
+  - 单 Hook 修改失败后，消息、工具集合、参数和结果均无部分残留。
+  - 默认 CONTINUE 与显式 FAIL_FAST 均有测试。
+- **限制条件或注意事项**：AGENT_BUILD 只由 CORE-01 编排；PRE_TOOL_CALL 的恢复游标只由 CORE-07A 持久化；结束 Hook 不得递归重入。
+
+## CORE-03 实现 Session、Turn、Iteration 状态编排
+
+- **任务名称**：建立唯一执行层级和持久化状态流转。
+- **任务目标**：用明确状态而非 Hook 历史表达新 Turn、Iteration、挂起、恢复和结束。
+- **当前进度**：未开始。现有概念已存在，但状态与 Spring 上下文、Plan 和 Memory 混合。
+- **设计依据**：设计文档第 6、10.2、16.4 节；架构文档第 6.1、8.1 节。
+- **涉及范围**：`ApexAgentContext`、`AgentRuntimeContext`、Session/Turn/Iteration 创建和状态机、Session/Conversation Repository 调用。
+- **前置依赖**：CORE-01、CORE-02、COM-03、EXT-01。
+- **具体执行内容**：
+  1. NEW 创建或续接 Session，并为每次用户输入创建单调递增 Turn。
+  2. 每次业务模型调用创建新 Iteration；多 ToolCall 属于同一 Iteration。
+  3. 首个 session Turn 用 defaultEnabledTools 初始化；后续 Turn 沿用 enabledTools 和 activatedSkills。
+  4. 挂起保留原 Turn/Iteration，不执行 TURN_END；恢复不创建新层级。
+  5. 按“追加用户消息 → 保存 SessionSnapshot”的顺序调用两个 Repository；任一步失败都停止后续执行，不承诺跨 Repository 原子回滚。
+  6. 人工介入状态与当前 Turn/Iteration 放入同一个 SessionSnapshot，由单次 SessionRepository 保存。
+  7. 在 Q-01 确认后固化异常、fail-fast、最大迭代和工具失败的终态表。
+- **预期产出**：执行状态机、快照提交编排和状态转换测试。
+- **验收标准**：
+  - turnNo/iterationNo 在正常、多工具、挂起和恢复场景符合定义。
+  - 后续 Turn 不重置 enabledTools/activatedSkills。
+  - 挂起不执行 TURN_END，最终收口只执行一次。
+  - Repository Fake 可断言每个关键状态的调用顺序、停止条件和提交内容。
+- **限制条件或注意事项**：core 不感知数据库事务技术，本期不提供跨 Session/Conversation Repository 原子事务；不得创建 Stage 或执行模式层级；Q-01 未确认的状态值不得自行决定。
+
+## CORE-04 建立协议事件工厂与发布语义
+
+- **任务名称**：把运行态转换为纯 protocol 消息并通过事件端口发布。
+- **任务目标**：移除 protocol DTO 对执行上下文的依赖，并使 core 不持有 `SseEmitter`。
+- **当前进度**：未开始。当前消息发送仍通过上下文和 `MessageUtils` 访问 `SseEmitter`。
+- **设计依据**：设计文档第 13 节；架构文档第 8.6、13 节。
+- **涉及范围**：core `AgentEventFactory`、STREAM_CONTENT 聚合信息、ASK_HUMAN、TOOL_CONFIRMATION、END 发布请求。
+- **前置依赖**：PRO-01/02、EXT-01、CORE-02。
+- **具体执行内容**：
+  1. 建立 streamContent、askHuman、toolConfirmation、end 等消息工厂。
+  2. 固定 `context.mode="react"`，移除 stage_id 生产。
+  3. 通过 `AgentEventPublisher` 发布，不访问 SSE、Servlet 或 platform。
+  4. 正常完成、失败和挂起退出当前传输时请求 END。
+  5. 将真正的 END 幂等交给 RUN-04C 的请求级 Once Publisher。
+- **预期产出**：core 事件工厂、发布适配测试和 Golden File 复用测试。
+- **验收标准**：
+  - 事件 JSON 与 PRO-02 Golden File 一致。
+  - `ApexAgentContext` 与 core 全模块不引用 `SseEmitter`。
+  - core 各结束路径至多请求一次正常 END；即使多方请求，RUN-04C 集成后仍只实际发布一次。
+- **限制条件或注意事项**：END 不增加字段；兼容 DTO 的存在不代表 core 继续生产 Plan/TaskThink/StreamThink。
+
+## CORE-05A 实现唯一 ReAct 控制循环
+
+- **任务名称**：实现 Iteration 控制、分支和最大迭代收口。
+- **任务目标**：建立删除模式分支后的唯一循环骨架，负责 Iteration 创建、模型步骤、工具步骤和 Turn 结束控制。
+- **当前进度**：未开始。当前 `SuperAgent` 与 Stage/Mode 分支仍耦合。
+- **设计依据**：设计文档第 9.1、21.2 节；架构文档第 8.2 节。
+- **涉及范围**：`ApexAgent` 循环骨架、Iteration 控制、模型/工具步骤接口、最大 Iteration。
+- **前置依赖**：CORE-02～04、EXT-01/02。
+- **具体执行内容**：
+  1. 实现 begin iteration、ITERATION_START、模型步骤、工具步骤、ITERATION_END 和 TURN_END 的控制骨架。
+  2. 模型无工具调用时结束 Iteration/Turn，有工具调用时交给 CORE-06。
+  3. 工具完成后创建下一 Iteration，不复用当前 Iteration。
+  4. maxIterations 从 runtime 配置读取，默认值由 RUN-01 提供 30。
+  5. 在 Q-01 确认后固定最大迭代和模型/Hook 失败终态。
+- **预期产出**：唯一 ReAct 控制循环和基于 Fake 步骤的状态测试。
+- **验收标准**：
+  - 源码中只有一套 Agent 循环且无执行模式判断。
+  - 无工具、单工具、多 Iteration 和最大迭代路径的生命周期次数可精确断言。
+  - `"react"` 不成为 core 模式枚举或分支条件。
+- **限制条件或注意事项**：本任务不实现模型流聚合、压缩算法或工具内部编排；不得保留 PlanExecutor 兼容路径。
+
+## CORE-05B 实现模型请求、流响应与模型生命周期
+
+- **任务名称**：实现一次业务模型步骤。
+- **任务目标**：完成最终 ModelRequest 调用、流式内容发布、响应聚合和 PRE/POST_MODEL_CALL 生命周期。
+- **当前进度**：未开始。
+- **设计依据**：设计文档第 8.2、9.1、13.2、23.1 节；架构文档第 8.2 节。
+- **涉及范围**：ModelRequest 编排、PRE_MODEL_CALL、ModelGateway stream、STREAM_CONTENT、ModelResponse 汇总、POST_MODEL_CALL。
+- **前置依赖**：CORE-04、CORE-05A、EXT-01；RUN-02 可先用 Fake，后续适配。
+- **具体执行内容**：
+  1. 接收 CORE-05C 准备的基础请求并执行 PRE_MODEL_CALL。
+  2. 校验最终请求硬上限后调用 ModelGateway。
+  3. 聚合流片段并通过 CORE-04 保持 content_id 事件语义。
+  4. 形成完整中立 ModelResponse 并执行 POST_MODEL_CALL。
+  5. ModelGateway 内部重试复用同一最终请求，不重新进入生命周期或压缩门。
+- **预期产出**：模型步骤组件、流聚合测试和生命周期顺序测试。
+- **验收标准**：
+  - 每个 Iteration 的业务模型只调用一次逻辑模型步骤。
+  - 流事件与最终响应内容、ToolCall ID/顺序一致。
+  - PRE/POST_MODEL_CALL 各执行一次，重试不重复执行。
+  - PRE_MODEL_CALL 修改后超限时模型不执行。
+- **限制条件或注意事项**：Spring AI 类型转换属于 RUN-02；模型异常终态受 Q-01 约束。
+
+## CORE-05C 实现模型调用前压缩门
+
+- **任务名称**：实现每 Iteration 一次的窗口准备和条件压缩。
+- **任务目标**：在 PRE_MODEL_CALL 之前完成压缩判断、压缩 Hook、结果保存和基础请求替换。
+- **当前进度**：未开始。当前压缩仍隐藏在消息准备逻辑中。
+- **设计依据**：设计文档第 9.2、21.5、23.9 节；架构文档第 8.3、11.4 节。
+- **涉及范围**：ConversationWindowManager、CompactionCheck/Policy、PRE/POST_MESSAGE_COMPRESSION、Compactor、两个 Repository 的有序调用、硬上限输入。
+- **前置依赖**：CORE-02/03、CORE-05A、EXT-02；RUN-03 可先用 Fake。
+- **具体执行内容**：
+  1. 组装基础消息和 ModelRequest，并构造包含消息、system prompt、启用工具定义占用的检查对象。
+  2. 每个逻辑业务模型调用只执行一次 shouldCompact。
+  3. true 时按 PRE Hook → Compactor → POST Hook 执行；false 直接返回基础请求。
+  4. 先保存 ConversationRepository 压缩结果，再保存 SessionSnapshot；两步均成功后才交给 CORE-05B。
+  5. 任一步失败都停止模型调用；不实现跨 Repository 原子事务或回滚。
+  6. Compactor 内部模型调用不得递归进入业务压缩门。
+- **预期产出**：显式压缩门、顺序测试和失败停止测试。
+- **验收标准**：
+  - 非模型阶段、HUMAN_RESPONSE 工具恢复和 ModelGateway 重试不触发压缩判断。
+  - true/false、PRE END_TURN、Compactor 失败、POST END_TURN 路径均有精确顺序测试。
+  - ConversationRepository 或 SessionRepository 保存失败时 PRE_MODEL_CALL 和业务模型均不执行。
+  - 测试不要求两个 Repository 原子回滚。
+- **限制条件或注意事项**：本任务只编排压缩，不实现 runtime 默认算法；PRE_MODEL_CALL 改写后不回跳压缩门。
+
+## CORE-06 实现工具三层状态与多 ToolCall 编排
+
+- **任务名称**：实现工具可见性、动态启用、执行守卫和多调用结果对齐。
+- **任务目标**：保证模型只看见 enabledTools、执行器只执行 enabledTools，并按顺序完整处理单次模型响应中的多个 ToolCall。
+- **当前进度**：未开始。当前工具解析仍受 Stage/Mode 影响。
+- **设计依据**：设计文档第 8.3～8.4、9.1、11 节；架构文档第 6.3、8.4 节。
+- **涉及范围**：工具解析、模型工具定义投影、PRE/POST_TOOL_CALL、ToolCallPatch/ToolResultPatch、对话追加和进度持久化。
+- **前置依赖**：CORE-01/02/03、CORE-05A/05B、EXT-01；Q-06 影响标准结果载荷。
+- **具体执行内容**：
+  1. 验证三层子集并在 session 首 Turn 初始化 enabledTools。
+  2. Hook 的 ToolActivationDelta 立即影响当前和后续模型调用/Turn。
+  3. 模型请求只附加 enabledTools；真实执行前再次校验。
+  4. 按响应顺序处理 ToolCall，支持 CONTINUE、BLOCK_TOOL、RETURN_TOOL_RESULT、END_TURN。
+  5. BLOCK/RETURN 跳过真实工具但执行 POST_TOOL_CALL；普通工具失败只生成对应结果。
+  6. core 为每次真实工具执行创建请求级 ToolExecutionObserver，绑定当前 AgentEventPublisher；本期只允许 INVOCATION_DECLARED/INVOCATION_CHANGE。
+  7. 工具发布 END、交互事件、流内容或其他禁止事件时拒绝转发；observer 不暴露底层 Publisher，也不进入快照。
+  8. 每个 ToolResult 先追加 ConversationRepository，再保存 SessionSnapshot；两步成功后才继续后序调用。
+  9. END_TURN 为当前和剩余 ToolCall 补齐标准结果，保持一一匹配。
+- **预期产出**：工具编排器、三层状态管理和多 ToolCall 测试。
+- **验收标准**：
+  - 禁用工具不进入模型请求，也无法通过伪造/过期 ToolCall 执行。
+  - 参数 Patch 在执行前生效，结果 Patch 在写对话前生效。
+  - 多 ToolCall 顺序、失败隔离和前序结果持久化有自动测试。
+  - 允许的 INVOCATION 进度事件写入当前请求；END 和非 allowlist 事件被拒绝。
+  - END_TURN 后 Assistant ToolCall 与 ToolResult 数量和 ID 一一匹配。
+- **限制条件或注意事项**：工具来源对 core 透明；本期不保证 Conversation/Session 两个保存原子回滚；MCP 隐式上下文限制由 RUN-06 实现；标准失败/终止 ToolResult 的精确载荷受 Q-06 约束。
+
+## CORE-07A 实现人工介入挂起保存
+
+- **任务名称**：统一生成并保存 QUESTION/TOOL_CONFIRMATION 挂起状态。
+- **任务目标**：在 PRE_TOOL_CALL 请求人工介入时可靠保存原 Turn/Iteration/ToolCall 和已执行 Hook ID。
+- **当前进度**：未开始。
+- **设计依据**：设计文档第 10.2～10.3 节；架构文档第 6.5、8.5 节。
+- **涉及范围**：HumanInterventionRequest、SuspendedToolCall、executedPreToolHookIds、SessionSnapshot 保存和交互事件。
+- **前置依赖**：CORE-02/03/04/06、KIT-01/02、COM-03。
+- **具体执行内容**：
+  1. PRE_TOOL_CALL 每成功完成一个 Hook 就累计稳定 Binding ID，返回介入的 Hook 也计入。
+  2. 构造唯一 SuspendedToolCall，保存 Hook 改写后的参数和交互载荷。
+  3. 将挂起对象、HUMAN_IN_THE_LOOP、当前 Turn/Iteration 放入同一 SessionSnapshot 并一次保存。
+  4. 发布 ASK_HUMAN/TOOL_CONFIRMATION 和本次传输 END。
+  5. 挂起时不执行真实工具、POST_TOOL_CALL、ITERATION_END 或 TURN_END。
+- **预期产出**：统一挂起创建器、SessionSnapshot 保存逻辑和挂起测试。
+- **验收标准**：
+  - 挂起快照不含 ToolCall index、重复 enabledTools/定义快照或其他生命周期 Hook 历史。
+  - 两类介入使用同一挂起结构和保存入口。
+  - SessionRepository 保存失败时不发布交互事件，也不继续执行。
+- **限制条件或注意事项**：挂起保存只涉及一次 SessionRepository 操作，不引入跨 Repository 事务；事件 END 只结束本次传输。
+
+## CORE-07B 实现 HUMAN_RESPONSE 恢复校验与上下文重建
+
+- **任务名称**：验证恢复请求并重建原执行位置。
+- **任务目标**：从 SessionSnapshot 恢复同一 Turn、Iteration 和 ToolCall，跳过已完成生命周期。
+- **当前进度**：未开始。
+- **设计依据**：设计文档第 10.1、10.2、10.4 节；架构文档第 8.5 节。
+- **涉及范围**：userId/agentKey/状态/交互标识校验、toolCallId 定位、定义快照、Hook/Tool 重新解析、humanResponse。
+- **前置依赖**：CORE-01、CORE-07A、COM-03；RUN-04B 的 lease 可先用 Fake。
+- **具体执行内容**：
+  1. 校验 userId、agentKey、Session HUMAN_IN_THE_LOOP 状态、交互标识和 toolCallId。
+  2. 通过 toolCallId 在原模型响应定位调用，不使用数组 index。
+  3. 使用挂起前 AgentDefinitionSnapshot 重新解析 Hook/Tool，不重新加载配置或执行 AGENT_BUILD。
+  4. 恢复 session enabledTools、activatedSkills 和原 Turn/Iteration。
+  5. 将 humanResponse 放入本地 ToolExecutionContext，并跳过 AGENT_BUILD 至 POST_MODEL_CALL。
+- **预期产出**：恢复验证器、上下文重建器和非法恢复测试。
+- **验收标准**：
+  - HUMAN_RESPONSE 不创建新 Turn/Iteration、不调用模型或模型前生命周期。
+  - 配置源变化不影响恢复；快照中的 Hook/Tool 无法解析时明确失败。
+  - 用户、Agent、状态、交互或 toolCallId 不匹配均拒绝恢复且不修改快照。
+- **限制条件或注意事项**：恢复请求是新传输但不是新业务 Turn；session lease 的获取属于 RUN-04B/04C。
+
+## CORE-07C 实现剩余 PRE Hook 五分支恢复
+
+- **任务名称**：继续未执行 PRE_TOOL_CALL Hook 并完成恢复收口。
+- **任务目标**：完整实现再次介入、END_TURN、BLOCK_TOOL、RETURN_TOOL_RESULT 和全部 CONTINUE 五类路径。
+- **当前进度**：未开始。
+- **设计依据**：设计文档第 10.4～10.5、21.3 节；架构文档第 8.5 节。
+- **涉及范围**：Hook 跳过/累计、参数合并、五分支动作、工具执行、POST_TOOL_CALL、挂起清理和剩余 ToolCall。
+- **前置依赖**：CORE-07B、CORE-06、KIT-01/02。
+- **具体执行内容**：
+  1. 跳过 executedPreToolHookIds，只按顺序执行剩余 PRE Hook。
+  2. 再次介入时更新唯一挂起对象、累计 Hook ID并结束本次传输。
+  3. END_TURN 时补齐标准 ToolResult、清除挂起并执行一次结束生命周期。
+  4. BLOCK/RETURN 跳过真实工具，执行 POST_TOOL_CALL 后清除挂起。
+  5. 全部 CONTINUE 时重新校验 enabledTools，执行真实工具和 POST_TOOL_CALL。
+  6. 工具确认批准只合并允许编辑参数；拒绝映射 RETURN_TOOL_RESULT。
+  7. ask_human 真实工具读取 humanResponse；收口后继续剩余 ToolCall/Iteration。
+- **预期产出**：五分支恢复执行器和完整恢复回归测试。
+- **验收标准**：
+  - 已执行 PRE Hook 不重复，未执行 Hook 顺序不变。
+  - 五类分支、批准/拒绝、ask_human、多 ToolCall 前序结果均有自动测试。
+  - 再次介入后挂起状态仍存在；最终完成后 SuspendedToolCall 和 Hook ID 完全清除。
+- **限制条件或注意事项**：拒绝和终止结果精确载荷受 Q-06 约束；本任务不新增模型调用或压缩判断。

@@ -2,7 +2,7 @@
 
 > 状态：已确认
 > 日期：2026-07-28
-> 最近修订：2026-07-30
+> 最近修订：2026-07-31
 > 范围：仅重构 `apex-agent` 后端，不修改 `apex-frontend`
 > 基线：当前单模块后端共有 248 个生产源码文件、44 个测试源码文件；重构前完整后端测试为 137 个测试全部通过
 
@@ -74,6 +74,9 @@ ChatController
 31. 本期 platform 只支持单实例部署。`SessionExecutionCoordinator` 作为 runtime 可替换 SPI，默认使用进程内实现；在实现 PostgreSQL/分布式 lease 和续租前，不允许多个 platform 实例共同处理同一会话命名空间。
 32. Builder 只校验注册表和基础设施装配，不加载动态 AgentDefinition，也不执行定义级三层工具、Hook Binding 或 Skill 关系校验。所有请求的权威定义校验统一由 core `AgentDefinitionAssembler` 在 `AGENT_BUILD` 后执行；静态定义预检也必须复用同一 core 校验器。
 33. `TURN_START`、`ITERATION_START`、`ITERATION_END` 使用 `LoopHookResult`，允许 `CONTINUE`、`END_TURN`；`TURN_END` 单独使用 `TurnEndHookResult`，只允许 `CONTINUE`。
+34. 迁移期临时增加 `legacy` Maven 模块，原根目录的生产源码、测试和资源先整体迁入该模块；目标八模块不得依赖 `legacy`。在新 platform 通过切换门槛前，`legacy` 保持旧链路可运行；最终由清理阶段删除该临时模块。
+35. 本期暂不提供跨 `SessionRepository` 与 `ConversationRepository` 的事务端口，也不承诺两个 Repository 调用的原子提交。core 只规定调用顺序和失败传播；各 Repository 只保证自身单次操作的一致性。
+36. 工具执行期进度事件通过 `ToolExecutionObserver` 端口发布。observer 由 core 针对当前请求创建并绑定 `AgentEventPublisher`；工具只能发布 core 明确允许的进度事件，不能发布 `END`，也不能取得底层 Publisher。
 
 ## 3. 目标与非目标
 
@@ -168,6 +171,16 @@ apex-agent/
     └── pom.xml
 ```
 
+迁移期额外允许：
+
+```text
+apex-agent/
+└── legacy/
+    └── pom.xml
+```
+
+`legacy` 不是目标模块。父 POM 首次切换为 `packaging=pom` 时，现有根目录 `src/main`、`src/test` 和运行资源必须整体迁入 `legacy`，使旧测试和旧 Spring Boot 入口继续参与 reactor 构建。迁移期仅允许 `legacy` 依赖已落地的目标模块，任何目标模块都不得依赖 `legacy`。新 platform 接管全部兼容入口后，清理阶段删除 `legacy`，最终目录仍严格为八个模块。
+
 统一坐标：
 
 ```text
@@ -183,7 +196,7 @@ artifactId: apex-agent-{module}
 - Maven Compiler、Surefire、Enforcer 和测试插件版本。
 - 模块清单。
 - 禁止循环依赖和未声明依赖。
-- 不承担 Spring Boot repackage；只有 platform 执行 repackage。
+- 最终态不承担 Spring Boot repackage；只有 platform 执行 repackage。迁移期 legacy 的临时豁免见本节迁移说明。
 
 ## 5. 模块职责
 
@@ -272,7 +285,14 @@ public interface ModelGateway {
 
 public interface AgentTool {
     ToolDefinition definition();
-    ToolResult execute(ToolCall call, ToolExecutionContext context);
+    ToolResult execute(
+            ToolCall call,
+            ToolExecutionContext context,
+            ToolExecutionObserver observer);
+}
+
+public interface ToolExecutionObserver {
+    void onEvent(AgentMessage event);
 }
 
 public interface ToolProvider {
@@ -325,6 +345,7 @@ public interface ConversationCompactor {
 - `TimeProvider`。
 - `SkillProvider`。
 - `SkillActivator`。
+- `ToolExecutionObserver`。
 
 严格限制：
 
@@ -350,6 +371,7 @@ public interface ConversationCompactor {
 - Prompt/模型请求的中立编排。
 - ReAct 循环内、`PRE_MODEL_CALL` 之前的消息压缩判断、压缩生命周期调度和结果提交。
 - 工具调用编排。
+- 为每次工具执行创建请求级 `ToolExecutionObserver`，校验进度事件类型后转发到当前 `AgentEventPublisher`。
 - 工具启用状态管理和执行前二次校验。
 - 人在回路挂起状态生成。
 - HUMAN_RESPONSE 恢复状态机。
@@ -1167,7 +1189,9 @@ runtime 默认支持：
 - HTTP SubAgent 工具。
 - Skill 工具。
 
-工具统一适配为 `AgentTool`，core 不感知来源。
+工具统一适配为 `AgentTool`，core 不感知来源。工具执行时由 core 传入请求级 `ToolExecutionObserver`；普通工具可以不发布事件，需要进度事件的工具只能通过该 observer 发布。
+
+本期 observer allowlist 仅包含 `INVOCATION_DECLARED`、`INVOCATION_CHANGE`。`STREAM_CONTENT` 由工具实现聚合为最终 ToolResult，`ARTIFACT_*` 保持忽略；`END`、`ASK_HUMAN`、`TOOL_CONFIRMATION`、流内容和其他非 allowlist 事件均由 core 拒绝。工具不能绕过 observer 取得 `AgentEventPublisher`。
 
 ### 11.3 MCP
 
@@ -1187,7 +1211,8 @@ runtime 默认支持：
 - 用户身份继续通过 `X-User-Id` 传播；父调用链深度和 trace 信息只用于 runtime 侧防递归与观测，不改变前端协议。
 - runtime 负责 HTTP 请求、SSE 解析、超时、取消和异常转换，protocol 提供消息反序列化模型。
 - 子 Agent 的 `STREAM_CONTENT` 聚合为父 Agent 当前 ToolCall 的 ToolResult。
-- `INVOCATION_*` 按当前行为透传；`ARTIFACT_*` 保持当前无生产者/忽略语义；收到 `END` 后完成当前工具调用。
+- `INVOCATION_*` 由 HTTP SubAgent 工具通过本次工具调用的 `ToolExecutionObserver` 透传；core 校验事件类型后再发布到当前请求出口。
+- `STREAM_CONTENT` 不通过 observer 透传；`ARTIFACT_*` 保持当前无生产者/忽略语义。远端 `END` 只结束当前工具调用，禁止通过 observer 发布为父请求的 `END`。
 - 子 Agent 请求与普通用户请求走同一个 chat 接口和同一套 ApexAgent 主循环，因此任何 Agent 都天然具备作为 SubAgent 的能力。
 - 必须限制最大调用深度，并拒绝目标 `agentKey` 已出现在当前 SubAgent 调用链中的递归调用，避免每层创建新 session 后仍形成 Agent 闭环。
 
@@ -1572,14 +1597,16 @@ apex_agent_session.suspended_tool_call.executedPreToolHookIds
 
 Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 
-### 16.4 事务边界
+### 16.4 存储提交顺序
 
-- 新 Turn 创建、用户消息追加和 Session 快照保存为一个事务。
-- 任一人工介入挂起、SuspendedToolCall 和 Session 状态切换为一个事务。
-- 消息压缩结果、摘要、`compacted` 标记、压缩边界和 SessionSnapshot 更新为一个事务，并在业务模型调用前提交。
-- HUMAN_RESPONSE 参数合并和恢复占用同一 session 执行锁。
-- 每个 ToolResult 追加后及时提交，保证多工具调用中途挂起时前序结果可恢复。
-- Turn/Iteration 嵌套状态结束与 Session 状态更新保持一致。
+本期暂不考虑跨 Repository 事务。`SessionRepository` 与 `ConversationRepository` 保持分离，core 不依赖 Spring 事务，也不新增 UnitOfWork 或组合 Repository 端口。
+
+- 新 Turn 创建时，core 按顺序追加用户消息并保存 SessionSnapshot；两个调用不承诺原子提交。
+- 人工介入对象、`HUMAN_IN_THE_LOOP` 状态和当前 Turn/Iteration 位于同一个 SessionSnapshot，由一次 SessionRepository 保存完成。
+- 压缩摘要、`compacted` 标记和压缩边界先通过 ConversationRepository 保存；随后更新 SessionSnapshot。两者都成功后才调用业务模型，但不承诺跨 Repository 回滚。
+- HUMAN_RESPONSE 参数合并和恢复继续占用同一 session execution lease。
+- 每个 ToolResult 先追加到 ConversationRepository，再保存最新 SessionSnapshot；后序 ToolCall 只在两步均成功后继续。
+- 任一存储调用失败时停止后续执行并传播失败；本期测试验证调用顺序、停止条件和单 Repository 一致性，不验证跨 Repository 原子回滚。
 
 ## 17. PlanExecutor 清理
 
@@ -1696,14 +1723,17 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
   - context.mode 为 react。
   - END 精确 JSON。
 - 保存当前协议 Golden Files。
+- 只有阶段 0 基线测试通过后，才允许把根 POM 切换为父聚合 POM。
 
 ### 阶段 1：父 POM、protocol、common
 
-- 改父聚合 POM。
+- 创建临时 `legacy` 模块，把现有根 `src/main`、`src/test` 和资源整体迁入，保持包名和业务行为不变。
+- 改父聚合 POM，同时聚合临时 `legacy` 与八个目标模块。
+- 迁移初期允许 `legacy` 执行 Spring Boot repackage；目标模块不得依赖 `legacy`。
 - 搬迁并净化协议实体。
 - 建立无 Spring common 模型。
 - 在 common 建立 `JsonUtils`，替换 Fastjson 并移除其依赖。
-- 保持 platform 临时调用旧链路，确保协议测试继续通过。
+- 保持 `legacy` 旧链路和基线测试继续通过。
 
 ### 阶段 2：core-extension
 
@@ -1752,6 +1782,7 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - 增加不含 JSONB、独立 Turn/Iteration 表的 Flyway schema，长内容与序列化快照使用 TEXT。
 - 删除 MySQL 依赖。
 - 验证现有前端无缝连接。
+- 新 platform 只有在 HTTP/SSE Golden File、NEW/HUMAN_RESPONSE、409、PostgreSQL 恢复和前端零修改验证均通过后，才可接管默认启动入口。
 
 ### 阶段 7：memory 封存
 
@@ -1765,11 +1796,20 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - 删除 PlanExecutor。
 - 删除旧 SuperAgent 类型。
 - 删除重复 Hook Runtime 和死代码。
+- 删除临时 `legacy` 模块；父 POM 移除该模块，Spring Boot repackage 只保留在 platform。
 - 清理过时配置和 Prompt。
 - 更新 `docs/reference/`、`docs/overview/`、`docs/spec/` 当前态文档。
 - 全量验证。
 
-每个阶段都必须保持 Maven 构建可运行。允许在迁移分支中短期存在 Adapter，但最终产物不得保留额外 legacy 模块。
+每个阶段都必须保持 Maven 构建可运行，切换门槛如下：
+
+1. 父 POM 切换前：原单模块基线测试通过。
+2. 父 POM 切换后至新 platform 接管前：`legacy` 测试和旧 Spring Boot 入口可运行，父 reactor 测试通过。
+3. 新 platform 接管时：新链路的协议、恢复、并发、PostgreSQL 和前端兼容验收通过；此后旧链路只作为回归对照。
+4. 删除 `legacy` 前：父 reactor 不再有目标模块或测试依赖 legacy，且新 platform 已成为唯一产品入口。
+5. 最终态：只保留八个目标模块，只有 platform 执行 Spring Boot repackage。
+
+迁移期允许短期 Adapter 和 `legacy -> 目标模块` 依赖；禁止 `目标模块 -> legacy`。每项临时豁免必须绑定迁移任务或最终清理任务，不得无期限保留。
 
 ## 21. 测试策略
 
@@ -1786,6 +1826,7 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - 没有任何模块依赖 memory。
 - protocol 消息不依赖执行上下文。
 - 依赖树不包含 Fastjson/fastjson2。
+- 迁移期任何目标模块都不依赖 legacy；最终 reactor 不包含 legacy 模块。
 
 可以使用 Maven Enforcer、ArchUnit 和模块级编译测试组合实现。
 
@@ -1813,6 +1854,7 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - 工具启用变更跨 Iteration、跨后续 Turn 保留。
 - 最大 Iteration。
 - 多 ToolCall 顺序和部分结果。
+- 工具执行 observer 只转发允许的进度事件；工具尝试发布 END 或其他禁止事件时被 core 拒绝。
 - Turn/Iteration 状态流转。
 
 ### 21.3 HUMAN_RESPONSE 测试
@@ -1850,7 +1892,8 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - 多配置源同时出现时失败，不执行全局/workspace 叠加。
 - 摘要压缩。
 - MCP stdio/SSE 资源关闭，调用只传工具参数且不泄露上下文。
-- 任意 Agent 作为 HTTP SubAgent 的协议解析、独立子 session 和调用深度限制。
+- 任意 Agent 作为 HTTP SubAgent 的协议解析、独立子 session、调用深度限制，以及通过 ToolExecutionObserver 透传 INVOCATION 事件。
+- 远端 END 只结束 SubAgent 工具调用，不会通过 ToolExecutionObserver 结束父请求。
 - `newAgent`/`resumeAgent` 在返回 `ApexAgentExecution` 前同步取得 session lease；同一 session 的第二个 NEW 或 HUMAN_RESPONSE 在方法返回前抛出 `SessionBusyException`。
 - NEW 与 HUMAN_RESPONSE 使用同一个 `SessionExecutionCoordinator`，不形成两套互不一致的锁状态。
 - 正常完成、再次挂起、构造失败、Publisher 异常和 `cancelBeforeStart` 均只释放一次 lease；未调用 `run` 时 `close` 也能兜底释放。
@@ -1887,7 +1930,7 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - END 只发送一次。
 - NEW 与 HUMAN_RESPONSE 路由。
 - PostgreSQL Repository。
-- 事务和进程重启恢复。
+- Repository 提交顺序、单 Repository 一致性和进程重启恢复；不要求跨 Session/Conversation Repository 原子回滚。
 - schema 不包含 `current_iteration_no`、`apex_agent_turn` 或 `apex_agent_iteration`。
 - schema 不包含 JSONB，快照、集合和 payload 使用 TEXT。
 - 超长消息、摘要、工具结果和 SessionSnapshot 的 TEXT 往返不截断。
@@ -2077,7 +2120,8 @@ core 发送 END，platform 又需要覆盖构造失败和线程池拒绝路径�
 
 - 业务模型入口和 Compactor 基础设施模型入口分离，只有前者经过压缩门。
 - 每个 Iteration 的业务模型调用只判定一次，下一 Iteration 再重新判定；ModelGateway 内部重试不重复触发。
-- 固定执行顺序为压缩判断、PRE 压缩 Hook、Compactor、POST 压缩 Hook、事务提交、PRE_MODEL_CALL、模型。
+- 固定执行顺序为压缩判断、PRE 压缩 Hook、Compactor、POST 压缩 Hook、ConversationRepository 保存、SessionRepository 保存、PRE_MODEL_CALL、模型。
+- 本期不提供跨 Repository 原子事务；任一步保存失败都停止模型调用并传播失败。
 - `PRE_MODEL_CALL` 修改后的最终请求只做硬上限校验，不回跳到压缩门。
 - 用顺序测试覆盖 false、成功、Hook 终止和 Compactor 失败路径。
 
@@ -2135,6 +2179,9 @@ flowchart LR
     Agent --> Compaction["Compaction Policy / Compactor 接口"]
     Agent --> Model["ModelGateway 接口"]
     Agent --> Tools["AgentTool 接口"]
+    Agent --> ToolObserver["请求级 ToolExecutionObserver"]
+    Tools -. "允许的进度事件" .-> ToolObserver
+    ToolObserver --> Events
     Agent --> Stores["Session / Conversation 接口"]
     Agent --> Events
 
