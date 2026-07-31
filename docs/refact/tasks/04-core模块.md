@@ -23,11 +23,11 @@
   - 恢复路径 Provider 调用次数与 AGENT_BUILD 调用次数均为 0。
   - 非法工具、Skill、Hook 或 Prompt 在 Agent 创建前失败，且不产生部分冻结快照。
   - runtime 源码不存在复制的定义级校验规则。
-- **限制条件或注意事项**：数据库 Agent 定义源不在本期；Builder 只校验注册表和基础设施装配；快照版本行为受 Q-05 约束。
+- **限制条件或注意事项**：数据库 Agent 定义源不在本期；Builder 只校验注册表和基础设施装配；首版定义快照 schema 版本固定为 `1.0.0`，本期不实现跨版本兼容。
 
 ## CORE-02 实现 11 生命周期调度器与原子结果应用
 
-- **任务名称**：统一生命周期分发、排序、类型防御、错误策略和流控。
+- **任务名称**：统一生命周期分发、排序、类型防御、异常处理和流控。
 - **任务目标**：用一套 core 调度器替代现有重复 Hook Runtime，并严格执行各生命周期允许的结果族与动作。
 - **当前进度**：未开始。当前 Hook 仍通过 Spring `ApplicationContext`/Bean 名解析，并使用通用结果对象。
 - **设计依据**：设计文档第 8 节、第 21.2 节；架构文档第 7 节。
@@ -37,7 +37,7 @@
   1. 支持 AGENT_BUILD、TURN_START、ITERATION_START、PRE/POST_MESSAGE_COMPRESSION、PRE/POST_MODEL_CALL、PRE/POST_TOOL_CALL、ITERATION_END、TURN_END。
   2. 按 Hook Binding order 和稳定 ID 分发，运行时再次校验 Context/Result 类型。
   3. 先验证整个 record，再原子应用消息、工具、参数、结果或压缩修改。
-  4. AGENT_BUILD 固定 fail-fast；其他 Hook 默认 CONTINUE，显式 FAIL_FAST 时终止。
+  4. 所有 Hook 执行异常统一记录 warn，丢弃当前 Hook 的全部修改并继续后续 Hook；不提供 `FAIL_FAST` 配置。
   5. 实现 END_TURN 的非递归结束语义，禁止 SKIP_ITERATION 和非法动作。
   6. 审计写日志/Tracing/Metrics，不写通用 Hook 执行历史到快照。
 - **预期产出**：单一生命周期调度器、动作处理器、结构化日志和完整单元测试。
@@ -45,7 +45,7 @@
   - 11 个生命周期的顺序和条件执行可由 Fake Hook 精确断言。
   - `TURN_END` 返回非 Continue、结果族不匹配或动作载荷非法会明确失败。
   - 单 Hook 修改失败后，消息、工具集合、参数和结果均无部分残留。
-  - 默认 CONTINUE 与显式 FAIL_FAST 均有测试。
+  - 每个生命周期的 Hook 异常均只产生 warn、无部分修改，并继续后续 Hook；静态类型或定义契约非法仍明确失败。
 - **限制条件或注意事项**：AGENT_BUILD 只由 CORE-01 编排；PRE_TOOL_CALL 的恢复游标只由 CORE-07A 持久化；结束 Hook 不得递归重入。
 
 ## CORE-03 实现 Session、Turn、Iteration 状态编排
@@ -63,14 +63,15 @@
   4. 挂起保留原 Turn/Iteration，不执行 TURN_END；恢复不创建新层级。
   5. 按“追加用户消息 → 保存 SessionSnapshot”的顺序调用两个 Repository；任一步失败都停止后续执行，不承诺跨 Repository 原子回滚。
   6. 人工介入状态与当前 Turn/Iteration 放入同一个 SessionSnapshot，由单次 SessionRepository 保存。
-  7. 在 Q-01 确认后固化异常、fail-fast、最大迭代和工具失败的终态表。
+  7. 固化异常终态：模型异常时当前 Iteration、Turn、Session 进入 `FAILED` 并立即返回；Hook 异常跳过且状态不变；工具异常形成 ToolResult 后继续。
 - **预期产出**：执行状态机、快照提交编排和状态转换测试。
 - **验收标准**：
   - turnNo/iterationNo 在正常、多工具、挂起和恢复场景符合定义。
   - 后续 Turn 不重置 enabledTools/activatedSkills。
   - 挂起不执行 TURN_END，最终收口只执行一次。
+  - 模型异常不再执行后续 Hook、工具或模型调用，三层状态均为 `FAILED`；请求仍由既有 END 收口。
   - Repository Fake 可断言每个关键状态的调用顺序、停止条件和提交内容。
-- **限制条件或注意事项**：core 不感知数据库事务技术，本期不提供跨 Session/Conversation Repository 原子事务；不得创建 Stage 或执行模式层级；Q-01 未确认的状态值不得自行决定。
+- **限制条件或注意事项**：core 不感知数据库事务技术，本期不提供跨 Session/Conversation Repository 原子事务；不得创建 Stage 或执行模式层级；模型异常不新增协议错误事件。
 
 ## CORE-04 建立协议事件工厂与发布语义
 
@@ -106,11 +107,12 @@
   2. 模型无工具调用时结束 Iteration/Turn，有工具调用时交给 CORE-06。
   3. 工具完成后创建下一 Iteration，不复用当前 Iteration。
   4. maxIterations 从 runtime 配置读取，默认值由 RUN-01 提供 30。
-  5. 在 Q-01 确认后固定最大迭代和模型/Hook 失败终态。
+  5. 最后一个允许的 Iteration 在 ModelRequest 中加入“直接输出最终结论且不再调用工具”的约束；若模型仍返回 ToolCall，则触发 END_TURN 并补齐“达到最大轮次，强制结束”，不创建额外 Iteration。
 - **预期产出**：唯一 ReAct 控制循环和基于 Fake 步骤的状态测试。
 - **验收标准**：
   - 源码中只有一套 Agent 循环且无执行模式判断。
   - 无工具、单工具、多 Iteration 和最大迭代路径的生命周期次数可精确断言。
+  - 最大迭代路径不会发起第 `maxIterations + 1` 次业务模型调用；最后一次仍返回工具时不执行工具并完整补齐 ToolResult。
   - `"react"` 不成为 core 模式枚举或分支条件。
 - **限制条件或注意事项**：本任务不实现模型流聚合、压缩算法或工具内部编排；不得保留 PlanExecutor 兼容路径。
 
@@ -128,13 +130,15 @@
   3. 聚合流片段并通过 CORE-04 保持 content_id 事件语义。
   4. 形成完整中立 ModelResponse 并执行 POST_MODEL_CALL。
   5. ModelGateway 内部重试复用同一最终请求，不重新进入生命周期或压缩门。
+  6. ModelGateway 最终失败时把当前 Iteration、Turn、Session 标记为 `FAILED` 后立即返回，不执行 POST_MODEL_CALL 或结束生命周期。
 - **预期产出**：模型步骤组件、流聚合测试和生命周期顺序测试。
 - **验收标准**：
   - 每个 Iteration 的业务模型只调用一次逻辑模型步骤。
   - 流事件与最终响应内容、ToolCall ID/顺序一致。
   - PRE/POST_MODEL_CALL 各执行一次，重试不重复执行。
   - PRE_MODEL_CALL 修改后超限时模型不执行。
-- **限制条件或注意事项**：Spring AI 类型转换属于 RUN-02；模型异常终态受 Q-01 约束。
+  - 模型最终异常时无后续 Hook、工具或模型调用，三层失败状态和单次 END 收口可断言。
+- **限制条件或注意事项**：Spring AI 类型转换属于 RUN-02；模型异常直接返回，不新增 SSE 错误事件。
 
 ## CORE-05C 实现模型调用前压缩门
 
@@ -166,25 +170,25 @@
 - **当前进度**：未开始。当前工具解析仍受 Stage/Mode 影响。
 - **设计依据**：设计文档第 8.3～8.4、9.1、11 节；架构文档第 6.3、8.4 节。
 - **涉及范围**：工具解析、模型工具定义投影、PRE/POST_TOOL_CALL、ToolCallPatch/ToolResultPatch、对话追加和进度持久化。
-- **前置依赖**：CORE-01/02/03、CORE-05A/05B、EXT-01；Q-06 影响标准结果载荷。
+- **前置依赖**：CORE-01/02/03、CORE-05A/05B、EXT-01。
 - **具体执行内容**：
   1. 验证三层子集并在 session 首 Turn 初始化 enabledTools。
   2. Hook 的 ToolActivationDelta 立即影响当前和后续模型调用/Turn。
-  3. 模型请求只附加 enabledTools；真实执行前再次校验。
+  3. 模型请求只附加 enabledTools，禁用工具不得出现在工具列表中；真实执行前再次校验，阻止伪造或过期调用。
   4. 按响应顺序处理 ToolCall，支持 CONTINUE、BLOCK_TOOL、RETURN_TOOL_RESULT、END_TURN。
-  5. BLOCK/RETURN 跳过真实工具但执行 POST_TOOL_CALL；普通工具失败只生成对应结果。
+  5. BLOCK/RETURN 跳过真实工具但执行 POST_TOOL_CALL；普通工具异常转换为当前 ToolCall 的模型可见 ToolResult，继续处理并让模型决定后续行为。
   6. core 为每次真实工具执行创建请求级 ToolExecutionObserver，绑定当前 AgentEventPublisher；本期只允许 INVOCATION_DECLARED/INVOCATION_CHANGE。
   7. 工具发布 END、交互事件、流内容或其他禁止事件时拒绝转发；observer 不暴露底层 Publisher，也不进入快照。
   8. 每个 ToolResult 先追加 ConversationRepository，再保存 SessionSnapshot；两步成功后才继续后序调用。
-  9. END_TURN 为当前和剩余 ToolCall 补齐标准结果，保持一一匹配。
+  9. END_TURN 为当前和剩余 ToolCall 逐个补齐内容为“达到最大轮次，强制结束”的 ToolResult，保留原 toolCallId/name 并保持一一匹配，不增加自定义 code/payload。
 - **预期产出**：工具编排器、三层状态管理和多 ToolCall 测试。
 - **验收标准**：
   - 禁用工具不进入模型请求，也无法通过伪造/过期 ToolCall 执行。
   - 参数 Patch 在执行前生效，结果 Patch 在写对话前生效。
-  - 多 ToolCall 顺序、失败隔离和前序结果持久化有自动测试。
+  - 多 ToolCall 顺序、工具异常结果回传模型、失败隔离和前序结果持久化有自动测试。
   - 允许的 INVOCATION 进度事件写入当前请求；END 和非 allowlist 事件被拒绝。
   - END_TURN 后 Assistant ToolCall 与 ToolResult 数量和 ID 一一匹配。
-- **限制条件或注意事项**：工具来源对 core 透明；本期不保证 Conversation/Session 两个保存原子回滚；MCP 隐式上下文限制由 RUN-06 实现；标准失败/终止 ToolResult 的精确载荷受 Q-06 约束。
+- **限制条件或注意事项**：工具来源对 core 透明；本期不保证 Conversation/Session 两个保存原子回滚；MCP 隐式上下文限制由 RUN-06 实现；禁用工具通常不会被模型调用，执行前二次校验只用于防御伪造或过期 ToolCall。
 
 ## CORE-07A 实现人工介入挂起保存
 
@@ -239,14 +243,14 @@
 - **具体执行内容**：
   1. 跳过 executedPreToolHookIds，只按顺序执行剩余 PRE Hook。
   2. 再次介入时更新唯一挂起对象、累计 Hook ID并结束本次传输。
-  3. END_TURN 时补齐标准 ToolResult、清除挂起并执行一次结束生命周期。
+  3. END_TURN 时为当前和剩余调用补齐“达到最大轮次，强制结束” ToolResult、清除挂起并执行一次结束生命周期。
   4. BLOCK/RETURN 跳过真实工具，执行 POST_TOOL_CALL 后清除挂起。
   5. 全部 CONTINUE 时重新校验 enabledTools，执行真实工具和 POST_TOOL_CALL。
-  6. 工具确认批准只合并允许编辑参数；拒绝映射 RETURN_TOOL_RESULT。
+  6. 工具确认批准只合并允许编辑参数；拒绝映射 RETURN_TOOL_RESULT，模型可见结果固定为“用户拒绝执行”。
   7. ask_human 真实工具读取 humanResponse；收口后继续剩余 ToolCall/Iteration。
 - **预期产出**：五分支恢复执行器和完整恢复回归测试。
 - **验收标准**：
   - 已执行 PRE Hook 不重复，未执行 Hook 顺序不变。
   - 五类分支、批准/拒绝、ask_human、多 ToolCall 前序结果均有自动测试。
   - 再次介入后挂起状态仍存在；最终完成后 SuspendedToolCall 和 Hook ID 完全清除。
-- **限制条件或注意事项**：拒绝和终止结果精确载荷受 Q-06 约束；本任务不新增模型调用或压缩判断。
+- **限制条件或注意事项**：拒绝和终止 ToolResult 均保留原 toolCallId/name，不增加自定义 code/payload；本任务不新增模型调用或压缩判断。

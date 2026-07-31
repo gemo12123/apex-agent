@@ -17,7 +17,7 @@
   3. 定义 `ToolExecutionObserver`，并把它作为 `AgentTool.execute` 的显式参数；ToolExecutionContext 不反向引用 core-extension。
   4. 明确 observer 本期只允许 INVOCATION_DECLARED/INVOCATION_CHANGE，不能发布 END、交互事件、流内容或其他事件，也不暴露底层 AgentEventPublisher。
   5. 区分单工具执行、工具集合解析和 Agent 定义加载。
-  6. 为 Agent 元数据列表登记 Q-02，在确认后补充唯一列表契约。
+  6. `AgentDefinitionProvider` 同时声明 `load(agentKey)` 与 `listAgents()`；后者直接返回 `List<AgentMetadata>`，不得通过逐个加载完整定义实现。
   7. 给每个端口编写编译契约测试或 Fake 示例，证明 core 可独立替换实现。
 - **预期产出**：基础端口接口和接口契约测试。
 - **验收标准**：
@@ -25,7 +25,7 @@
   - 不存在 `default` 方法、实现类、静态工厂或 Spring 注解。
   - Fake 实现可在 core 测试中使用且不启动 Spring。
   - AgentTool 可在执行期间通过 observer 上报允许的进度事件，且接口层没有 Publisher 或 SSE 依赖。
-  - Q-02 解决后，Agent 列表无需 platform 读取具体 Spring 配置对象。
+  - Agent 列表通过 `listAgents()` 获取轻量元数据，无需 platform 读取具体 Spring 配置对象或完整 AgentDefinition。
 - **限制条件或注意事项**：数据库版 AgentDefinitionProvider 本期不实现；端口不得为当前实现便利而暴露 `ApplicationContext`、`SseEmitter`、`ToolCallback` 或 ORM 实体。
 
 ## EXT-02 定义生命周期与对话压缩端口
@@ -40,7 +40,7 @@
   1. 用泛型上下文和结果族定义 LifecycleHook。
   2. HookResolver 通过 HookPoint 与稳定注册名解析，不使用 Bean 名语义。
   3. 定义窗口、压缩判断和压缩器接口，区分业务模型入口与摘要基础设施模型调用。
-  4. 明确接口不承担 Hook 排序、错误策略和原子应用；本期不增加跨 Repository 事务端口，core 只编排调用顺序。
+  4. 明确接口不承担 Hook 排序、异常处理和原子应用；本期不增加跨 Repository 事务端口，core 只编排调用顺序。
   5. 用 Fake 证明压缩 false/true/失败路径可独立驱动。
 - **预期产出**：生命周期和压缩端口接口及编译契约测试。
 - **验收标准**：

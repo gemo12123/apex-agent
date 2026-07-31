@@ -17,7 +17,7 @@
   3. 明确 `enabledSkills` 与 session `activatedSkills` 的不同归属。
   4. 对跨边界集合使用不可变副本或防御性复制。
   5. ToolExecutionContext 只保存本地工具所需中立数据，不引用 core-extension 的 ToolExecutionObserver 或 AgentEventPublisher。
-  6. 为状态转换预留明确枚举；Q-01 未确认的异常终态不自行补齐语义。
+  6. 为状态转换定义明确枚举；模型异常时当前 Iteration、Turn、Session 进入 `FAILED`，Hook/工具异常不改变三层状态。
 - **预期产出**：common 基础领域模型和构造/不变量单元测试。
 - **验收标准**：
   - common 不包含 Spring、Spring AI、Servlet、ORM 或数据库类型。
@@ -32,7 +32,7 @@
 - **任务目标**：用生命周期专用上下文、结果接口和动作 record 代替万能可空 `HookResult`，为 core 调度器提供可验证输入。
 - **当前进度**：未开始。
 - **设计依据**：设计文档第 8.1～8.5 节；架构文档第 7 节。
-- **涉及范围**：HookPoint、HookBinding、HookErrorPolicy、各 HookContextView、LifecycleHookResult、结果族、动作 record、HookMutations、MessageOperation、ToolActivationDelta、专用 Patch。
+- **涉及范围**：HookPoint、HookBinding、各 HookContextView、LifecycleHookResult、结果族、动作 record、HookMutations、MessageOperation、ToolActivationDelta、专用 Patch。
 - **前置依赖**：COM-01。
 - **具体执行内容**：
   1. 定义 `AgentBuildHookResult`、`LoopHookResult`、压缩前后、模型前后、工具前后和 `TurnEndHookResult`。
@@ -46,7 +46,7 @@
   - 不属于当前生命周期的结果族可被编译期或运行期明确拒绝。
   - 必填动作载荷为 null、越界工具启用变更或非法 Patch 会在应用前失败。
   - 结果对象创建后不可被外部修改。
-- **限制条件或注意事项**：目标态不存在 `SKIP_ITERATION`；Skill 集合不能通过运行期 Hook 动态增删；AGENT_BUILD 只允许定义操作并固定 fail-fast。
+- **限制条件或注意事项**：目标态不存在 `SKIP_ITERATION`；Skill 集合不能通过运行期 Hook 动态增删；AGENT_BUILD 只允许定义操作，执行异常同样记录 warn 后跳过，最终定义仍必须通过 Assembler 校验。
 
 ## COM-03 建立快照、人工介入与版本化持久化模型
 
@@ -60,15 +60,15 @@
   1. 定义 SessionSnapshot 的一级状态：当前 Turn/Iteration、enabledTools、activatedSkills、活动定义快照和唯一挂起对象。
   2. `SuspendedToolCall` 只保存当前工具信息、交互信息和 `executedPreToolHookIds`。
   3. 明确禁止保存 emitter、Bean、Tool 实例、客户端、ToolCall index、重复 enabledTools/定义快照和通用 Hook 历史。
-  4. 为快照加入版本字段与版本化 Adapter 入口。
-  5. 在 Q-05 确认后实现未知版本和升级路径测试。
+  4. 为快照加入字符串版本字段，首版固定为 `1.0.0`。
+  5. 只实现 `1.0.0` 的序列化 Adapter 和 round-trip 测试，不实现升级链或未知版本分支。
 - **预期产出**：中立快照模型、版本化适配入口、序列化样本和不变量测试。
 - **验收标准**：
   - 挂起样本能定位原 session/turn/iteration/toolCall，并且只有 PRE_TOOL_CALL Hook ID 执行进度。
   - 通过 `toolCallId` 而非数组 index 表达恢复定位。
   - 快照不包含任何禁止类型或重复状态。
-  - 已知版本 round-trip 保持等价；未知版本行为在 Q-05 确认后有测试。
-- **限制条件或注意事项**：`defaultEnabledTools` 是初始化参数，不进入恢复投影；挂起对象不重复保存 AgentDefinitionSnapshot；Q-05 未决部分不能以“默认按当前 DTO 解析”替代。
+  - `1.0.0` 版本 round-trip 保持等价。
+- **限制条件或注意事项**：`defaultEnabledTools` 是初始化参数，不进入恢复投影；挂起对象不重复保存 AgentDefinitionSnapshot；跨版本升级、版本跨度和未知版本处理不在本期范围，不宣称跨版本兼容。
 
 ## COM-04 统一 Jackson JsonUtils 并提供深拷贝契约
 

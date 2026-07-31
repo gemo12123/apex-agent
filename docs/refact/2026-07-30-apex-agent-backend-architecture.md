@@ -208,7 +208,7 @@ common 保存扩展接口和核心实现共同使用的中立对象：
 - 中立消息、模型请求、模型响应、流片段。
 - 工具定义、工具调用、工具结果和三层工具状态。
 - Skill 定义与 session 激活状态。
-- HookPoint、HookBinding、HookErrorPolicy、生命周期上下文视图和分型结果。
+- HookPoint、HookBinding、生命周期上下文视图和分型结果。
 - 消息、工具参数、工具结果、模型请求、压缩请求/结果的专用 Patch。
 - HumanInterventionRequest、SuspendedToolCall、SuspensionPoint。
 - SessionSnapshot、运行快照和持久化中立结构。
@@ -224,7 +224,7 @@ core-extension 严格只声明接口。接口参数和返回值只能来自 JDK�
 
 | 端口 | 责任 |
 | --- | --- |
-| `AgentDefinitionProvider` | 按 `agentKey` 返回完整 Agent 定义 |
+| `AgentDefinitionProvider` | 按 `agentKey` 返回完整 Agent 定义，并通过 `listAgents()` 直接返回轻量元数据列表 |
 | `ModelGateway` | 流式调用模型并返回中立响应 |
 | `AgentTool` | 声明并执行单个工具 |
 | `ToolExecutionObserver` | 接收工具执行期允许透传的进度事件 |
@@ -382,6 +382,7 @@ Turn 从一个 `RequestType.NEW` 开始，到该输入对应的 ReAct 执行完�
 - HUMAN_RESPONSE 不创建新 Turn。
 - 挂起时 Turn 状态为 `SUSPENDED`，但不执行 `TURN_END`。
 - 只有原 Turn 真正收口时执行一次 `TURN_END`。
+- 模型调用异常时当前 Iteration、Turn、Session 均标记为 `FAILED` 并立即返回，不再执行后续 Hook、工具、模型调用或结束生命周期；请求级执行句柄仍负责用既有 `END` 收口并释放 lease。
 
 Iteration 表示一次业务模型推理及其产生的全部 ToolCall 处理：
 
@@ -402,7 +403,7 @@ AgentDefinition 是配置源返回的完整定义，至少包含：
 - `enabledSkills`。
 - MCP、SubAgent 等外部资源引用。
 - 十一个生命周期点的 Hook Binding。
-- 定义版本。
+- 定义版本，首版固定为字符串 `1.0.0`。
 
 每个普通 NEW 由 core 的 `AgentDefinitionAssembler` 按以下顺序构造活动定义：
 
@@ -527,15 +528,15 @@ core 必须先验证整个结果，再原子应用。参数、结果、消息和
 | `BLOCK_TOOL` | 不执行真实工具，生成标准失败 ToolResult，继续 POST_TOOL_CALL 和剩余 ToolCall |
 | `RETURN_TOOL_RESULT` | 不执行真实工具，使用给定 ToolResult，继续 POST_TOOL_CALL 和剩余 ToolCall |
 | `REQUEST_HUMAN_INTERVENTION` | 保存当前工具与已执行 PRE Hook ID，挂起原 Turn/Iteration |
-| `END_TURN` | 停止当前 Hook 链、剩余工具和模型循环，按规则补齐 ToolResult，执行一次结束生命周期 |
+| `END_TURN` | 停止当前 Hook 链、剩余工具和模型循环；存在 ToolCall 时按原 ID/name 补齐“达到最大轮次，强制结束” ToolResult，执行一次结束生命周期 |
 
 目标态没有 `SKIP_ITERATION`。一个 Iteration 必须以完整模型/工具结果或明确 Turn 结束语义收口。
 
-### 7.4 Hook 失败策略
+### 7.4 Hook 异常策略
 
-- AGENT_BUILD 固定 fail-fast。
-- 其他 Hook 默认 `CONTINUE`，可显式配置 `FAIL_FAST`。
-- CONTINUE 失败记录结构化日志、Tracing 和 Metrics。
+- 所有 Hook 执行异常统一记录 warn、Tracing 和 Metrics，丢弃该 Hook 的全部修改后继续后续 Hook；不提供 `FAIL_FAST` 或其他运行时错误策略配置。
+- AGENT_BUILD 执行异常同样跳过，随后仍由 Assembler 完整校验最终定义；静态类型、Binding、结果族或动作契约非法仍明确失败，不能按执行异常跳过。
+- Hook 执行异常不改变 Session、Turn、Iteration 状态，也不产生协议错误事件。
 - Hook 审计不作为恢复状态写入 SessionSnapshot。
 - runtime 注册表只校验 Hook 实现自身声明的类型元数据；core Assembler 在加载 AgentDefinition 后校验 Hook Binding 的 HookPoint、Context 与 Result 族匹配，core 分发器在运行时再次防御性校验。
 
@@ -596,12 +597,20 @@ while iterationNo < maxIterations:
         persist final compaction result
         replace baseRequest.messages
 
+    if iterationNo == maxIterations - 1:
+        add instruction to baseRequest to output final conclusion and not call tools
     finalRequest = run PRE_MODEL_CALL(baseRequest)
     validate hard context limit
-    response = modelGateway.stream(finalRequest)
+    response = modelGateway.stream(finalRequest); on error mark Iteration/Turn/Session FAILED and return
     run POST_MODEL_CALL
 
     if response has no tool calls:
+        finish iteration
+        finish turn
+        return
+
+    if iterationNo == maxIterations - 1:
+        append "达到最大轮次，强制结束" for every ToolCall
         finish iteration
         finish turn
         return
@@ -610,22 +619,22 @@ while iterationNo < maxIterations:
         run PRE_TOOL_CALL
         handle block / direct result / intervention / end turn
         verify tool enabled
-        execute tool
+        execute tool; convert execution error to current ToolResult
         run POST_TOOL_CALL
         append ToolResult
 
     finish iteration
-
-fail when maxIterations exceeded
 ```
 
 关键不变量：
 
 - `maxIterations` 是 runtime 配置，默认 30。
+- 最后一个允许的 Iteration 提示模型直接输出最终结论且不再调用工具，不创建第 `maxIterations + 1` 个 Iteration；若模型仍返回 ToolCall，则不执行工具并逐个补齐“达到最大轮次，强制结束”。
 - Assistant ToolCall 与 ToolResult 一一匹配。
-- 一个工具失败只生成该工具的响应，不默认终止整个 Turn。
+- 一个工具执行异常只生成该工具的模型可见 ToolResult，不终止 Turn，由下一 Iteration 的模型决定后续行为。
 - 多 ToolCall 按模型响应顺序处理。
-- END_TURN 遇到未处理 ToolCall 时，为当前及剩余调用补标准终止结果，但不运行其 PRE/POST Hook。
+- 禁用工具不进入模型工具列表；执行前二次校验仅防御伪造或过期 ToolCall。
+- END_TURN 遇到未处理 ToolCall 时，为当前及剩余调用按原 toolCallId/name 补内容为“达到最大轮次，强制结束”的结果，不增加自定义 code/payload，也不运行其 PRE/POST Hook。
 
 ### 8.3 模型调用前压缩门
 
@@ -712,7 +721,7 @@ flowchart TD
     Start["按 toolCallId 定位调用，跳过 executedPreToolHookIds"] --> Decision{"剩余 PRE_TOOL_CALL 结果"}
     Decision -->|REQUEST_HUMAN_INTERVENTION| SuspendAgain["替换唯一 SuspendedToolCall<br/>累计已执行 Hook ID<br/>发送新交互事件与 END"]
     SuspendAgain --> Stop1["保持原 Turn / Iteration<br/>不执行工具和 POST Hook"]
-    Decision -->|END_TURN| EndTurn["补齐标准 ToolResult<br/>清除挂起状态<br/>结束原 Iteration / Turn"]
+    Decision -->|END_TURN| EndTurn["补齐“达到最大轮次，强制结束” ToolResult<br/>清除挂起状态<br/>结束原 Iteration / Turn"]
     Decision -->|BLOCK_TOOL| Block["生成失败 ToolResult<br/>执行 POST_TOOL_CALL"]
     Decision -->|RETURN_TOOL_RESULT| Direct["使用指定 ToolResult<br/>跳过真实工具<br/>执行 POST_TOOL_CALL"]
     Decision -->|全部 CONTINUE| Execute["重新校验 enabledTools<br/>执行真实工具<br/>执行 POST_TOOL_CALL"]
@@ -735,7 +744,7 @@ flowchart TD
 工具确认：
 
 - 批准时只合并允许编辑的参数，再执行剩余 PRE Hook 和真实工具。
-- 拒绝时映射为 RETURN_TOOL_RESULT，不执行剩余 PRE Hook 和真实工具，但执行 POST_TOOL_CALL。
+- 拒绝时映射为 RETURN_TOOL_RESULT，不执行剩余 PRE Hook 和真实工具，生成内容固定为“用户拒绝执行”的 ToolResult 后执行 POST_TOOL_CALL；不增加自定义 code/payload。
 
 任何剩余 PRE Hook 再次请求人工介入时，必须在同一挂起槽位中更新经 Hook 修改后的参数、交互载荷和累计 Hook ID，结束本次 SSE；不能提前清除挂起状态，也不能执行真实工具。
 
@@ -851,7 +860,7 @@ runtime 实现 `AutoCloseable`，拥有并关闭自身创建的：
 - HTTP Client。
 - 内部调度器或执行器。
 
-未配置 MCP/SubAgent 时不得创建对应资源。初始化失败采用 fail-fast 还是受控降级由 Builder 显式配置。
+未配置 MCP/SubAgent 时不得创建对应资源。单个 MCP/SubAgent 初始化失败时记录 warn，关闭本次失败产生的资源，从注册表、相关 Agent 定义的 available/defaultEnabled 集合及 session enabledTools 移除受影响工具后继续；不提供策略开关，健康集成不受影响。
 
 ## 10. platform 架构
 
@@ -884,7 +893,7 @@ platform 负责参数校验、用户提取、请求级 SSE Publisher 创建、�
 - 线程池拒绝时调用 `execution.cancelBeforeStart()`，确保 END 和 lease 各自只收口一次。
 - platform 不保存另一套 session 并发占用状态。
 
-Agent 列表从 AgentDefinitionProvider 的元数据读取，不再直接绑定全局 Spring 配置对象。
+Agent 列表调用 `AgentDefinitionProvider.listAgents()` 直接读取轻量元数据，不逐个加载完整 AgentDefinition，也不再绑定全局 Spring 配置对象。
 
 ### 10.2 用户上下文
 
@@ -968,7 +977,7 @@ platform 只支持 PostgreSQL，建议由 Flyway 管理：
 - PostgreSQL 不使用 JSONB。
 - 快照、集合和扩展 payload 序列化为 JSON 字符串后存入 TEXT。
 - 需要查询、排序和索引的字段提升为独立标量列。
-- 快照带版本，DTO 演进通过版本化 Adapter 处理。
+- 定义与快照 schema 版本首版固定为字符串 `1.0.0`，本期只提供该版本 Adapter；不实现跨版本升级、版本跨度或未知版本分支。
 - Fastjson/fastjson2 依赖和调用全部删除。
 
 ### 11.4 存储提交顺序
@@ -1045,14 +1054,15 @@ END 保持精确兼容：
 统一入口是 AgentDefinitionProvider。每个 runtime/platform 实例只选择一个 Provider：
 
 - runtime：ProgrammaticAgentDefinitionProvider。
-- runtime：FileAgentDefinitionProvider，支持 classpath 与文件系统。
+- runtime：FileAgentDefinitionProvider，接收调用方显式指定的 classpath 或文件系统 YAML 资源，初始化时加载一次并缓存。
 - platform：SpringPropertiesAgentDefinitionProvider。
 - 未来：DatabaseAgentDefinitionProvider，本期不实现。
 
 Provider 必须返回完整定义：
 
+- Provider 还必须通过 `listAgents()` 直接返回 `List<AgentMetadata>`，不得由调用方逐个加载完整定义后拼装列表。
 - 不保留“全局配置 + workspace 配置”字段级叠加。
-- workspace 可以是文件 Provider 的资源根，但不是第二配置层。
+- File Provider 不扫描 workspace 或其他目录、不热加载；本期不提供现有配置迁移映射。
 - 多个互相覆盖的配置源同时存在时构造失败。
 - Hook Binding 使用稳定且在当前生命周期点唯一的 `id`。
 - Hook `name` 是注册表解析名，不等于 Spring Bean 名。
@@ -1189,15 +1199,18 @@ memory 参与父 POM 编译与单元测试，但不进入 platform 默认启动�
 必须覆盖：
 
 - 十一个生命周期点的顺序与条件执行。
-- ReAct 多 Iteration、多 ToolCall 和最大 Iteration。
+- ReAct 多 Iteration、多 ToolCall、最后一次模型最终结论约束和最大 Iteration 强制收口。
 - 工具三层状态和执行前二次校验。
-- Hook 分型结果、原子修改、错误策略和 END_TURN。
+- 模型异常后三层 `FAILED` 并直接返回；工具异常转换为 ToolResult 后继续。
+- Hook 分型结果、原子修改、执行异常 warn 后跳过和 END_TURN。
 - ToolExecutionObserver 只转发 allowlist 内的进度事件，并拒绝 END。
 - 每个 Iteration 的压缩门只判定一次。
 - `enabledTools`、`activatedSkills` 跨 Turn 保留。
 - `AgentDefinitionAssembler` 的加载、AGENT_BUILD、校验与冻结顺序，以及 `ApexAgentFactory` 的 NEW/恢复分流。
 - 动态 AgentDefinitionProvider 不在 Builder 阶段加载；不同 agentKey 的定义均在请求构造时通过同一 Assembler 校验。
 - 生命周期结果族严格匹配：TURN_START、ITERATION_START、ITERATION_END 使用 `LoopHookResult`，TURN_END 只接受 `TurnEndHookResult`。
+- `AgentDefinitionProvider.listAgents()` 不触发完整定义加载；File Provider 只加载显式 YAML 资源一次且不热加载。
+- MCP/SubAgent 初始化失败只移除受影响工具、记录 warn 并继续，且失败资源全部关闭。
 
 ### 18.3 恢复测试
 
@@ -1211,6 +1224,7 @@ memory 参与父 POM 编译与单元测试，但不进入 platform 默认启动�
 - ask_human 与工具确认共用恢复管线。
 - 多 ToolCall 中前序结果保留。
 - 收口后清除唯一挂起对象。
+- 工具确认拒绝结果固定为“用户拒绝执行”；END_TURN 补齐结果固定为“达到最大轮次，强制结束”，均保留原 toolCallId/name 且无自定义 code/payload。
 
 ### 18.4 平台与协议测试
 
@@ -1226,6 +1240,7 @@ memory 参与父 POM 编译与单元测试，但不进入 platform 默认启动�
 - END 只发送一次且精确 JSON 不变。
 - PostgreSQL Repository、提交顺序、单 Repository 一致性和进程重启恢复；不要求跨 Repository 原子回滚。
 - TEXT 长内容往返不截断。
+- `1.0.0` 定义/快照版本可完整往返和重启恢复；跨版本与未知版本不属于本期验收范围。
 - 现有前端测试、typecheck 和 build 在不改前端源码的情况下通过。
 
 ## 19. 核心架构不变量
@@ -1244,9 +1259,13 @@ memory 参与父 POM 编译与单元测试，但不进入 platform 默认启动�
 10. runtime 不要求 Spring IoC，platform 不拥有核心语义。
 11. memory 不进入默认主链路。
 12. 前端协议保持兼容，END 精确载荷保持不变。
-13. PostgreSQL 是 platform 唯一数据库，序列化快照使用 TEXT 和 Jackson。
-14. `SuperAgent` 后端概念最终统一更名为 `ApexAgent`。
-15. AGENT_BUILD、定义校验与冻结只由 core `AgentDefinitionAssembler`/`ApexAgentFactory` 编排；Builder 不复制定义级校验规则。
-16. 每次 NEW/HUMAN_RESPONSE 都拥有独立 Publisher、Once END 状态和 `ApexAgentExecution`。
-17. session lease 在 runtime API 返回前同步取得，由 execution 在所有结束路径幂等释放。
-18. 默认 lease 只保证单进程安全；本期 platform 只支持单实例部署。
+13. 模型异常使当前 Iteration、Turn、Session 进入 `FAILED` 并立即返回；Hook 异常 warn 后跳过；工具异常以 ToolResult 告诉模型。
+14. `AgentDefinitionProvider.listAgents()` 是 Agent 列表的唯一来源；File Provider 只加载显式 YAML 资源一次，不扫描、不热加载。
+15. MCP/SubAgent 初始化失败只移除受影响工具并继续；禁用或降级移除的工具不进入模型工具列表。
+16. 首版定义/快照 schema 版本固定为 `1.0.0`，本期不承诺跨版本兼容。
+17. PostgreSQL 是 platform 唯一数据库，序列化快照使用 TEXT 和 Jackson。
+18. `SuperAgent` 后端概念最终统一更名为 `ApexAgent`。
+19. AGENT_BUILD、定义校验与冻结只由 core `AgentDefinitionAssembler`/`ApexAgentFactory` 编排；Builder 不复制定义级校验规则。
+20. 每次 NEW/HUMAN_RESPONSE 都拥有独立 Publisher、Once END 状态和 `ApexAgentExecution`。
+21. session lease 在 runtime API 返回前同步取得，由 execution 在所有结束路径幂等释放。
+22. 默认 lease 只保证单进程安全；本期 platform 只支持单实例部署。

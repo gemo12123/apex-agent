@@ -7,23 +7,23 @@
 
 - **任务名称**：建立 platform 应用与 SpringPropertiesAgentDefinitionProvider。
 - **任务目标**：把现有 Spring 配置映射为完整中立 Agent 定义，并保持 Agent 列表响应兼容。
-- **当前进度**：未开始。当前仍使用全局配置 + workspace 配置叠加和旧 Loader；Q-02/Q-03 未决。
+- **当前进度**：未开始。当前仍使用全局配置 + workspace 配置叠加和旧 Loader；目标配置不兼容迁移该结构。
 - **设计依据**：设计文档第 5.7、7.2、15.2 节；架构文档第 5.7、10.1、14 节。
 - **涉及范围**：ApexApplication、自动装配、Spring properties/YAML Provider、Bean 到 runtime 注册表适配、`GET /api/sse/agents`。
-- **前置依赖**：RUN-01/08、EXT-01；Q-02、Q-03。
+- **前置依赖**：RUN-01/08、EXT-01。
 - **具体执行内容**：
   1. 创建 platform Spring Boot 启动模块并装配一个 ApexAgentRuntime。
   2. 将 Spring 配置转换为单一完整 AgentDefinition，不做字段级叠加。
   3. 移除 default-execution-mode、Plan Prompt、Skill Learning Hook 配置。
-  4. 根据 Q-02 契约从 Provider 获取 AgentMetadata 列表。
-  5. 迁移现有 Agent 定义并按 Q-03 形成映射清单。
+  4. 从 Provider `listAgents()` 获取 AgentMetadata 列表，不逐个加载完整定义。
+  5. 定义新的完整 YAML 属性结构，不提供现有全局/workspace 配置迁移映射。
 - **预期产出**：platform 启动应用、Spring Provider、注册适配和兼容 Agent 列表。
 - **验收标准**：
   - platform 能以 Spring Boot 启动并创建单一 runtime。
   - 多个冲突配置源在启动/构造时明确失败。
   - Agent 列表保持 `code/data/message` 及 `agentKey/name` 字段结构。
   - 配置中不存在执行模式、Plan Prompt 或默认 Skill Learning Hook。
-- **限制条件或注意事项**：数据库 AgentDefinitionProvider 不实现；Q-02/Q-03 未确认前不得自行定义公共属性结构或列表端口；外部路径仍是部署配置，不可提交机器绝对路径。
+- **限制条件或注意事项**：数据库 AgentDefinitionProvider 不实现；SpringProperties Provider 默认使用 YAML，不保留旧配置兼容层；外部路径仍是部署配置，不可提交机器绝对路径。
 
 ## PLAT-02 接入 HTTP/SSE、用户上下文与异步执行
 
@@ -76,19 +76,20 @@
 - **当前进度**：未开始。
 - **设计依据**：设计文档第 14.6、16.2～16.3 节；架构文档第 11.1～11.3 节。
 - **涉及范围**：PostgreSQL SessionRepository、ConversationRepository、数据库实体/Mapper、JsonUtils、版本化 Snapshot Adapter。
-- **前置依赖**：PLAT-03A、COM-03/04、EXT-01；Q-05。
+- **前置依赖**：PLAT-03A、COM-03/04、EXT-01。
 - **具体执行内容**：
   1. 实现 SessionSnapshot、enabledTools、activatedSkills、runtime snapshot 和 suspended tool 的 TEXT 往返。
   2. 实现对话消息有序追加、读取、压缩标记和摘要保存。
   3. 数据库实体不泄漏到 core，读取后必须转换为明确 common 类型。
   4. 覆盖长消息、长摘要、长工具结果和嵌套快照。
-  5. 在 Q-05 确认后实现版本化 Adapter 和未知版本行为。
+  5. 实现首版 `1.0.0` Snapshot Adapter 和 round-trip；不实现跨版本升级链或未知版本分支。
 - **预期产出**：两个 PostgreSQL Repository Adapter 和往返集成测试。
 - **验收标准**：
   - 全部 TEXT 载荷按明确类型往返且不截断。
   - 消息排序和唯一约束行为正确。
   - core/runtime 不引用 ORM 实体或数据库类型。
-- **限制条件或注意事项**：Q-05 未确认前不能宣称跨版本快照兼容；单 Repository 操作可以使用本地事务，但不扩展为跨 Repository 事务。
+  - `1.0.0` 快照版本被明确保存并可完整往返。
+- **限制条件或注意事项**：本期不宣称跨版本快照兼容；单 Repository 操作可以使用本地事务，但不扩展为跨 Repository 事务。
 
 ## PLAT-03C 实现单 Repository 状态提交与跨 Repository 顺序编排
 
@@ -118,7 +119,7 @@
 - **当前进度**：未开始。
 - **设计依据**：设计文档第 10、16、21.6 节；架构文档第 8.5、11 节。
 - **涉及范围**：Testcontainers PostgreSQL、runtime/platform 重建、HUMAN_RESPONSE、多 ToolCall、长 TEXT 样本。
-- **前置依赖**：PLAT-03C、CORE-07C、RUN-04C；Q-05。
+- **前置依赖**：PLAT-03C、CORE-07C、RUN-04C。
 - **具体执行内容**：
   1. 创建并挂起一次执行，销毁并重建 platform/runtime，再提交 HUMAN_RESPONSE。
   2. 验证定义快照、enabledTools、activatedSkills、Hook ID 和前序 ToolResult 恢复。
@@ -128,7 +129,7 @@
 - **验收标准**：
   - 重启后恢复同一 Turn/Iteration，不重新执行 AGENT_BUILD 或模型前生命周期。
   - 多 ToolCall 前序结果、挂起 Hook 进度和 session 状态保持。
-  - 未知快照版本行为符合 Q-05 的最终决策。
+  - `1.0.0` 快照可在进程重启后恢复；未知版本不属于本期验收范围。
 - **限制条件或注意事项**：只验证已成功完成各 Repository 保存后的恢复；不把跨 Repository 部分提交场景描述为原子回滚成功。
 
 ## PLAT-04 完成平台协议、并发与前端兼容验收
@@ -138,17 +139,18 @@
 - **当前进度**：未开始。
 - **设计依据**：设计文档第 21.6～22 节；架构文档第 13、15.2、18.4 节。
 - **涉及范围**：Controller 集成测试、SSE Golden File、PostgreSQL 测试、前端 test/typecheck/build、部署说明。
-- **前置依赖**：PLAT-01/02、PLAT-03A～03D、PRO-02、RUN-08、Q-01/Q-05/Q-06 已解决。
+- **前置依赖**：PLAT-01/02、PLAT-03A～03D、PRO-02、RUN-08。
 - **具体执行内容**：
   1. 覆盖 NEW/HUMAN_RESPONSE、用户校验、409、线程池拒绝、每请求 emitter 隔离。
   2. 对实际 SSE 运行 FND-01/PRO-02 Golden File。
   3. 覆盖正常、失败、挂起、再次挂起和重启恢复。
-  4. 在不修改 `apex-frontend/src` 的前提下运行现有前端测试、typecheck、build。
-  5. 在部署文档中声明单实例，禁止把共享 PostgreSQL 描述为分布式 lease。
+  4. 覆盖模型异常直接失败、Hook 异常 warn 后跳过、工具异常回传模型和最大 Iteration 强制收口。
+  5. 在不修改 `apex-frontend/src` 的前提下运行现有前端测试、typecheck、build。
+  6. 在部署文档中声明单实例，禁止把共享 PostgreSQL 描述为分布式 lease。
 - **预期产出**：平台验收测试、前端兼容记录和单实例部署说明。
 - **验收标准**：
   - Controller 路径、Header、请求字段和响应结构与基线一致。
   - SSE Golden File 全部通过，END 精确且仅一次。
   - 前端 `test:run`、`typecheck`、`build` 全部通过且 `git diff -- apex-frontend/src` 为空。
   - 单实例限制在配置/部署文档中可见。
-- **限制条件或注意事项**：Q-01/Q-05/Q-06 未解决时对应失败/恢复断言不能最终签收；不得为了通过验证修改前端源码。
+- **限制条件或注意事项**：不得为了通过验证修改前端源码；快照只验收 `1.0.0`，不扩展跨版本或未知版本场景。

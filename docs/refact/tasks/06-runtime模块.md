@@ -17,14 +17,15 @@
   3. 补齐默认 ReAct Agent、Prompt、maxIterations=30、kit 工具、内存 Store、Print Publisher 工厂。
   4. Builder 不加载动态定义、不校验定义级工具/Hook/Skill关系。
   5. 静态预检复用 CORE-01 唯一校验器。
-  6. File Provider 和多 Agent 配置行为在 Q-03 确认后实现；Agent 元数据列表能力受 Q-02 约束。
+  6. Programmatic/File Provider 均实现 `listAgents()`；File Provider 接收调用方显式指定的 classpath 或文件系统 YAML 资源，初始化时加载一次并缓存，不扫描目录、不热加载。
 - **预期产出**：runtime Builder/API、注册表、Java/文件 Provider 和无 Spring 示例。
 - **验收标准**：
   - 不创建 Spring ApplicationContext 即可运行一次无工具 Agent。
   - 多 Provider、重名注册和缺少必需端口在 build 阶段明确失败。
   - 动态 Provider 在 build 阶段调用次数为 0，请求期由 core Assembler 调用。
+  - File Provider 可从单个 YAML 资源加载完整的多 Agent 定义和元数据列表，文件变化不会影响已创建 Provider。
   - 默认配置不启动 MCP、SubAgent 或外部 Skill 资源。
-- **限制条件或注意事项**：不实现数据库 Provider；不保留全局 + workspace 字段级叠加；Q-02/Q-03 未确认部分不得固化为公共 API。
+- **限制条件或注意事项**：不实现数据库 Provider；不保留全局 + workspace 字段级叠加；不设计现有配置迁移、目录发现或热加载能力。
 
 ## RUN-02 实现 Spring AI 中立模型与工具适配
 
@@ -163,20 +164,21 @@
 - **当前进度**：未开始。
 - **设计依据**：设计文档第 5.6、11.3、23 节相关风险；架构文档第 12.1 节。
 - **涉及范围**：McpTransport、stdio 进程、SSE Client、工具发现/适配、超时/重连/关闭、Client 缓存。
-- **前置依赖**：RUN-01/02、RUN-04C、CORE-06；Q-04。
+- **前置依赖**：RUN-01/02、RUN-04C、CORE-06。
 - **具体执行内容**：
   1. 抽象 stdio/SSE transport 并适配为 AgentTool。
   2. 调用只发送最终工具参数，不传 session、用户、Agent 或 ToolExecutionContext。
   3. Client 缓存按 runtime 实例和 server 定义隔离。
   4. 未配置时不启动进程/连接；关闭 runtime 时释放全部自有资源。
-  5. 在 Q-04 确认后实现初始化 fail-fast/受控降级配置与观测。
+  5. server 初始化失败时记录 warn，关闭本次失败产生的资源，从注册表、相关 Agent 定义的 available/defaultEnabled 集合及 session enabledTools 移除受影响工具后继续；不提供策略开关。
 - **预期产出**：可选 MCP 集成、资源生命周期测试和参数泄漏测试。
 - **验收标准**：
   - stdio/SSE 工具发现和调用契约测试通过。
   - 发送载荷只含工具参数。
   - runtime close 后进程、连接和调度资源全部关闭。
   - 未配置 MCP 时无相关资源创建。
-- **限制条件或注意事项**：不得把 MCP 类型放入 common/core；Q-04 未确认前不得选择默认降级行为。
+  - 单个 MCP server 初始化失败不阻止其他 server/runtime 启动，受影响工具不进入模型列表且无资源泄漏。
+- **限制条件或注意事项**：不得把 MCP 类型放入 common/core；降级只移除失败 server 影响的工具，不扩大到健康集成。
 
 ## RUN-07 迁移 HTTP SubAgent 工具
 
@@ -185,7 +187,7 @@
 - **当前进度**：未开始。现有实现仍使用 Fastjson 且与旧上下文/事件处理耦合。
 - **设计依据**：设计文档第 11.4、23 节；架构文档第 12.2 节。
 - **涉及范围**：HTTP 客户端、SSE parser、SubAgent Tool、子 session/调用链、STREAM_CONTENT 聚合、INVOCATION/ARTIFACT 处理。
-- **前置依赖**：PRO-01/02、COM-04、EXT-01、RUN-01、RUN-04C、CORE-06；Q-04。
+- **前置依赖**：PRO-01/02、COM-04、EXT-01、RUN-01、RUN-04C、CORE-06。
 - **具体执行内容**：
   1. 使用 `POST /api/sse/chat`、RequestType.NEW、目标 agentKey 和独立子 sessionId。
   2. 通过 `X-User-Id` 传播用户身份。
@@ -193,13 +195,14 @@
   4. 保持 ARTIFACT 当前忽略语义；远端 END 只结束当前工具调用，不调用 observer 发布 END。
   5. 实现超时、取消、异常转换、最大深度和 agentKey 调用链闭环检测。
   6. 使用 protocol + Jackson 解析，移除 Fastjson。
-  7. 在 Q-04 确认后实现初始化失败策略。
+  7. SubAgent 初始化失败时记录 warn，关闭本次失败产生的资源，从注册表、相关 Agent 定义的 available/defaultEnabled 集合及 session enabledTools 移除对应工具后继续；不提供策略开关。
 - **预期产出**：HTTP SubAgent AgentTool、SSE 解析器和集成测试。
 - **验收标准**：
   - 子调用使用独立 session，不复用父 session。
   - 用户身份正确传播，父结果按顺序聚合。
   - INVOCATION 事件经 ToolExecutionObserver 写入当前父请求；远端 END 不会结束父请求。
   - 递归深度和 agentKey 闭环均被拒绝。
+  - 单个 SubAgent 初始化失败不阻止 runtime 启动，对应工具不进入模型列表且无资源泄漏。
   - 依赖和源码中不再因该能力引入 Fastjson。
 - **限制条件或注意事项**：SubAgent 不是特殊 Agent 类型；不得改变远端协议；调用链信息只用于 runtime 观测和防递归，不进入前端协议。
 
@@ -210,17 +213,19 @@
 - **当前进度**：未开始。
 - **设计依据**：设计文档第 14、21.4、22 节；架构文档第 9.5、15.1 节。
 - **涉及范围**：ApexAgentRuntime AutoCloseable、内部 executor/scheduler、示例、runtime 集成测试与 artifact 依赖。
-- **前置依赖**：RUN-01～03、RUN-04A～04C、RUN-05～07；Q-04。
+- **前置依赖**：RUN-01～03、RUN-04A～04C、RUN-05～07。
 - **具体执行内容**：
   1. 明确 runtime 创建和外部注入资源的所有权、关闭顺序和幂等性。
   2. 未配置可选能力时不创建相关客户端、进程或线程。
   3. 提供最小 Builder、显式 Publisher、HUMAN_RESPONSE 恢复示例。
   4. 运行无 Spring IoC 集成测试，覆盖默认内存、Print JSON、工具、压缩和恢复。
-  5. 检查 runtime artifact 不依赖 platform/memory。
+  5. 覆盖 MCP/SubAgent 单项初始化失败，验证 warn、受影响工具从三层集合和 session 状态清理、健康工具继续可用及失败资源关闭。
+  6. 检查 runtime artifact 不依赖 platform/memory。
 - **预期产出**：runtime-only 示例、集成测试、资源关闭报告。
 - **验收标准**：
   - 普通 Java 测试不启动 ApplicationContext 并完整执行一次 Agent。
   - runtime close 多次安全，所有自有线程/客户端/进程释放。
   - 默认 Print 输出满足 protocol Golden File。
+  - MCP/SubAgent 初始化失败不会阻止 runtime-only 执行，受影响工具不出现在模型列表或 session enabledTools。
   - 依赖树无 platform/memory，且只有最小 Spring AI 依赖。
-- **限制条件或注意事项**：外部注入资源是否由 runtime 关闭必须在 Builder 契约中显式；Q-04 未决策略在确认前不能作为验收完成。
+- **限制条件或注意事项**：外部注入资源是否由 runtime 关闭必须在 Builder 契约中显式；MCP/SubAgent 初始化失败固定采用 warn、移除受影响工具并继续的策略。
