@@ -65,6 +65,16 @@ interface ConversationRepository {
     List<AgentMessageEntry> load(ConversationQuery query);
     void compact(ConversationCompactionCommit commit);
 }
+
+interface SkillProvider {
+    List<SkillDefinition> loadSkills();
+}
+
+interface SkillActivator {
+    SkillActivationResult activate(String skillName,
+                                   Set<String> enabledSkills,
+                                   Set<String> activatedSkills);
+}
 ```
 
 `ModelStreamObserver` 和 `ToolExecutionObserver` 都返回同一个请求级 `CancellationToken`，不再只暴露布尔 `isCancelled()`。adapter 必须把 subscription/future/call handle 的取消 command 注册到 token，并仍可在回调边界检查 token。`ToolExecutionObserver.onEvent` 接收 protocol AgentMessage，但 allowlist 由 core 实现检查。
@@ -77,7 +87,7 @@ interface ConversationRepository {
 - Repository 方法按单次操作一致性定义；不增加 begin/commit/UnitOfWork。
 - `ToolProvider` 返回 AgentTool 列表，core 在请求内建立按名称索引的 ToolCatalog，加载时拒绝重复名；两个重载分别处理 AGENT_BUILD 后的定义候选和恢复投影，AgentTool 实例不进入快照。
 - `ToolAvailabilityProvider.current()` 返回精确工具名和 `UnavailableToolSource(origin, sourceId, stableNamePrefix, reasonCode, observedAt)` 的不可变快照，只有 MCP/SubAgent 初始化失败进入该集合。它只报告事实，不自行改定义或 session。
-- SkillProvider 返回完整注册集合；SkillActivator 根据 session 状态返回 instructions 和新 activated set 的中立结果。
+- SkillProvider 返回完整注册集合；SkillActivator 根据 session 状态返回 common `SkillActivationResult`，同时携带 instructions 和新的不可变 activated set。
 
 ### 异常处理
 

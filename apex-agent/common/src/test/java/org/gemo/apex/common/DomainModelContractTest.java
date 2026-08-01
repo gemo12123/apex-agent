@@ -6,6 +6,7 @@ import org.gemo.apex.common.json.JsonUtils;
 import org.gemo.apex.common.model.ModelResponse;
 import org.gemo.apex.common.snapshot.ToolExecutionSnapshot;
 import org.gemo.apex.common.skill.SkillSetDefinition;
+import org.gemo.apex.common.skill.SkillActivationResult;
 import org.gemo.apex.common.tool.*;
 import org.junit.jupiter.api.Test;
 
@@ -48,6 +49,19 @@ class DomainModelContractTest {
                 () -> new ToolSetDefinition(Set.of("a"), Set.of("b")));
         assertThrows(IllegalArgumentException.class,
                 () -> new SkillSetDefinition(Set.of("a"), Set.of("b")));
+    }
+
+    @Test
+    void Skill激活结果应保留指令并冻结激活集合() {
+        LinkedHashSet<String> activatedSkills = new LinkedHashSet<>(Set.of("writing"));
+        SkillActivationResult result = new SkillActivationResult("使用写作规范", activatedSkills);
+
+        activatedSkills.add("other");
+
+        assertEquals("使用写作规范", result.instructions());
+        assertEquals(Set.of("writing"), result.activatedSkills());
+        assertThrows(UnsupportedOperationException.class,
+                () -> result.activatedSkills().add("another"));
     }
 
     @Test

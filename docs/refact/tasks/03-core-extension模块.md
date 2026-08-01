@@ -1,13 +1,13 @@
 # core-extension 模块任务
 
 > 模块职责：只声明扩展接口，不包含任何实现、实体、枚举或 Spring 注解
-> 当前总体进度：未开始；现有接口分散在单模块并引用具体框架
+> 当前总体进度：已完成（2026-08-01）；EXT-01～EXT-03 已通过 PRO/COM/EXT 专项、依赖分析、架构守卫和 legacy 回归，达到 G2
 
 ## EXT-01 定义模型、工具、定义、事件、存储与基础设施端口
 
 - **任务名称**：建立 core 所需的基础扩展接口。
 - **任务目标**：使 core 只能通过端口访问模型、工具、工具进度事件、定义、事件、会话、对话、Skill、ID 和时间。
-- **当前进度**：未开始。现有 `IAgentDefinitionLoader` 等接口尚未形成目标端口集合。
+- **当前进度**：已完成（2026-08-01）。已建立定义、模型、工具、工具健康、事件、Session/Conversation、Skill、ID 与时间共 15 个基础端口；observer 显式共享请求级 CancellationToken，事件与 Repository 签名只使用 protocol/common 中立类型。
 - **设计依据**：设计文档第 5.3、7.2、13.1 节；架构文档第 5.3 节。
 - **涉及范围**：`AgentDefinitionProvider`、`ModelGateway`/observer、`AgentTool`、`ToolExecutionObserver`、`ToolProvider`、`ToolAvailabilityProvider`、`AgentEventPublisher`/Factory、Session/Conversation Repository、SkillProvider/Activator、IdGenerator、TimeProvider。
 - **前置依赖**：COM-01、COM-03、PRO-01。
@@ -35,7 +35,7 @@
 
 - **任务名称**：建立类型安全的 Hook、窗口和压缩扩展接口。
 - **任务目标**：让 core 能按生命周期点解析 Hook，并在每次业务模型调用前通过可替换端口准备窗口、判断和执行压缩。
-- **当前进度**：未开始。
+- **当前进度**：已完成（2026-08-01）。已建立类型安全的 `LifecycleHook<C,R>`、稳定名称 `HookResolver`，以及相互独立的窗口准备、压缩判断和压缩执行端口。
 - **设计依据**：设计文档第 5.3、8、9.2 节；架构文档第 7、8.3 节。
 - **涉及范围**：`LifecycleHook<C,R>`、`HookResolver`、ConversationWindowManager、ConversationCompactionPolicy、ConversationCompactor。
 - **前置依赖**：COM-02、COM-03。
@@ -56,6 +56,7 @@
 
 - **任务名称**：建立 core-extension 专项架构测试。
 - **任务目标**：持续阻止实体、record、枚举、实现或框架注解进入扩展模块。
+- **当前进度**：已完成（2026-08-01）。自动守卫扫描全部 20 个生产 class，拒绝非接口、字段/常量、嵌套类型、default 方法、注解和白名单外签名；非法 record、default、注解、框架类型与嵌套实现 fixture 均能触发失败，POM 直接项目依赖保持为 protocol、common。
 - **当前进度**：未开始。
 - **设计依据**：设计文档第 4.1、21.1 节；架构文档第 4.2、18.1 节。
 - **涉及范围**：core-extension 编译产物、模块 POM、FND-03A 架构测试基础设施。

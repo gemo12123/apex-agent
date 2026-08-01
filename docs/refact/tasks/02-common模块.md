@@ -1,13 +1,13 @@
 # common 模块任务
 
 > 模块职责：维护跨模块且与实现框架无关的领域实体、快照与 JSON 公共能力
-> 当前总体进度：已完成（2026-08-01）；COM-01～COM-04 已通过 common 专项、依赖分析、父 reactor 和架构边界验证；同日补齐下游冻结接口所需的 Conversation 查询、窗口与完整压缩契约
+> 当前总体进度：已完成（2026-08-01）；COM-01～COM-04 已通过 common 专项、依赖分析、父 reactor 和架构边界验证；同日补齐下游冻结接口所需的 Conversation 查询、窗口、完整压缩契约与 Skill 激活结果
 
 ## COM-01 建立 Agent、会话、模型、工具与 Skill 中立模型
 
 - **任务名称**：建立跨模块基础领域模型。
 - **任务目标**：用中立 DTO/record 表达 AgentDefinition、Session/Turn/Iteration、模型消息、工具和 Skill，使 core-extension 与 core 不依赖具体框架类型。
-- **当前进度**：已完成（2026-08-01）。已建立 Agent、Session/Turn/Iteration、模型、工具、Skill、取消与 availability 中立模型；集合和嵌套 Map 均防御性复制，四层 `CANCELLED`、工具/Skill 子集、ToolCall 顺序与请求级取消契约已有单元测试。
+- **当前进度**：已完成（2026-08-01）。已建立 Agent、Session/Turn/Iteration、模型、工具、Skill、取消与 availability 中立模型；补充 `SkillActivationResult` 承载 instructions 与新的 session 激活集合；集合和嵌套 Map 均防御性复制，四层 `CANCELLED`、工具/Skill 子集、ToolCall 顺序与请求级取消契约已有单元测试。
 - **设计依据**：设计文档第 5.2、6、7.1、11、12 节；架构文档第 5.2、6.1～6.4 节。
 - **涉及范围**：AgentDefinition/草稿/快照/元数据，请求命令，Session/Turn/Iteration 与状态，中立消息和模型流，ToolDefinition/ToolCall/ToolResult/ToolExecutionContext，CancellationToken/Registration，工具三层状态、ToolOrigin/ToolAvailabilitySnapshot，SkillDefinition/SkillSetDefinition。
 - **前置依赖**：PRO-01、FND-02。
