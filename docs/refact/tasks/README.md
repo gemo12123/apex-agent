@@ -139,7 +139,7 @@
 
 ## 6. 设计确认结果
 
-Q-01～Q-16 已于 2026-07-31 确认，以下结论是对应任务的实施与验收依据：
+Q-01～Q-16 已于 2026-07-31 确认，Q-17 已于 2026-08-01 确认；以下结论是对应任务的实施与验收依据：
 
 | 编号 | 已确认决策 | 影响任务 |
 | --- | --- | --- |
@@ -159,5 +159,6 @@ Q-01～Q-16 已于 2026-07-31 确认，以下结论是对应任务的实施与�
 | Q-14 | 前端刷新时按持久化的 `{userId, agentKey, sessionId}` 查询当前会话；若状态为 `HUMAN_IN_THE_LOOP`，从持久化挂起对象重新映射并展示 ASK_HUMAN/TOOL_CONFIRMATION。新增只读状态接口和前端初始化逻辑，既有 `/agents`、`/chat` 与 SSE 事件保持兼容。 | PRO-01/02、CORE-07A、PLAT-02/03B/04、前端 |
 | Q-15 | 本期不支持远程 SubAgent 人工介入；子流出现 ASK_HUMAN/TOOL_CONFIRMATION 时取消子请求，按父工具普通失败返回模型可见结果，不透传交互事件。 | RUN-07、PLAT-04 |
 | Q-16 | memory 仅迁移相关旧源码/资源到非标准源码归档目录，供后续整理历史思路；不适配当前框架、不设计 schema/ingestion、不迁移或新增测试、不产出可执行 class。memory 目录以 `packaging=pom` 占位且不被其他模块依赖。 | FND-02/03B、MEM-01～03、CLEAN-03 |
+| Q-17 | Spring AI 依赖先记录 declared/resolved tree、实际类来源和关键 API，再优先从现有声明中形成单一兼容版本线。只有 convergence、统一后编译或真实 Adapter 契约测试证明不兼容时，才允许最少调整 Spring AI BOM/版本属性；显式 Spring Framework 叶子覆盖应删除并服从未变更的 Spring Boot BOM。不得分模块 pin 版本，也不得扩大到 Spring Boot 或模型供应商 SDK。最终必须提交前后依赖树、变更理由、Enforcer convergence、Adapter 契约测试和 legacy 基线证据。 | FND-01/02/03A/03B、RUN-02、CLEAN-03 |
 
 这些确认保留八个顶层模块目录，但将 memory 明确降为非编译归档模块；Q-14 也把“前端零修改”收窄为“既有聊天接口与 SSE 契约零破坏”。其余模块边界不变。

@@ -41,7 +41,7 @@
 - 不兼容历史 MySQL 配置和历史数据。
 - 不保留 PlanExecutor 的兼容执行路径。
 - 不恢复长期 Memory、`session_search` 或 Skill Learning 到默认运行链路，也不要求 memory 适配、编译或测试。
-- 不升级 Spring Boot、Spring AI 或模型供应商版本。
+- 不做常规依赖升级，不调整 Spring Boot 或模型供应商 SDK；Spring AI 生态只在当前声明无法通过 convergence、编译或真实 Adapter 契约时允许最小收敛调整。
 - 不修改 `END` 当前缺少 `execution_status` 的线协议行为。
 - 本期不支持 platform 水平多实例部署；上线多实例前必须先实现分布式 session execution lease。
 
@@ -1182,6 +1182,7 @@ memory 以 `packaging=pom` 参与父 reactor，归档文件不进入 compile/tes
 - core 测试只使用 Fake 端口，不启动 Spring。
 - 模型、工具、Hook、事件和存储可独立替换。
 - runtime 默认实现与 platform 实现遵守同一快照和恢复语义。
+- Spring AI 版本收敛只发生在父 POM 与 runtime Adapter 边界：先固定 declared/resolved/loaded API 基线，再按“已有版本线优先、证据触发、最少 BOM/属性变化”选择单一集合。版本调整不能改变 common/core-extension 契约，也不能把 Spring AI 类型泄漏到 core。
 
 ### 17.2 一致性
 
@@ -1232,6 +1233,7 @@ memory 以 `packaging=pom` 参与父 reactor，归档文件不进入 compile/tes
 - 没有任何主链路模块依赖 memory。
 - protocol DTO 不依赖执行上下文。
 - 依赖树不含 Fastjson。
+- Spring AI 生态依赖收敛为单一兼容版本线，版本由父 POM/BOM 所有，R-13 临时豁免最终清零。
 - 迁移期任何目标模块都不依赖 legacy；最终 reactor 不包含 legacy 模块。
 - runtime 不自行分发 AGENT_BUILD，不复制 core Assembler/Factory 的构造状态机。
 

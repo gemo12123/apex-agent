@@ -34,7 +34,7 @@
 - **当前进度**：未开始。
 - **设计依据**：设计文档第 5.6、23.1 节；架构文档第 5.6、17.1 节。
 - **涉及范围**：ModelGateway、Spring AI Message/ChatResponse/ToolCall/ToolResponse 转换、流 observer、模型工具定义适配。
-- **前置依赖**：COM-01/04、EXT-01、CORE-05A/05B、CORE-06。
+- **前置依赖**：FND-01 的 Spring AI 依赖/API 基线、FND-03A 的 convergence 入口、COM-01/04、EXT-01、CORE-05A/05B、CORE-06。
 - **具体执行内容**：
   1. 建立 common 与 Spring AI 消息的双向 Adapter。
   2. 保留 ToolCall ID、名称、参数、顺序、role、内容和必要 metadata。
@@ -42,13 +42,17 @@
   4. 把 AgentTool 适配为模型可见工具定义，关闭 Spring AI 自动工具执行；真实执行仍由 CORE-06 统一调用 AgentTool。
   5. 对真实 Spring AI 消息样本做 round-trip 契约测试。
   6. subscription 建立后立即向请求级 token 注册 dispose；token 在建立前或建立后取消都必须终止活动模型调用。
-- **预期产出**：Spring AI Adapter、默认 ModelGateway、模型工具定义适配器及契约测试。
+  7. 按 Q-17 先尝试删除叶子覆盖并从当前已声明版本线形成单一集合；只有 convergence、编译或真实契约测试提供不可兼容证据时，才修改最少的 Spring AI BOM/版本属性。
+  8. 生成版本对齐报告，逐项记录 before/after、变更原因、触发证据、父 POM 所有权和未调整的 Spring Boot/模型供应商 SDK。
+- **预期产出**：Spring AI Adapter、默认 ModelGateway、模型工具定义适配器、契约测试及依赖版本对齐报告。
 - **验收标准**：
   - 文本、工具调用、多工具顺序和 ToolResult round-trip 无信息丢失。
   - core/common 不出现 Spring AI import。
   - ModelGateway 内部重试不重复进入 core 压缩门。
   - 请求取消会主动 dispose 模型 subscription，并以 `CancellationRequestedException` 结束而不是记为模型失败。
-- **限制条件或注意事项**：不升级 Spring AI 版本；若现有供应商专有字段无法由已设计中立模型表达，标记设计缺口而非把供应商类型泄漏到 common。
+  - Enforcer convergence 通过且不再有 R-13 豁免；关键 Spring AI artifact 各只有一个 resolved 版本，runtime/legacy 基线和真实 Adapter 契约测试通过。
+  - 对齐报告证明没有在子模块 pin 版本，没有调整 Spring Boot 或模型供应商 SDK，也没有无证据引入新版本线。
+- **限制条件或注意事项**：允许的是解决已证明不兼容所需的最小 Spring AI 生态调整，不是常规升级任务；不能以“使用最新版”为理由。若必须调整 Spring Boot 或模型供应商 SDK，停止并重新确认。供应商专有字段无法由中立模型表达时，标记设计缺口而非把供应商类型泄漏到 common。
 
 ## RUN-03 实现内存存储、对话窗口与默认压缩能力
 

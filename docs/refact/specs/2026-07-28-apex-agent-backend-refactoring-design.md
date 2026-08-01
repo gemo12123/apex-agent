@@ -95,6 +95,7 @@ ChatController
 52. platform 提供只读会话状态查询。前端持久化 `{userId, agentKey, sessionId}` 定位信息；刷新查询到 `HUMAN_IN_THE_LOOP` 时，从持久化挂起对象重新展示 ASK_HUMAN/TOOL_CONFIRMATION，不重跑 Agent。
 53. 远程 SubAgent 本期不得进入可恢复人工介入；子流出现 ASK_HUMAN/TOOL_CONFIRMATION 时取消子请求并转为父 ToolCall 的普通失败结果，不向父前端透传。
 54. memory 目录保留 `packaging=pom` 占位模块；相关旧源码/资源置于非标准归档目录并记录来源，不进入 compile/test，也不设计 schema、ingestion 或当前框架兼容层。
+55. Spring AI 依赖先以 FND-01 的 declared/resolved/API 基线为准，优先从当前已声明版本形成单一兼容集合。显式 Spring Framework 叶子覆盖删除并服从未变更的 Spring Boot BOM；只有 convergence、统一后编译或真实 Adapter 契约测试证明不兼容时，才允许最少调整 Spring AI BOM/版本属性。版本只由父 POM 所有，不调整 Spring Boot 或模型供应商 SDK。
 
 ## 3. 目标与非目标
 
@@ -117,7 +118,7 @@ ChatController
 - 不实现数据库版 Agent 定义。
 - 不保留 PlanExecutor 兼容执行路径。
 - 不兼容旧 MySQL 配置或旧数据库数据。
-- 不在本次重构中升级 Spring Boot、Spring AI 或模型供应商版本；只在父 POM 中集中管理现有依赖版本。
+- 不做常规依赖升级，也不调整 Spring Boot 或模型供应商 SDK。Spring AI 生态仅允许按第 55 项、在可复现不兼容证据成立后做最小收敛调整，并由父 POM 集中管理。
 - 不把 `memory` 重新接入主运行链路。
 
 ## 4. 总体架构
@@ -1922,6 +1923,7 @@ Hook 审计使用日志、Tracing 和 Metrics，不使用恢复快照。
 - 没有任何模块依赖 memory。
 - protocol 消息不依赖执行上下文。
 - 依赖树不包含 Fastjson/fastjson2。
+- Spring AI 生态依赖通过 Enforcer convergence，每个关键 artifact 只解析到一个版本；R-13 临时豁免已删除，实际依赖树与 RUN-02 对齐报告一致。
 - 迁移期任何目标模块都不依赖 legacy；最终 reactor 不包含 legacy 模块。
 
 可以使用 Maven Enforcer、ArchUnit 和模块级编译测试组合实现。

@@ -108,11 +108,14 @@ runtime 只装配端口并调用 core 工厂，AGENT_BUILD 与定义校验仍在
 
 ### 核心流程
 
-1. ModelRequest -> Spring AI messages/options/tool definitions。
-2. 显式关闭 Spring AI 自动工具执行，防止绕过 core PRE/POST Hook。
-3. 订阅流，将正文/tool-call delta 转 ModelStreamChunk。
-4. 订阅建立后立即通过 `observer.cancellationToken().onCancel(subscription::dispose)` 注册主动取消动作；observer 抛错时也发出同一 token 的取消命令。
-5. 聚合最终 Spring AI response -> common ModelResponse。
+1. 读取 FND-01 declared/resolved/API 基线，先移除可由既有 BOM 管理的叶子覆盖，并尝试从仓库已经声明的版本线形成单一候选集合。
+2. 对候选运行 Enforcer convergence、runtime 编译和真实类型 smoke/round-trip 测试；失败证据按 artifact、异常和 API 签名归档。
+3. 只有 Q-17 触发条件成立时，按“最少 BOM/版本属性变化”生成下一候选；禁止在子模块逐个 pin 叶子 artifact。
+4. 选定候选后实现 ModelRequest -> Spring AI messages/options/tool definitions。
+5. 显式关闭 Spring AI 自动工具执行，防止绕过 core PRE/POST Hook。
+6. 订阅流，将正文/tool-call delta 转 ModelStreamChunk。
+7. 订阅建立后立即通过 `observer.cancellationToken().onCancel(subscription::dispose)` 注册主动取消动作；observer 抛错时也发出同一 token 的取消命令。
+8. 聚合最终 Spring AI response -> common ModelResponse，并完成 legacy 基线与对齐报告后删除 R-13 临时豁免。
 
 ### 接口和数据结构
 
@@ -120,9 +123,13 @@ Mapper 覆盖 System/User/Assistant/ToolResponse 角色；Assistant 工具调用
 
 工具只适配定义给 ChatModel，不再通过 SpringAiAgentToolExecutor/ToolCallingManager 执行；真实 AgentTool.execute 由 CORE-06 直接调用。
 
+`SpringAiDependencyAlignmentReport` 是实施证据，不进入运行 API，至少包含：`coordinate`、`declaredVersions`、`resolvedBefore`、`selectedVersion`、`changeType`、`triggerEvidence`、`apiEvidence`、`tests`。报告必须明确 Spring Boot 与模型供应商 SDK before/after 相同。
+
 ### 关键实现逻辑
 
 - 当前 POM 同时出现 Spring AI 1.1.2、2.0.0-M1 和 Alibaba RC 依赖。FND 基线先记录 resolved API；本任务必须选定一套与当前 ChatModel 实际兼容的 dependencyManagement，并通过 Enforcer convergence。不能让两个 ToolCall 模型并存。
+- 候选优先级固定为：删除显式叶子覆盖并服从已有 BOM；从仓库已声明版本中选单一版本线；最后才引入最少的新 Spring AI BOM/属性值。优先级较低的方案必须附上较高方案失败证据。
+- 版本所有权只在父 POM/BOM。Spring Boot、模型供应商 SDK 不在本次调整白名单；若其版本成为唯一阻塞，记录依赖对齐阻塞并重新提请决策，不得静默扩围。
 - 自动工具执行开关在当前 Spring AI 版本用实际 ChatOptions API设置，并写集成测试证明 ToolCallback 未被框架调用。
 - arguments 原始 JSON必须解析为对象 Map；保留原始字符串可放 metadata 供诊断，不作为执行输入。
 - 流最终只有正文时用累计文本构造 response；只有 ToolCall 时也合法；二者都无则模型响应非法。
@@ -134,6 +141,7 @@ Mapper 覆盖 System/User/Assistant/ToolResponse 角色；Assistant 工具调用
 - subscription error/interrupt/empty response 包装 ModelInvocationException；token 已取消导致的终止统一转换为 `CancellationRequestedException`，由 core 记录 `CANCELLED`。
 - observer 发布失败立即取消流并传播原异常。
 - ToolCall 参数 JSON 非对象、重复 ID或缺 name 包装 InvalidModelResponseException。
+- 所有候选均无法在允许边界内同时通过 convergence、编译和契约测试时，保留失败报告并阻塞 RUN-02；不得选择“编译通过但契约失败”或保留多个大版本共存。
 
 ### 测试方案
 
@@ -142,6 +150,8 @@ Mapper 覆盖 System/User/Assistant/ToolResponse 角色；Assistant 工具调用
 - 自动工具执行关闭的 spy ToolCallback测试。
 - token 在订阅建立前/后取消、内部重试、错误和空响应；两种时序都断言活动 subscription 的 dispose 被调用。
 - core/common 无 Spring AI import，runtime dependency convergence。
+- 对齐前后 dependency tree 比较；R-13 豁免清零；报告中的每个版本变化都有对应触发证据。
+- legacy 基线、runtime 全套 Adapter 测试同时通过；Spring Boot 与模型供应商 SDK resolved 版本未变化。
 
 ### 架构符合性
 
