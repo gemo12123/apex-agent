@@ -1,7 +1,7 @@
 # common 模块任务
 
 > 模块职责：维护跨模块且与实现框架无关的领域实体、快照与 JSON 公共能力
-> 当前总体进度：已完成（2026-08-01）；COM-01～COM-04 已通过 common 专项、依赖分析、父 reactor 和架构边界验证
+> 当前总体进度：已完成（2026-08-01）；COM-01～COM-04 已通过 common 专项、依赖分析、父 reactor 和架构边界验证；同日补齐下游冻结接口所需的 Conversation 查询、窗口与完整压缩契约
 
 ## COM-01 建立 Agent、会话、模型、工具与 Skill 中立模型
 
@@ -35,7 +35,7 @@
 
 - **任务名称**：建立 11 个生命周期点的中立契约数据。
 - **任务目标**：用生命周期专用上下文、结果接口和动作 record 代替万能可空 `HookResult`，为 core 调度器提供可验证输入。
-- **当前进度**：已完成（2026-08-01）。已建立 11 个生命周期专用 Context、分型结果族、定义操作、消息操作、工具启停变化和六类专用 Patch；`TURN_END` 仅允许 Continue，运行生命周期结果类型闭包不包含 AgentDefinition 或 Hook Binding 修改。
+- **当前进度**：已完成（2026-08-01）。已建立 11 个生命周期专用 Context、分型结果族、定义操作、消息操作、工具启停变化和六类专用 Patch；压缩前 Context 同时提供基础 ModelRequest、完整检查对象和请求，压缩后 Context 提供原消息与结果；`TURN_END` 仅允许 Continue，运行生命周期结果类型闭包不包含 AgentDefinition 或 Hook Binding 修改。
 - **设计依据**：设计文档第 8.1～8.5 节；架构文档第 7 节。
 - **涉及范围**：HookPoint、HookBinding、各 HookContextView、LifecycleHookResult、结果族、动作 record、HookMutations、MessageOperation、ToolActivationDelta、专用 Patch。
 - **前置依赖**：COM-01。
@@ -57,7 +57,7 @@
 
 - **任务名称**：定义可恢复且与存储技术无关的快照契约。
 - **任务目标**：让内存和 PostgreSQL Repository 使用同一 SessionSnapshot 语义，并保证 HUMAN_RESPONSE 恢复不依赖运行对象或配置重载。
-- **当前进度**：已完成（2026-08-01）。已建立 `SessionSnapshot`、活动 Turn/Iteration、定义恢复投影、人工介入、挂起工具、历史工具绑定及压缩数据；schema 固定为 `1.0.0`，仅提供 V1 JSON Adapter，未知版本显式拒绝且不实现升级链。
+- **当前进度**：已完成（2026-08-01）。已建立 `SessionSnapshot`、活动 Turn/Iteration、定义恢复投影、人工介入、挂起工具、历史工具绑定，以及 `ConversationQuery`、窗口请求/结果和完整压缩检查/请求/结果/提交数据；schema 固定为 `1.0.0`，仅提供 V1 JSON Adapter，未知版本显式拒绝且不实现升级链。
 - **设计依据**：设计文档第 6、7.3、10、14.5、16.2～16.3 节；架构文档第 6.5、11 节。
 - **涉及范围**：SessionSnapshot、活动 Turn/Iteration runtime snapshot、AgentDefinitionSnapshot 恢复投影、HumanInterventionRequest、SuspendedToolCall、SuspensionPoint、ConversationCompaction 数据。
 - **前置依赖**：COM-01、COM-02。
