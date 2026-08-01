@@ -1,13 +1,13 @@
 # core 模块任务
 
 > 模块职责：实现 Agent 定义构造、Session/Turn/Iteration、生命周期、唯一 ReAct 循环、工具编排、压缩门和恢复状态机
-> 当前总体进度：未开始；现有 `SuperAgent` 仍直接依赖 Spring AI、Web、Memory、工具实现和 Spring Hook 解析
+> 当前总体进度：受阻（2026-08-01）；CORE-01～CORE-06 已完成并通过全 Fake 专项验证，CORE-07A～CORE-07C 等待尚未落地的 KIT-01/02 介入请求接口与行为契约
 
 ## CORE-01 实现 AgentDefinitionAssembler 与 ApexAgentFactory
 
 - **任务名称**：实现 Agent 定义构造、权威校验、冻结和 NEW/恢复工厂分流。
 - **任务目标**：把 AGENT_BUILD、定义级校验和不可变快照冻结收敛到 core，runtime 只提供端口并调用入口。
-- **当前进度**：未开始。现有构造语义仍位于 `SuperAgentFactory` 和配置 Loader。
+- **当前进度**：已完成（2026-08-01）。已实现唯一 Assembler/Validator、NEW/恢复工厂分流、AGENT_BUILD 进入点快照、不可用新绑定拒绝与旧绑定历史迁移；恢复路径不访问 DefinitionProvider 或 AGENT_BUILD。
 - **设计依据**：设计文档第 2.30、2.32、5.4、7.3 节；架构文档第 5.4、6.2、8.1 节。
 - **涉及范围**：core `AgentDefinitionAssembler`、定义校验器、`ApexAgentFactory.createNew/createResumed`、AgentDefinitionSnapshot 恢复投影。
 - **前置依赖**：COM-01～03、EXT-01～02。
@@ -32,7 +32,7 @@
 
 - **任务名称**：统一生命周期分发、排序、类型防御、异常处理和流控。
 - **任务目标**：用一套 core 调度器替代现有重复 Hook Runtime，并严格执行各生命周期允许的结果族与动作。
-- **当前进度**：未开始。当前 Hook 仍通过 Spring `ApplicationContext`/Bean 名解析，并使用通用结果对象。
+- **当前进度**：已完成（2026-08-01）。已实现统一 LifecycleDispatcher，覆盖 11 个生命周期的排序、descriptor/结果族校验、普通异常跳过、原子 mutation 应用与 END_TURN 流控。
 - **设计依据**：设计文档第 8 节、第 21.2 节；架构文档第 7 节。
 - **涉及范围**：core 生命周期调度器、Hook Binding 排序、上下文视图构造、结果校验/原子应用、错误与审计日志。
 - **前置依赖**：CORE-01、COM-02、EXT-02。
@@ -55,7 +55,7 @@
 
 - **任务名称**：建立唯一执行层级和持久化状态流转。
 - **任务目标**：用明确状态而非 Hook 历史表达新 Turn、Iteration、挂起、恢复、完成、失败和取消。
-- **当前进度**：未开始。现有概念已存在，但状态与 Spring 上下文、Plan 和 Memory 混合。
+- **当前进度**：已完成（2026-08-01）。已实现 ApexAgentContext 中唯一 Session/Turn/Iteration 状态编排、有序 Repository 提交、失败/取消终态和执行前取消；后续 Turn 保留 session 工具与 Skill 状态。
 - **设计依据**：设计文档第 6、10.2、16.4 节；架构文档第 6.1、8.1 节。
 - **涉及范围**：`ApexAgentContext`、`AgentRuntimeContext`、Session/Turn/Iteration 创建和状态机、Session/Conversation Repository 调用。
 - **前置依赖**：CORE-01、CORE-02、COM-03、EXT-01。
@@ -85,7 +85,7 @@
 
 - **任务名称**：把运行态转换为纯 protocol 消息并通过事件端口发布。
 - **任务目标**：移除 protocol DTO 对执行上下文的依赖，并使 core 不持有 `SseEmitter`。
-- **当前进度**：未开始。当前消息发送仍通过上下文和 `MessageUtils` 访问 `SseEmitter`。
+- **当前进度**：已完成（2026-08-01）。已实现纯 protocol AgentEventFactory/Emitter，固定 react context、不产生 stage_id，并通过 AgentEventPublisher 发布；core 架构测试禁止 Spring、Servlet、SSE 与数据库依赖。
 - **设计依据**：设计文档第 13 节；架构文档第 8.6、13 节。
 - **涉及范围**：core `AgentEventFactory`、STREAM_CONTENT 聚合信息、ASK_HUMAN、TOOL_CONFIRMATION、END 发布请求。
 - **前置依赖**：PRO-01/02、EXT-01、CORE-02。
@@ -107,7 +107,7 @@
 
 - **任务名称**：实现 Iteration 控制、分支和最大迭代收口。
 - **任务目标**：建立删除模式分支后的唯一循环骨架，负责 Iteration 创建、模型步骤、工具步骤和 Turn 结束控制。
-- **当前进度**：未开始。当前 `SuperAgent` 与 Stage/Mode 分支仍耦合。
+- **当前进度**：已完成（2026-08-01）。已实现唯一 ApexAgent ReAct 循环、Iteration/Turn 收口和最大轮次策略，最后一轮仍返回 ToolCall 时不执行真实工具并补齐固定结果。
 - **设计依据**：设计文档第 9.1、21.2 节；架构文档第 8.2 节。
 - **涉及范围**：`ApexAgent` 循环骨架、Iteration 控制、模型/工具步骤接口、最大 Iteration。
 - **前置依赖**：CORE-02～04、EXT-01/02。
@@ -129,7 +129,7 @@
 
 - **任务名称**：实现一次业务模型步骤。
 - **任务目标**：完成最终 ModelRequest 调用、流式内容发布、响应聚合和 PRE/POST_MODEL_CALL 生命周期。
-- **当前进度**：未开始。
+- **当前进度**：已完成（2026-08-01）。已实现 PRE/POST_MODEL_CALL、硬上限、流式正文事件、响应提交、失败/取消状态收口与请求级 CancellationToken 透传。
 - **设计依据**：设计文档第 8.2、9.1、13.2、23.1 节；架构文档第 8.2 节。
 - **涉及范围**：ModelRequest 编排、PRE_MODEL_CALL、ModelGateway stream、STREAM_CONTENT、ModelResponse 汇总、POST_MODEL_CALL。
 - **前置依赖**：CORE-04、CORE-05A、EXT-01；RUN-02 可先用 Fake，后续适配。
@@ -155,7 +155,7 @@
 
 - **任务名称**：实现每 Iteration 一次的窗口准备和条件压缩。
 - **任务目标**：在 PRE_MODEL_CALL 之前完成压缩判断、压缩 Hook、结果保存和基础请求替换。
-- **当前进度**：未开始。当前压缩仍隐藏在消息准备逻辑中。
+- **当前进度**：已完成（2026-08-01）。已实现每业务模型调用一次的显式压缩门、PRE/POST 压缩生命周期、稳定 compactionId 及 Conversation→Session 有序提交。
 - **设计依据**：设计文档第 9.2、21.5、23.9 节；架构文档第 8.3、11.4 节。
 - **涉及范围**：ConversationWindowManager、CompactionCheck/Policy、PRE/POST_MESSAGE_COMPRESSION、Compactor、两个 Repository 的有序调用、硬上限输入。
 - **前置依赖**：CORE-02/03、CORE-05A、EXT-02；RUN-03 可先用 Fake。
@@ -178,7 +178,7 @@
 
 - **任务名称**：实现工具可见性、动态启用、执行守卫和多调用结果对齐。
 - **任务目标**：保证模型只看见 enabledTools、执行器只执行 enabledTools，并按顺序完整处理单次模型响应中的多个 ToolCall。
-- **当前进度**：未开始。当前工具解析仍受 Stage/Mode 影响。
+- **当前进度**：已完成（2026-08-01）。已实现 registered/available/enabled 三层状态、模型投影、执行前守卫、多 ToolCall 顺序提交、受限 observer、工具异常隔离、取消批量补齐及 core 唯一 ToolResultFactory。
 - **设计依据**：设计文档第 8.3～8.4、9.1、11 节；架构文档第 6.3、8.4 节。
 - **涉及范围**：工具解析、模型工具定义投影、PRE/POST_TOOL_CALL、ToolCallPatch/ToolResultPatch、对话追加和进度持久化。
 - **前置依赖**：CORE-01/02/03、CORE-05A/05B、EXT-01。
@@ -210,7 +210,7 @@
 
 - **任务名称**：统一生成并保存 QUESTION/TOOL_CONFIRMATION 挂起状态。
 - **任务目标**：在 PRE_TOOL_CALL 请求人工介入时可靠保存原 Turn/Iteration/ToolCall 和已执行 Hook ID。
-- **当前进度**：未开始。
+- **当前进度**：受阻（2026-08-01）。前置 KIT-01/02 尚未提供可联调的 ask_human/工具确认介入 Hook 与工具行为；按任务边界未在 core 复制 kit 实现。
 - **设计依据**：设计文档第 10.2～10.3 节；架构文档第 6.5、8.5 节。
 - **涉及范围**：HumanInterventionRequest、SuspendedToolCall、executedPreToolHookIds、SessionSnapshot 保存和交互事件。
 - **前置依赖**：CORE-02/03/04/06、KIT-01/02、COM-03。
@@ -233,7 +233,7 @@
 
 - **任务名称**：验证恢复请求并重建原执行位置。
 - **任务目标**：从 SessionSnapshot 恢复同一 Turn、Iteration 和 ToolCall，跳过已完成生命周期。
-- **当前进度**：未开始。
+- **当前进度**：受阻（2026-08-01）。依赖 CORE-07A 的正式挂起快照以及 KIT-01/02 typed submission 行为，当前仅保留 CORE-01 的恢复定义投影入口，未提前实现恢复状态机。
 - **设计依据**：设计文档第 10.1、10.2、10.4 节；架构文档第 8.5 节。
 - **涉及范围**：userId/agentKey/状态/交互标识校验、toolCallId 定位、定义快照、Hook/Tool 重新解析、humanResponse。
 - **前置依赖**：CORE-01、CORE-07A、COM-03；RUN-04B 的 lease 可先用 Fake。
@@ -254,7 +254,7 @@
 
 - **任务名称**：继续未执行 PRE_TOOL_CALL Hook 并完成恢复收口。
 - **任务目标**：完整实现再次介入、END_TURN、BLOCK_TOOL、RETURN_TOOL_RESULT 和全部 CONTINUE 五类路径。
-- **当前进度**：未开始。
+- **当前进度**：受阻（2026-08-01）。依赖 CORE-07B 与 KIT-01/02 的确认批准/拒绝和 ask_human 行为契约，未实现五分支恢复或复制 kit 固定行为。
 - **设计依据**：设计文档第 10.4～10.5、21.3 节；架构文档第 8.5 节。
 - **涉及范围**：Hook 跳过/累计、参数合并、五分支动作、工具执行、POST_TOOL_CALL、挂起清理和剩余 ToolCall。
 - **前置依赖**：CORE-07B、CORE-06、KIT-01/02。
