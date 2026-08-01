@@ -1,0 +1,12 @@
+{
+  "event_type": "STREAM_CONTENT",
+  "context": {
+    "content_id": "content-1",
+    "mode": "react"
+  },
+  "messages": [
+    {
+      "content": "hello"
+    }
+  ]
+}

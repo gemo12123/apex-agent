@@ -1,0 +1,14 @@
+{
+  "event_type": "PLAN_DECLARED",
+  "context": {
+    "mode": "react"
+  },
+  "messages": [
+    {
+      "stage_id": "stage-1",
+      "stage_name": "Legacy stage",
+      "description": "Compatibility DTO only",
+      "status": "PENDING"
+    }
+  ]
+}

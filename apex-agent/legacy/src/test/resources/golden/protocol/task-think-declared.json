@@ -1,0 +1,12 @@
+{
+  "event_type": "TASK_THINK_DECLARED",
+  "context": {
+    "mode": "react"
+  },
+  "messages": [
+    {
+      "task_id": "task-1",
+      "content": "thinking"
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+exemptions:
+  - rule: legacy-fastjson
+    reason: SubAgent 与旧工具处理仍位于 legacy，迁移完成前保持既有依赖。
+    owner: RUN-07
+    expires-at-task: CLEAN-02
+  - rule: legacy-plan-executor
+    reason: 旧 PlanExecutor 行为仅作为迁移期回归对照保留。
+    owner: CLEAN-01
+    expires-at-task: CLEAN-01
+  - rule: legacy-super-agent
+    reason: 新 ApexAgent 链路接管前必须保留旧启动和执行入口。
+    owner: CLEAN-02
+    expires-at-task: CLEAN-02
+  - rule: legacy-duplicate-hook-runtime
+    reason: 重复 Hook Runtime 等待新 core 生命周期实现完成后统一删除。
+    owner: CLEAN-02
+    expires-at-task: CLEAN-02
+  - rule: legacy-module
+    reason: legacy 是父 POM 切换期间保持旧链路可运行的临时迁移支架。
+    owner: CLEAN-02
+    expires-at-task: CLEAN-02
+  - rule: legacy-boot-repackage
+    reason: platform 接管默认入口前由 legacy 保持 Spring Boot 可执行包。
+    owner: CLEAN-02
+    expires-at-task: CLEAN-02
+  - rule: spring-ai-dependency-convergence
+    reason: FND-01 证明当前基线混用 Spring AI 1.1.0、1.1.2、2.0.0-M1 及相邻 Spring Framework 版本；RUN-02 负责按真实 Adapter 契约收敛。
+    owner: RUN-02
+    expires-at-task: RUN-02
+    coordinates:
+      - org.springframework.ai:spring-ai-commons
+      - org.springframework.ai:spring-ai-client-chat
+      - org.springframework.ai:spring-ai-model
+      - org.springframework:spring-beans
+      - org.springframework:spring-core
+      - org.springframework:spring-context
+      - org.springframework:spring-web
+      - org.springframework:spring-webflux
+    baseline-evidence: ../docs/refact/evidence/fnd-01-spring-dependency-tree.txt
+  - rule: legacy-transitive-dependency-convergence
+    reason: legacy 原依赖图还包含多组非 Spring AI 传递冲突；目标模块迁移时按各责任任务收敛，legacy 删除时清零。
+    owner: CLEAN-02
+    expires-at-task: CLEAN-02
+    coordinates:
+      - com.fasterxml.jackson.core:jackson-annotations
+      - com.fasterxml.jackson.core:jackson-core
+      - com.fasterxml.jackson.core:jackson-databind
+      - com.fasterxml.jackson.datatype:jackson-datatype-jdk8
+      - com.fasterxml.jackson.datatype:jackson-datatype-jsr310
+      - com.fasterxml.jackson.module:jackson-module-jsonSchema
+      - commons-codec:commons-codec
+      - io.micrometer:micrometer-commons
+      - io.micrometer:micrometer-observation
+      - io.modelcontextprotocol.sdk:mcp
+      - io.modelcontextprotocol.sdk:mcp-json
+      - io.modelcontextprotocol.sdk:mcp-json-jackson2
+      - io.projectreactor:reactor-core
+      - io.swagger.core.v3:swagger-annotations-jakarta
+      - jakarta.xml.bind:jakarta.xml.bind-api
+      - net.minidev:json-smart
+      - org.apache.commons:commons-lang3
+      - org.hamcrest:hamcrest
+      - org.jetbrains.kotlin:kotlin-stdlib-common
+      - org.jetbrains.kotlin:kotlin-stdlib-jdk8
+      - org.jetbrains:annotations
+      - org.junit.jupiter:junit-jupiter-api
+      - org.slf4j:slf4j-api
+      - org.springframework.boot:spring-boot-autoconfigure
+    baseline-evidence: ../docs/refact/evidence/fnd-01-legacy-full-dependency-tree.txt

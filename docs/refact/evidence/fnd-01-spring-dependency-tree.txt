@@ -1,0 +1,102 @@
+org.gemo.apex:apex-agent:jar:1.0-SNAPSHOT
++- org.springframework.boot:spring-boot-starter:jar:3.4.5:compile
+|  +- org.springframework.boot:spring-boot:jar:3.4.5:compile
+|  |  +- (org.springframework:spring-core:jar:6.2.6:compile - omitted for duplicate)
+|  |  \- (org.springframework:spring-context:jar:6.2.6:compile - omitted for duplicate)
+|  \- org.springframework:spring-core:jar:6.2.6:compile
+|     \- org.springframework:spring-jcl:jar:6.2.6:compile
++- org.springframework.boot:spring-boot-starter-test:jar:3.4.5:compile
+|  +- org.springframework.boot:spring-boot-test:jar:3.4.5:compile
+|  |  \- (org.springframework:spring-test:jar:6.2.6:compile - omitted for duplicate)
+|  +- (org.springframework:spring-core:jar:6.2.6:compile - omitted for duplicate)
+|  \- org.springframework:spring-test:jar:6.2.6:compile
+|     \- (org.springframework:spring-core:jar:6.2.6:compile - omitted for duplicate)
++- org.springframework.boot:spring-boot-starter-web:jar:3.4.5:compile
+|  +- org.springframework.boot:spring-boot-starter-json:jar:3.4.5:compile
+|  |  \- (org.springframework:spring-web:jar:6.2.6:compile - omitted for duplicate)
+|  +- org.springframework:spring-web:jar:6.2.6:compile
+|  |  +- (org.springframework:spring-beans:jar:6.2.6:compile - omitted for duplicate)
+|  |  \- (org.springframework:spring-core:jar:6.2.6:compile - omitted for duplicate)
+|  \- org.springframework:spring-webmvc:jar:6.2.6:compile
+|     +- (org.springframework:spring-aop:jar:6.2.6:compile - omitted for duplicate)
+|     +- (org.springframework:spring-beans:jar:6.2.6:compile - omitted for duplicate)
+|     +- (org.springframework:spring-context:jar:6.2.6:compile - omitted for duplicate)
+|     +- (org.springframework:spring-core:jar:6.2.6:compile - omitted for duplicate)
+|     +- (org.springframework:spring-expression:jar:6.2.6:compile - omitted for duplicate)
+|     \- (org.springframework:spring-web:jar:6.2.6:compile - omitted for duplicate)
++- com.alibaba.cloud.ai:spring-ai-alibaba-agent-framework:jar:1.1.0.0-RC2:compile
+|  \- com.alibaba.cloud.ai:spring-ai-alibaba-graph-core:jar:1.1.0.0-RC2:compile
+|     +- org.springframework.ai:spring-ai-commons:jar:1.1.0:compile
+|     |  \- (org.springframework:spring-context:jar:6.2.12:compile - omitted for conflict with 6.2.6)
+|     +- org.springframework.ai:spring-ai-rag:jar:1.1.0:compile
+|     |  +- (org.springframework.ai:spring-ai-client-chat:jar:1.1.0:compile - omitted for conflict with 2.0.0-M1)
+|     |  \- org.springframework.ai:spring-ai-vector-store:jar:1.1.0:compile
+|     |     \- (org.springframework.ai:spring-ai-model:jar:1.1.0:compile - omitted for conflict with 2.0.0-M1)
+|     +- org.springframework.ai:spring-ai-retry:jar:1.1.0:compile
+|     |  \- (org.springframework:spring-web:jar:6.2.12:compile - omitted for conflict with 6.2.6)
+|     +- org.springframework.ai:spring-ai-autoconfigure-retry:jar:1.1.0:compile
+|     |  \- (org.springframework.ai:spring-ai-retry:jar:1.1.0:compile - omitted for duplicate)
+|     +- org.springframework.ai:spring-ai-deepseek:jar:1.1.0:compile
+|     |  +- (org.springframework.ai:spring-ai-model:jar:1.1.0:compile - omitted for conflict with 2.0.0-M1)
+|     |  +- (org.springframework.ai:spring-ai-retry:jar:1.1.0:compile - omitted for duplicate)
+|     |  +- org.springframework:spring-context-support:jar:6.2.12:compile
+|     |  |  +- (org.springframework:spring-beans:jar:6.2.12:compile - omitted for conflict with 6.2.6)
+|     |  |  +- (org.springframework:spring-context:jar:6.2.12:compile - omitted for conflict with 6.2.6)
+|     |  |  \- (org.springframework:spring-core:jar:6.2.12:compile - omitted for conflict with 6.2.6)
+|     |  \- org.springframework:spring-webflux:jar:6.2.12:compile
+|     |     +- (org.springframework:spring-beans:jar:6.2.12:compile - omitted for conflict with 6.2.6)
+|     |     +- (org.springframework:spring-core:jar:6.2.12:compile - omitted for conflict with 6.2.6)
+|     |     \- (org.springframework:spring-web:jar:6.2.12:compile - omitted for conflict with 6.2.6)
+|     \- (org.springframework.ai:spring-ai-client-chat:jar:1.1.0:compile - omitted for conflict with 2.0.0-M1)
++- org.springframework.ai:spring-ai-starter-mcp-client:jar:1.1.2:compile
+|  +- org.springframework.ai:spring-ai-autoconfigure-mcp-client-httpclient:jar:1.1.2:compile
+|  |  \- org.springframework.ai:spring-ai-autoconfigure-mcp-client-common:jar:1.1.2:compile
+|  +- org.springframework.ai:spring-ai-mcp:jar:1.1.2:compile
+|  |  \- (org.springframework.ai:spring-ai-model:jar:1.1.2:compile - omitted for conflict with 2.0.0-M1)
+|  \- org.springframework.ai:spring-ai-mcp-annotations:jar:1.1.2:compile
+|     \- (org.springframework.ai:spring-ai-model:jar:1.1.2:compile - omitted for conflict with 2.0.0-M1)
++- com.alibaba.cloud.ai:spring-ai-alibaba-starter-dashscope:jar:1.1.0.0-RC2:compile
+|  \- com.alibaba.cloud.ai:spring-ai-alibaba-autoconfigure-dashscope:jar:1.1.0.0-RC2:compile
+|     +- com.alibaba.cloud.ai:spring-ai-alibaba-dashscope:jar:1.1.0.0-RC2:compile
+|     |  +- (org.springframework.ai:spring-ai-commons:jar:1.1.0:compile - omitted for duplicate)
+|     |  +- (org.springframework.ai:spring-ai-model:jar:1.1.0:compile - omitted for conflict with 2.0.0-M1)
+|     |  +- (org.springframework.ai:spring-ai-rag:jar:1.1.0:compile - omitted for duplicate)
+|     |  +- (org.springframework.ai:spring-ai-retry:jar:1.1.0:compile - omitted for duplicate)
+|     |  \- (org.springframework:spring-webflux:jar:6.2.14:compile - omitted for conflict with 6.2.12)
+|     +- (org.springframework.ai:spring-ai-autoconfigure-retry:jar:1.1.0:compile - omitted for duplicate)
+|     +- org.springframework.ai:spring-ai-autoconfigure-model-tool:jar:1.1.0:compile
+|     |  \- (org.springframework.ai:spring-ai-model:jar:1.1.0:compile - omitted for conflict with 2.0.0-M1)
+|     +- org.springframework.ai:spring-ai-autoconfigure-model-chat-client:jar:1.1.0:compile
+|     |  \- (org.springframework.ai:spring-ai-client-chat:jar:1.1.0:compile - omitted for conflict with 2.0.0-M1)
+|     +- org.springframework.ai:spring-ai-autoconfigure-model-chat-observation:jar:1.1.0:compile
+|     |  \- (org.springframework.ai:spring-ai-client-chat:jar:1.1.0:compile - omitted for conflict with 2.0.0-M1)
+|     +- org.springframework.ai:spring-ai-autoconfigure-model-embedding-observation:jar:1.1.0:compile
+|     |  \- (org.springframework.ai:spring-ai-model:jar:1.1.0:compile - omitted for conflict with 2.0.0-M1)
+|     \- org.springframework.ai:spring-ai-autoconfigure-model-image-observation:jar:1.1.0:compile
+|        \- (org.springframework.ai:spring-ai-model:jar:1.1.0:compile - omitted for conflict with 2.0.0-M1)
++- org.springframework.ai:spring-ai-client-chat:jar:2.0.0-M1:compile (scope not updated to compile)
+|  +- org.springframework.ai:spring-ai-model:jar:2.0.0-M1:compile
+|  |  +- (org.springframework.ai:spring-ai-commons:jar:2.0.0-M1:compile - omitted for conflict with 1.1.0)
+|  |  +- org.springframework.ai:spring-ai-template-st:jar:2.0.0-M1:compile
+|  |  |  \- (org.springframework.ai:spring-ai-commons:jar:2.0.0-M1:compile - omitted for conflict with 1.1.0)
+|  |  \- org.springframework:spring-messaging:jar:7.0.1:compile
+|  |     +- (org.springframework:spring-beans:jar:7.0.1:compile - omitted for conflict with 6.2.6)
+|  |     \- (org.springframework:spring-core:jar:7.0.1:compile - omitted for conflict with 6.2.6)
+|  \- (org.springframework:spring-context:jar:7.0.1:compile - omitted for conflict with 6.2.6)
++- org.springframework:spring-context:jar:6.2.6:compile
+|  +- org.springframework:spring-aop:jar:6.2.6:compile
+|  |  +- (org.springframework:spring-beans:jar:6.2.6:compile - omitted for duplicate)
+|  |  \- (org.springframework:spring-core:jar:6.2.6:compile - omitted for duplicate)
+|  +- org.springframework:spring-beans:jar:6.2.6:compile
+|  |  \- (org.springframework:spring-core:jar:6.2.6:compile - omitted for duplicate)
+|  +- (org.springframework:spring-core:jar:6.2.6:compile - omitted for duplicate)
+|  \- org.springframework:spring-expression:jar:6.2.6:compile
+|     \- (org.springframework:spring-core:jar:6.2.6:compile - omitted for duplicate)
+\- com.baomidou:mybatis-plus-spring-boot3-starter:jar:3.5.5:compile
+   \- org.springframework.boot:spring-boot-starter-jdbc:jar:3.2.0:compile
+      \- org.springframework:spring-jdbc:jar:6.1.1:compile
+         +- (org.springframework:spring-beans:jar:6.1.1:compile - omitted for conflict with 6.2.6)
+         +- (org.springframework:spring-core:jar:6.1.1:compile - omitted for conflict with 6.2.6)
+         \- org.springframework:spring-tx:jar:6.1.1:compile
+            +- (org.springframework:spring-beans:jar:6.1.1:compile - omitted for conflict with 6.2.6)
+            \- (org.springframework:spring-core:jar:6.1.1:compile - omitted for conflict with 6.2.6)
