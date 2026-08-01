@@ -1,0 +1,15 @@
+package org.gemo.apex.common.hook;
+
+public enum HookPoint {
+    AGENT_BUILD,
+    TURN_START,
+    ITERATION_START,
+    PRE_MESSAGE_COMPRESSION,
+    POST_MESSAGE_COMPRESSION,
+    PRE_MODEL_CALL,
+    POST_MODEL_CALL,
+    PRE_TOOL_CALL,
+    POST_TOOL_CALL,
+    ITERATION_END,
+    TURN_END
+}

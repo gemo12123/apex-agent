@@ -1,13 +1,13 @@
 # common 模块任务
 
 > 模块职责：维护跨模块且与实现框架无关的领域实体、快照与 JSON 公共能力
-> 当前总体进度：未开始；现有共享对象仍混有 Spring AI、SSE、运行对象和持久化细节
+> 当前总体进度：已完成（2026-08-01）；COM-01～COM-04 已通过 common 专项、依赖分析、父 reactor 和架构边界验证
 
 ## COM-01 建立 Agent、会话、模型、工具与 Skill 中立模型
 
 - **任务名称**：建立跨模块基础领域模型。
 - **任务目标**：用中立 DTO/record 表达 AgentDefinition、Session/Turn/Iteration、模型消息、工具和 Skill，使 core-extension 与 core 不依赖具体框架类型。
-- **当前进度**：未开始。
+- **当前进度**：已完成（2026-08-01）。已建立 Agent、Session/Turn/Iteration、模型、工具、Skill、取消与 availability 中立模型；集合和嵌套 Map 均防御性复制，四层 `CANCELLED`、工具/Skill 子集、ToolCall 顺序与请求级取消契约已有单元测试。
 - **设计依据**：设计文档第 5.2、6、7.1、11、12 节；架构文档第 5.2、6.1～6.4 节。
 - **涉及范围**：AgentDefinition/草稿/快照/元数据，请求命令，Session/Turn/Iteration 与状态，中立消息和模型流，ToolDefinition/ToolCall/ToolResult/ToolExecutionContext，CancellationToken/Registration，工具三层状态、ToolOrigin/ToolAvailabilitySnapshot，SkillDefinition/SkillSetDefinition。
 - **前置依赖**：PRO-01、FND-02。
@@ -35,7 +35,7 @@
 
 - **任务名称**：建立 11 个生命周期点的中立契约数据。
 - **任务目标**：用生命周期专用上下文、结果接口和动作 record 代替万能可空 `HookResult`，为 core 调度器提供可验证输入。
-- **当前进度**：未开始。
+- **当前进度**：已完成（2026-08-01）。已建立 11 个生命周期专用 Context、分型结果族、定义操作、消息操作、工具启停变化和六类专用 Patch；`TURN_END` 仅允许 Continue，运行生命周期结果类型闭包不包含 AgentDefinition 或 Hook Binding 修改。
 - **设计依据**：设计文档第 8.1～8.5 节；架构文档第 7 节。
 - **涉及范围**：HookPoint、HookBinding、各 HookContextView、LifecycleHookResult、结果族、动作 record、HookMutations、MessageOperation、ToolActivationDelta、专用 Patch。
 - **前置依赖**：COM-01。
@@ -57,7 +57,7 @@
 
 - **任务名称**：定义可恢复且与存储技术无关的快照契约。
 - **任务目标**：让内存和 PostgreSQL Repository 使用同一 SessionSnapshot 语义，并保证 HUMAN_RESPONSE 恢复不依赖运行对象或配置重载。
-- **当前进度**：未开始。
+- **当前进度**：已完成（2026-08-01）。已建立 `SessionSnapshot`、活动 Turn/Iteration、定义恢复投影、人工介入、挂起工具、历史工具绑定及压缩数据；schema 固定为 `1.0.0`，仅提供 V1 JSON Adapter，未知版本显式拒绝且不实现升级链。
 - **设计依据**：设计文档第 6、7.3、10、14.5、16.2～16.3 节；架构文档第 6.5、11 节。
 - **涉及范围**：SessionSnapshot、活动 Turn/Iteration runtime snapshot、AgentDefinitionSnapshot 恢复投影、HumanInterventionRequest、SuspendedToolCall、SuspensionPoint、ConversationCompaction 数据。
 - **前置依赖**：COM-01、COM-02。
@@ -79,7 +79,7 @@
 
 - **任务名称**：建立全项目唯一 JSON 公共入口。
 - **任务目标**：用 Jackson 统一 record、Java Time、枚举、泛型、树转换和深拷贝，逐步淘汰 Fastjson。
-- **当前进度**：未开始。当前源码仍存在 Fastjson import；依赖尚未移除。
+- **当前进度**：已完成（2026-08-01）。已提供全局唯一 Jackson `JsonUtils`，覆盖 Java Time、record、枚举、泛型、树转换、mapper copy 与深拷贝；common 消费 protocol test-jar 的全部 16 份 Golden File。legacy Fastjson 的迁移和最终依赖删除仍按计划归后续模块与 CLEAN-02。
 - **设计依据**：设计文档第 2.26～2.27、5.2、14.6、16.1 节；架构文档第 11.3 节。
 - **涉及范围**：common `JsonUtils`、Jackson 模块配置、泛型 TypeReference API、快照 deepCopy 测试；其他模块的 Fastjson 删除由各模块迁移任务负责，最终由 CLEAN-02 收口。
 - **前置依赖**：COM-01、COM-03。
