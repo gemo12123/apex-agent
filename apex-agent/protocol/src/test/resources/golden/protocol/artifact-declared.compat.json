@@ -1,0 +1,1 @@
+{"event_type":"ARTIFACT_DECLARED","context":{"mode":"react"},"messages":[{"scope":"GLOBAL","data_type":"text","source":"agent","artifact_id":"artifact-1","artifact_name":"report","artifact_type":"markdown","content":"content","complete":false}]}

@@ -1,13 +1,13 @@
 # protocol 模块任务
 
 > 模块职责：维护前端、platform、core 事件工厂和远程 SubAgent 共用的线协议
-> 当前总体进度：未开始；协议类型仍位于单模块并依赖部分运行上下文
+> 当前总体进度：已完成（2026-08-01）；PRO-01、PRO-02 已通过 protocol 专项、legacy 对照和父 reactor 验证
 
 ## PRO-01 提取并净化公共协议 DTO
 
 - **任务名称**：迁移 HTTP/SSE 与远程调用公共协议。
 - **任务目标**：形成不依赖 core、Spring AI、Servlet、SSE 和数据库实现的独立 `apex-agent-protocol`。
-- **当前进度**：未开始。`message/*`、`ChatRequest` 和事件常量仍在单模块；`ToolConfirmationMessage` 仍含上下文构造逻辑。
+- **当前进度**：已完成（2026-08-01）。HTTP/SSE、人在回路和远程 SubAgent 线协议已提取到 `org.gemo.apex.protocol`；legacy 保留原包兼容 DTO，新 protocol 不含运行上下文构造逻辑，并新增独立只读 `SessionStateView`。
 - **设计依据**：设计文档第 5.1、13、17 节；架构文档第 5.1、13 节。
 - **涉及范围**：`ChatRequest`、`RequestType`、刷新查询 `SessionStateView`、`AgentEventType`、`AgentMessage` 及所有具体消息、工具确认展示/编辑/选项 DTO、协议常量。
 - **前置依赖**：FND-01、FND-02。
@@ -29,7 +29,7 @@
 
 - **任务名称**：建立 protocol 精确 JSON 契约测试。
 - **任务目标**：确保模块化和 Jackson 统一后，现有前端无需改动既有 SSE 消费逻辑，并为新增刷新查询提供独立 DTO。
-- **当前进度**：未开始，依赖 FND-01 产出的 Golden File。
+- **当前进度**：已完成（2026-08-01）。16 份 Golden File 覆盖运行事件、兼容 DTO 和三类会话状态响应；protocol 24 个测试、legacy 迁移对照及父 reactor 均通过，兼容结论见 `docs/refact/evidence/PRO-02-协议兼容报告.md`。
 - **设计依据**：设计文档第 13.2、21.7、22 节；架构文档第 13、18.4 节。
 - **涉及范围**：protocol Jackson 注解/配置、协议测试资源、FND-01 Golden File。
 - **前置依赖**：PRO-01、FND-01。

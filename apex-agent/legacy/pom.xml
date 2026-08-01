@@ -11,6 +11,11 @@
     <artifactId>apex-agent-legacy</artifactId>
 
     <dependencies>
+        <dependency>
+            <groupId>org.gemo.apex</groupId>
+            <artifactId>apex-agent-protocol</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter</artifactId></dependency>
         <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId></dependency>
         <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency>

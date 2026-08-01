@@ -1,0 +1,1 @@
+{"event_type":"INVOCATION_CHANGE","context":{"invocation_id":"invocation-3","mode":"react"},"messages":[{"change_type":"CONTENT_APPEND","invocation_id":"invocation-3","status":"RUNNING","content":"result","render_type":"text"}]}
