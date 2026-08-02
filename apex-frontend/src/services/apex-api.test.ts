@@ -7,6 +7,33 @@ vi.mock('@microsoft/fetch-event-source', () => ({
 }))
 
 describe('createApexApiClient', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('queries the read-only session state with owner headers', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      code: 200,
+      data: {
+        sessionId: 'session-1',
+        agentKey: 'default_agent',
+        executionStatus: 'COMPLETED',
+        pendingInteraction: null,
+      },
+      message: 'success',
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createApexApiClient().fetchSessionState?.('session-1', 'default_agent', 'user-1')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/apex-api/sse/sessions/session-1?agentKey=default_agent',
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'X-User-Id': 'user-1' }),
+      }),
+    )
+  })
+
   it('keeps the chat stream open while the page is hidden', async () => {
     const apiClient = createApexApiClient()
     const request: ChatRequest = {

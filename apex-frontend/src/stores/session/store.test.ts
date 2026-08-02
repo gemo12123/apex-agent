@@ -1,10 +1,18 @@
 import { createPinia, setActivePinia } from 'pinia'
-import { createApexApiClient, setApexApiClientForTesting } from '@/services/apex-api'
+import {
+  createApexApiClient,
+  SessionStateHttpError,
+  setApexApiClientForTesting,
+} from '@/services/apex-api'
 import { useSessionStore } from '@/stores/session/store'
 import type { ApexApiClient } from '@/services/apex-api'
 import type { ChatRequest, SseEnvelope } from '@/types/apex'
 
 describe('useSessionStore', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
   afterEach(() => {
     setApexApiClientForTesting(createApexApiClient())
   })
@@ -288,5 +296,119 @@ describe('useSessionStore', () => {
     await store.sendPrompt('Trigger failure')
 
     expect(store.session.status).toBe('error')
+    expect(localStorage.getItem('apex:active-session:v1')).toBeNull()
+  })
+
+  it('restores a persisted ask-human interaction after refresh without submitting a response', async () => {
+    localStorage.setItem('apex:active-session:v1', JSON.stringify({
+      userId: 'demo-user',
+      agentKey: 'default_agent',
+      sessionId: 'session-refresh',
+    }))
+    const streamChat = vi.fn()
+    const mockClient: ApexApiClient = {
+      async fetchAgents() {
+        return [{ agentKey: 'default_agent', name: 'Default Agent' }]
+      },
+      async fetchSessionState() {
+        return {
+          sessionId: 'session-refresh',
+          agentKey: 'default_agent',
+          executionStatus: 'HUMAN_IN_THE_LOOP',
+          pendingInteraction: {
+            event_type: 'ASK_HUMAN',
+            context: { mode: 'react', invocation_id: 'invocation-1' },
+            messages: [{
+              input_type: 'TEXT_INPUT',
+              question: 'Continue?',
+              tool_call_id: 'call-1',
+            }],
+          },
+        }
+      },
+      streamChat,
+    }
+    setActivePinia(createPinia())
+    setApexApiClientForTesting(mockClient)
+
+    const store = useSessionStore()
+    await store.initialize()
+
+    expect(store.session.sessionId).toBe('session-refresh')
+    expect(store.session.status).toBe('waiting-human')
+    expect(store.session.pendingPrompts[0]?.toolCallId).toBe('call-1')
+    expect(streamChat).not.toHaveBeenCalled()
+  })
+
+  it('restores a persisted tool confirmation after refresh', async () => {
+    localStorage.setItem('apex:active-session:v1', JSON.stringify({
+      userId: 'demo-user', agentKey: 'default_agent', sessionId: 'session-confirmation',
+    }))
+    const mockClient: ApexApiClient = {
+      async fetchAgents() {
+        return [{ agentKey: 'default_agent', name: 'Default Agent' }]
+      },
+      async fetchSessionState() {
+        return {
+          sessionId: 'session-confirmation',
+          agentKey: 'default_agent',
+          executionStatus: 'HUMAN_IN_THE_LOOP',
+          pendingInteraction: {
+            event_type: 'TOOL_CONFIRMATION',
+            context: { mode: 'react', invocation_id: 'invocation-1' },
+            messages: [{
+              confirmation_id: 'confirmation-1',
+              tool_call_id: 'call-1',
+              invocation_id: 'invocation-1',
+              tool_name: 'search',
+              tool_display_name: '搜索',
+              title: '确认搜索',
+              risk_level: 'MEDIUM',
+              editable: false,
+              confirm_label: '确认',
+              deny_label: '拒绝',
+              display_fields: [],
+              editable_fields: [],
+            }],
+          },
+        }
+      },
+      async streamChat() { },
+    }
+    setActivePinia(createPinia())
+    setApexApiClientForTesting(mockClient)
+
+    const store = useSessionStore()
+    await store.initialize()
+
+    expect(store.session.status).toBe('waiting-confirmation')
+    expect(store.session.pendingConfirmations[0]?.confirmationId).toBe('confirmation-1')
+  })
+
+  it('clears stale locators on 404 but retains them on server errors', async () => {
+    const locator = JSON.stringify({
+      userId: 'demo-user', agentKey: 'default_agent', sessionId: 'session-refresh',
+    })
+    const client = (status: number): ApexApiClient => ({
+      async fetchAgents() {
+        return [{ agentKey: 'default_agent', name: 'Default Agent' }]
+      },
+      async fetchSessionState() { throw new SessionStateHttpError(status) },
+      async streamChat() { },
+    })
+
+    localStorage.setItem('apex:active-session:v1', locator)
+    setActivePinia(createPinia())
+    setApexApiClientForTesting(client(404))
+    await useSessionStore().initialize()
+    expect(localStorage.getItem('apex:active-session:v1')).toBeNull()
+
+    localStorage.setItem('apex:active-session:v1', locator)
+    setActivePinia(createPinia())
+    setApexApiClientForTesting(client(500))
+    const store = useSessionStore()
+    await store.initialize()
+    expect(localStorage.getItem('apex:active-session:v1')).toBe(locator)
+    expect(store.errorMessage).toContain('500')
   })
 })

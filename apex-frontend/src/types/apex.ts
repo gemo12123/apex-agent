@@ -13,6 +13,13 @@ export interface AgentSummary {
   name: string
 }
 
+export interface SessionStateView {
+  sessionId: string
+  agentKey: string
+  executionStatus: string
+  pendingInteraction: AskHumanEnvelope | ToolConfirmationEnvelope | null
+}
+
 export interface EnvelopeContext {
   mode?: 'react' | 'plan-executor' | string
   stage_id?: string

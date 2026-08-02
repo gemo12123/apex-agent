@@ -1,0 +1,29 @@
+spring:
+  application:
+    name: apex-agent-platform
+  datasource:
+    url: ${APEX_DB_URL:jdbc:postgresql://localhost:5432/apex_agent}
+    username: ${APEX_DB_USER:apex_agent}
+    password: ${APEX_DB_PASSWORD:}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+apex:
+  platform:
+    agents:
+      default_agent:
+        name: 通用智能体
+        description: 通用智能体
+        prompt:
+          system: classpath:agents/default_agent/REACT_PROMPT.md
+          max-iterations: 30
+        message-compression:
+          enabled: true
+          max-messages: 20
+        tools:
+          available: []
+          default-enabled: []
+        skills: []
+        sub-agents: {}
+        hooks: {}
