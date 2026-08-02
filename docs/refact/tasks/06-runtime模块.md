@@ -1,13 +1,13 @@
 # runtime 模块任务
 
 > 模块职责：提供无需 Spring IoC、可通过 Builder 直接运行的默认实现和外部集成
-> 当前总体进度：未开始；现有运行能力仍由 Spring 单模块装配
+> 当前总体进度：已完成（2026-08-02）；RUN-01～RUN-08 已实现并通过 runtime-only、依赖收敛与 legacy 回归验证，达到 G4
 
 ## RUN-01 实现 ApexAgentRuntime Builder、注册表与定义 Provider
 
 - **任务名称**：建立 runtime 公共 API 和基础装配。
 - **任务目标**：外部项目只依赖 runtime，提供 ChatModel/ModelGateway 与 Agent 定义后即可通过普通 Java `new`/Builder 运行。
-- **当前进度**：未开始。
+- **当前进度**：已完成（2026-08-02）。已实现无 IoC Builder、注册表、Programmatic/File Provider、默认 Agent 与请求期定义加载。
 - **设计依据**：设计文档第 5.6、7.2、14.1～14.3 节；架构文档第 5.6、9.1～9.2、14 节。
 - **涉及范围**：`ApexAgentRuntime`、Builder、Tool/Hook/Skill 注册表、Programmatic/FileAgentDefinitionProvider、默认 Agent/Prompt、静态预检入口。
 - **前置依赖**：CORE-01～04、KIT-01～03、EXT-01/02。
@@ -31,7 +31,7 @@
 
 - **任务名称**：适配 ChatModel、消息、流响应和 ToolCallback。
 - **任务目标**：隔离 Spring AI 类型，保证 common ModelRequest/Response 与真实模型调用之间无损转换。
-- **当前进度**：未开始。
+- **当前进度**：已完成（2026-08-02）。已实现真实 Spring AI 消息/工具调用/流适配、主动取消与自动工具执行关闭，并按 Q-17 收敛到 1.1.2。
 - **设计依据**：设计文档第 5.6、23.1 节；架构文档第 5.6、17.1 节。
 - **涉及范围**：ModelGateway、Spring AI Message/ChatResponse/ToolCall/ToolResponse 转换、流 observer、模型工具定义适配。
 - **前置依赖**：FND-01 的 Spring AI 依赖/API 基线、FND-03A 的 convergence 入口、COM-01/04、EXT-01、CORE-05A/05B、CORE-06。
@@ -58,7 +58,7 @@
 
 - **任务名称**：提供 runtime 默认 Session/Conversation Repository 和压缩实现。
 - **任务目标**：支持同一 runtime 实例内的连续会话、挂起恢复、窗口准备和业务模型调用前摘要压缩。
-- **当前进度**：未开始。现有会话 Store 位于 memory 包且对象隔离不足以代表目标快照契约。
+- **当前进度**：已完成（2026-08-02）。已实现深拷贝 Session、幂等 Conversation、窗口、阈值策略与默认压缩器。
 - **设计依据**：设计文档第 5.6、9.2、14.5、21.4～21.5 节；架构文档第 9.4、11.1 节。
 - **涉及范围**：InMemorySessionRepository、InMemoryConversationRepository、ConversationWindowManager、默认 CompactionPolicy/Compactor。
 - **前置依赖**：COM-03/04、EXT-01/02、CORE-03、CORE-05C。
@@ -80,7 +80,7 @@
 
 - **任务名称**：实现执行、取消和关闭的请求级状态机。
 - **任务目标**：用原子状态保证 execution 只能启动一次，且所有结束路径只执行一次资源收口。
-- **当前进度**：未开始。
+- **当前进度**：已完成（2026-08-02）。已实现 PREPARED/RUNNING/CANCEL_REQUESTED/TERMINATED 状态机与幂等收口。
 - **设计依据**：设计文档第 13.3、14.4 节；架构文档第 8.6、9.3 节。
 - **涉及范围**：ApexAgentExecution、RuntimeCancellationSource、ActiveExecutionRegistry、run、cancel、cancelBeforeStart、close、构造失败和状态转换测试。
 - **前置依赖**：CORE-04、RUN-01。
@@ -106,7 +106,7 @@
 
 - **任务名称**：实现单进程 session execution lease。
 - **任务目标**：让 NEW/HUMAN_RESPONSE 在 runtime API 返回前同步竞争同一 sessionId 占用空间。
-- **当前进度**：未开始。当前锁主要位于 Web Coordinator。
+- **当前进度**：已完成（2026-08-02）。已实现单 runtime 同 session 同步互斥、owner 校验与幂等释放。
 - **设计依据**：设计文档第 2.29、2.31、14.4 节；架构文档第 9.3 节。
 - **涉及范围**：SessionExecutionCoordinator、SessionExecutionLease、SessionBusyException、稳定 LockEntry/引用计数。
 - **前置依赖**：RUN-01。
@@ -126,7 +126,7 @@
 
 - **任务名称**：完成请求级事件隔离和 runtime new/resume 同步准备。
 - **任务目标**：为每次 NEW/HUMAN_RESPONSE 创建独立事件出口，并把 Publisher、core Agent 和 lease 交给 RUN-04A 状态机统一持有。
-- **当前进度**：未开始。
+- **当前进度**：已完成（2026-08-02）。已实现请求级 Publisher、精确一次 END、准备失败收口和活动执行登记。
 - **设计依据**：设计文档第 2.28～2.29、13.1～13.3、14.4 节；架构文档第 8.6、9.1、9.3 节。
 - **涉及范围**：OnceAgentEventPublisher、AgentEventPublisherFactory、Print Publisher、runtime newAgent/resumeAgent、RUN-04A/04B 集成。
 - **前置依赖**：RUN-04A、RUN-04B、CORE-01、CORE-04、EXT-01。
@@ -151,7 +151,7 @@
 
 - **任务名称**：迁移 `org.gemo.apex.skills` 中非 learning 能力。
 - **任务目标**：保留文件 Skill 的发现、解析、instructions、资源读取和 `activate_skill` 行为，同时把状态改为 session 隔离。
-- **当前进度**：未开始。
+- **当前进度**：已完成（2026-08-02）。已实现普通文件 Skill、session 激活及 enabledSkills 约束的资源读取；learning 未进入 runtime。
 - **设计依据**：设计文档第 5.6、12、21.4 节；架构文档第 6.4 节。
 - **涉及范围**：非 learning Skill loader/provider、Skill registry、activate_skill、read_skill_resource、消息写入与 session 状态。
 - **前置依赖**：RUN-01/03、CORE-03/06、COM-01。
@@ -174,7 +174,7 @@
 
 - **任务名称**：把 MCP 客户端和工具适配迁移到 runtime。
 - **任务目标**：以普通 AgentTool 暴露 MCP 工具，并由 runtime 管理 stdio/SSE 连接的完整生命周期。
-- **当前进度**：未开始。
+- **当前进度**：已完成（2026-08-02）。已实现中立 MCP transport/call handle、AgentTool 适配、参数隔离、主动取消与资源关闭契约。
 - **设计依据**：设计文档第 5.6、11.3、23 节相关风险；架构文档第 12.1 节。
 - **涉及范围**：McpTransport、stdio 进程、SSE Client、工具发现/适配、超时/重连/关闭、Client 缓存。
 - **前置依赖**：RUN-01/02、RUN-04C、CORE-06。
@@ -200,7 +200,7 @@
 
 - **任务名称**：把可在单次 NEW 内自行完成的远程 Agent 适配为普通 HTTP 工具。
 - **任务目标**：复用现有 chat/SSE 协议完成远端调用、流聚合、事件透传和递归防护；不支持远程人工介入。
-- **当前进度**：未开始。现有实现仍使用 Fastjson 且与旧上下文/事件处理耦合。
+- **当前进度**：已完成（2026-08-02）。已实现 JDK HTTP/SSE、独立子 session、用户传播、递归防护、事件聚合和远程 HITL 普通失败边界。
 - **设计依据**：设计文档第 11.4、23 节；架构文档第 12.2 节。
 - **涉及范围**：HTTP 客户端、SSE parser、SubAgent Tool、子 session/调用链、STREAM_CONTENT 聚合、INVOCATION/ARTIFACT 处理。
 - **前置依赖**：PRO-01/02、COM-04、EXT-01、RUN-01、RUN-04C、CORE-06。
@@ -230,7 +230,7 @@
 
 - **任务名称**：收口 runtime 默认能力和可选资源所有权。
 - **任务目标**：证明 runtime 在无 Spring IoC 情况下可独立运行、恢复、关闭，并且可选集成不会泄漏资源。
-- **当前进度**：未开始。
+- **当前进度**：已完成（2026-08-02）。已实现关闭门、活动执行取消、owned/borrowed 所有权、逆序关闭和 runtime-only 集成验收。
 - **设计依据**：设计文档第 14、21.4、22 节；架构文档第 9.5、15.1 节。
 - **涉及范围**：ApexAgentRuntime AutoCloseable、ActiveExecutionRegistry、ResourceRegistry、内部 executor/scheduler、示例、runtime 集成测试与 artifact 依赖。
 - **前置依赖**：RUN-01～03、RUN-04A～04C、RUN-05～07。

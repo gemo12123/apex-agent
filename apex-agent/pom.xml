@@ -29,8 +29,7 @@
         <spring-boot.version>3.4.5</spring-boot.version>
         <spring-ai-alibaba.version>1.1.0.0-RC2</spring-ai-alibaba.version>
         <spring-ai-mcp.version>1.1.2</spring-ai-mcp.version>
-        <spring-ai-client-chat.version>2.0.0-M1</spring-ai-client-chat.version>
-        <spring-framework.version>6.2.6</spring-framework.version>
+        <spring-ai-client-chat.version>1.1.2</spring-ai-client-chat.version>
         <lombok.version>1.18.42</lombok.version>
         <jackson.version>2.16.1</jackson.version>
         <maven-jar-plugin.version>3.4.2</maven-jar-plugin.version>
@@ -44,6 +43,10 @@
 
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>org.springframework.boot</groupId><artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring-boot.version}</version><type>pom</type><scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-starter</artifactId>
@@ -80,9 +83,14 @@
                 <version>${spring-ai-client-chat.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.springframework</groupId>
-                <artifactId>spring-context</artifactId>
-                <version>${spring-framework.version}</version>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-model</artifactId>
+                <version>${spring-ai-client-chat.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-commons</artifactId>
+                <version>${spring-ai-client-chat.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
@@ -286,14 +294,6 @@
                                 </bannedDependencies>
                                 <dependencyConvergence>
                                     <excludes>
-                                        <exclude>org.springframework.ai:spring-ai-commons</exclude>
-                                        <exclude>org.springframework.ai:spring-ai-client-chat</exclude>
-                                        <exclude>org.springframework.ai:spring-ai-model</exclude>
-                                        <exclude>org.springframework:spring-beans</exclude>
-                                        <exclude>org.springframework:spring-core</exclude>
-                                        <exclude>org.springframework:spring-context</exclude>
-                                        <exclude>org.springframework:spring-web</exclude>
-                                        <exclude>org.springframework:spring-webflux</exclude>
                                         <exclude>com.fasterxml.jackson.core:jackson-annotations</exclude>
                                         <exclude>com.fasterxml.jackson.core:jackson-core</exclude>
                                         <exclude>com.fasterxml.jackson.core:jackson-databind</exclude>

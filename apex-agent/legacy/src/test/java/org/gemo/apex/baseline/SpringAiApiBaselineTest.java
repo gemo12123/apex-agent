@@ -21,12 +21,12 @@ class SpringAiApiBaselineTest {
 
     @Test
     void criticalTypesLoadFromRecordedResolvedJars() {
-        assertSource(ChatModel.class, "spring-ai-model-2.0.0-M1.jar");
-        assertSource(Message.class, "spring-ai-model-2.0.0-M1.jar");
-        assertSource(ChatResponse.class, "spring-ai-model-2.0.0-M1.jar");
-        assertSource(AssistantMessage.ToolCall.class, "spring-ai-model-2.0.0-M1.jar");
-        assertSource(ToolResponseMessage.ToolResponse.class, "spring-ai-model-2.0.0-M1.jar");
-        assertSource(ChatOptions.class, "spring-ai-model-2.0.0-M1.jar");
+        assertSource(ChatModel.class, "spring-ai-model-1.1.2.jar");
+        assertSource(Message.class, "spring-ai-model-1.1.2.jar");
+        assertSource(ChatResponse.class, "spring-ai-model-1.1.2.jar");
+        assertSource(AssistantMessage.ToolCall.class, "spring-ai-model-1.1.2.jar");
+        assertSource(ToolResponseMessage.ToolResponse.class, "spring-ai-model-1.1.2.jar");
+        assertSource(ChatOptions.class, "spring-ai-model-1.1.2.jar");
         assertSource(ReactAgent.class, "spring-ai-alibaba-agent-framework-1.1.0.0-RC2.jar");
         assertSource(ApplicationContext.class, "spring-context-6.2.6.jar");
     }
