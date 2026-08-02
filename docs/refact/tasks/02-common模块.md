@@ -1,7 +1,7 @@
 # common 模块任务
 
 > 模块职责：维护跨模块且与实现框架无关的领域实体、快照与 JSON 公共能力
-> 当前总体进度：已完成（2026-08-01）；COM-01～COM-04 已通过 common 专项、依赖分析、父 reactor 和架构边界验证；同日补齐下游冻结接口所需的 Conversation 查询、窗口、完整压缩契约与 Skill 激活结果
+> 当前总体进度：已完成（2026-08-02）；COM-01～COM-04 已通过 common 专项、依赖分析、父 reactor 和架构边界验证；已补齐下游冻结接口所需的 Conversation 查询/窗口/完整压缩契约、Skill 激活结果，以及 Hook Binding/options 与 PRE_TOOL typed submission 上下文
 
 ## COM-01 建立 Agent、会话、模型、工具与 Skill 中立模型
 
@@ -35,7 +35,7 @@
 
 - **任务名称**：建立 11 个生命周期点的中立契约数据。
 - **任务目标**：用生命周期专用上下文、结果接口和动作 record 代替万能可空 `HookResult`，为 core 调度器提供可验证输入。
-- **当前进度**：已完成（2026-08-01）。已建立 11 个生命周期专用 Context、分型结果族、定义操作、消息操作、工具启停变化和六类专用 Patch；压缩前 Context 同时提供基础 ModelRequest、完整检查对象和请求，压缩后 Context 提供原消息与结果；`TURN_END` 仅允许 Continue，运行生命周期结果类型闭包不包含 AgentDefinition 或 Hook Binding 修改。
+- **当前进度**：已完成（2026-08-02）。已建立 11 个生命周期专用 Context、分型结果族、定义操作、消息操作、工具启停变化和六类专用 Patch；所有 Context 暴露当前不可变 HookBinding 供 Hook 读取自身 tools/options，`PreToolCallContext` 额外携带可空 typed HumanSubmission；压缩前后 Context 信息完整，`TURN_END` 仅允许 Continue，运行生命周期结果类型闭包不包含 AgentDefinition 或 Hook Binding 修改。
 - **设计依据**：设计文档第 8.1～8.5 节；架构文档第 7 节。
 - **涉及范围**：HookPoint、HookBinding、各 HookContextView、LifecycleHookResult、结果族、动作 record、HookMutations、MessageOperation、ToolActivationDelta、专用 Patch。
 - **前置依赖**：COM-01。

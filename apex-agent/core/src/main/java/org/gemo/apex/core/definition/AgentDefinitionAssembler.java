@@ -66,7 +66,7 @@ public final class AgentDefinitionAssembler {
         for (HookBinding binding : snapshot) {
             LifecycleHook hook = ports.hookResolver().resolve(HookPoint.AGENT_BUILD, binding.name());
             try {
-                Object raw = hook.apply(new AgentBuildContext(sessionId,
+                Object raw = hook.apply(new AgentBuildContext(sessionId, binding,
                         new AgentDefinitionSnapshot(materialize(source, draft))));
                 if (!(raw instanceof ContinueAgentBuild result)) {
                     throw new HookContractException("AGENT_BUILD 返回了非法结果: " + binding.id());

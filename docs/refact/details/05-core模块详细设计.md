@@ -135,11 +135,11 @@ final class ApexAgentFactory {
 
 ```text
 select enabled bindings
-  -> tool matcher when applicable
+  -> exact-or-* tool matcher when applicable
   -> sort(order,id)
   -> skip requested IDs only for PRE_TOOL_CALL resume
   -> resolve hook
-  -> build immutable context view
+  -> build immutable context view with current binding
   -> invoke
   -> validate complete result
   -> apply on temporary aggregate
@@ -171,6 +171,8 @@ final class LifecycleDispatcher {
 - 只有 PRE_TOOL_CALL resume 可以传 skipped IDs；其他生命周期传非空集合即契约错误。
 - 只有 AGENT_BUILD dispatcher 接受 `AgentBuildHookResult`/`AgentDefinitionOperation`；其他点即使通过原始类型或自定义实现绕过编译约束也必须防御性拒绝，不能把定义变化混入 `HookMutations`。
 - PRE_TOOL_CALL 每次调用具体 Binding 前由 core IdGenerator 生成 `proposedInterventionId` 放入只读Context；当前 ToolCall的 `invocationId` 在开始处理该调用时只生成一次并跨挂起恢复保留。
+- Hook Binding 的 tools 支持精确名称和 `*` glob；定义校验阶段要求每个非空 pattern 至少匹配一个 availableTool，运行分发时按当前 ToolCall 过滤。
+- 恢复重建出的 typed `HumanSubmission` 同时进入 `PreToolCallContext` 与本地 `ToolExecutionContext`，确保 Hook 防重复挂起与真实工具读取的是同一提交对象。
 - Hook 审计只写日志/trace/metrics；不保存通用执行列表。
 
 ### 异常处理

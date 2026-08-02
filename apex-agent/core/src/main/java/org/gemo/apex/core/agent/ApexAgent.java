@@ -35,7 +35,8 @@ public final class ApexAgent {
     public AgentRunOutcome run() {
         try {
             LifecycleDispatchOutcome turnStart = dispatcher.dispatch(HookPoint.TURN_START, context,
-                    current -> new TurnStartContext(current.snapshot().sessionId(), current.snapshot()), Set.of());
+                    (current, binding) -> new TurnStartContext(current.snapshot().sessionId(), binding,
+                            current.snapshot()), Set.of());
             if (turnStart instanceof LifecycleDispatchOutcome.EndTurn end) {
                 return finalizeTurn(end.reason(), true, false);
             }
@@ -44,7 +45,7 @@ public final class ApexAgent {
                 context.startIteration(iterationNo);
                 context.save();
                 LifecycleDispatchOutcome iterationStart = dispatcher.dispatch(HookPoint.ITERATION_START, context,
-                        current -> new IterationStartContext(current.snapshot().sessionId(),
+                        (current, binding) -> new IterationStartContext(current.snapshot().sessionId(), binding,
                                 current.snapshot().activeTurn()), Set.of());
                 if (iterationStart instanceof LifecycleDispatchOutcome.EndTurn end) {
                     return finalizeTurn(end.reason(), true, true);
@@ -123,7 +124,7 @@ public final class ApexAgent {
             }
         }
         dispatcher.dispatch(HookPoint.TURN_END, context,
-                current -> new TurnEndContext(current.snapshot().sessionId(),
+                (current, binding) -> new TurnEndContext(current.snapshot().sessionId(), binding,
                         current.snapshot().activeTurn()), Set.of());
         context.completeTurn(endedByHook);
         context.save();
@@ -132,7 +133,7 @@ public final class ApexAgent {
 
     private LifecycleDispatchOutcome dispatchIterationEnd() {
         return dispatcher.dispatch(HookPoint.ITERATION_END, context,
-                current -> new IterationEndContext(current.snapshot().sessionId(),
+                (current, binding) -> new IterationEndContext(current.snapshot().sessionId(), binding,
                         current.snapshot().activeTurn().currentIteration()), Set.of());
     }
 

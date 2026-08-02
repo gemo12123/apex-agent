@@ -62,7 +62,7 @@ public final class ModelRequestPreparer {
         context.compactionRequest(new ConversationCompactionRequest(context.snapshot().sessionId(),
                 compactionId, window.messages(), retained, Map.of()));
         LifecycleDispatchOutcome pre = dispatcher.dispatch(HookPoint.PRE_MESSAGE_COMPRESSION, context,
-                current -> new PreMessageCompressionContext(current.snapshot().sessionId(),
+                (current, binding) -> new PreMessageCompressionContext(current.snapshot().sessionId(), binding,
                         current.modelRequest(), check, current.compactionRequest()), Set.of());
         if (pre instanceof LifecycleDispatchOutcome.EndTurn end) {
             return new PreparationOutcome.EndTurn(end.reason());
@@ -70,7 +70,7 @@ public final class ModelRequestPreparer {
         context.ports().cancellationToken().throwIfCancellationRequested();
         context.compactionResult(context.ports().compactor().compact(context.compactionRequest()));
         LifecycleDispatchOutcome post = dispatcher.dispatch(HookPoint.POST_MESSAGE_COMPRESSION, context,
-                current -> new PostMessageCompressionContext(current.snapshot().sessionId(),
+                (current, binding) -> new PostMessageCompressionContext(current.snapshot().sessionId(), binding,
                         window.messages(), current.compactionResult()), Set.of());
         commit(context, window, context.compactionResult());
         if (post instanceof LifecycleDispatchOutcome.EndTurn end) {

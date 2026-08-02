@@ -15,21 +15,22 @@ import org.gemo.apex.core.exception.HookContractException;
 import org.gemo.apex.extension.hook.LifecycleHook;
 
 import java.util.*;
-import java.util.function.Function;
+import java.util.function.BiFunction;
 
 public final class LifecycleDispatcher {
     private static final System.Logger LOG = System.getLogger(LifecycleDispatcher.class.getName());
+    private final ToolBindingMatcher toolMatcher = new ToolBindingMatcher();
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     public LifecycleDispatchOutcome dispatch(HookPoint point, ApexAgentContext context,
-                                             Function<ApexAgentContext, HookContextView> contextFactory,
+                                             BiFunction<ApexAgentContext, HookBinding, HookContextView> contextFactory,
                                              Set<String> skippedBindingIds) {
         if (point != HookPoint.PRE_TOOL_CALL && !skippedBindingIds.isEmpty()) {
             throw new HookContractException("只有 PRE_TOOL_CALL 恢复允许跳过 Hook");
         }
         List<HookBinding> bindings = context.definition().definition().hooks().getOrDefault(point, List.of())
                 .stream().filter(HookBinding::enabled)
-                .filter(binding -> matchesTool(binding, context.toolCall()))
+                .filter(binding -> !isToolPoint(point) || toolMatcher.matches(binding, context.toolCall()))
                 .filter(binding -> !skippedBindingIds.contains(binding.id()))
                 .sorted(Comparator.comparingInt(HookBinding::order).thenComparing(HookBinding::id)).toList();
         for (HookBinding binding : bindings) {
@@ -39,7 +40,7 @@ public final class LifecycleDispatcher {
             }
             Object raw;
             try {
-                HookContextView view = contextFactory.apply(context);
+                HookContextView view = contextFactory.apply(context, binding);
                 if (hook.descriptor().contextType() != view.getClass()) {
                     throw new HookContractException("Hook Context 类型不匹配: " + binding.id());
                 }
@@ -60,8 +61,8 @@ public final class LifecycleDispatcher {
         return new LifecycleDispatchOutcome.Continued();
     }
 
-    private boolean matchesTool(HookBinding binding, ToolCall call) {
-        return binding.tools().isEmpty() || call == null || binding.tools().contains(call.name());
+    private boolean isToolPoint(HookPoint point) {
+        return point == HookPoint.PRE_TOOL_CALL || point == HookPoint.POST_TOOL_CALL;
     }
 
     private LifecycleDispatchOutcome validateAndApply(HookPoint point, ApexAgentContext context, Object result) {

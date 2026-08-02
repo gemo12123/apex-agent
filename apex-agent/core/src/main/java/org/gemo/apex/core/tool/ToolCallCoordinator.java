@@ -39,8 +39,9 @@ public final class ToolCallCoordinator {
             try {
                 context.ports().cancellationToken().throwIfCancellationRequested();
                 LifecycleDispatchOutcome pre = dispatcher.dispatch(HookPoint.PRE_TOOL_CALL, context,
-                        current -> new PreToolCallContext(current.snapshot().sessionId(), current.toolCall(),
-                                invocationId, current.ports().idGenerator().newConfirmationId()), Set.of());
+                        (current, binding) -> new PreToolCallContext(current.snapshot().sessionId(), binding,
+                                current.toolCall(), invocationId,
+                                current.ports().idGenerator().newConfirmationId(), current.humanSubmission()), Set.of());
                 if (pre instanceof LifecycleDispatchOutcome.HumanIntervention) {
                     throw new SessionStateException("人工介入挂起需等待 CORE-07A 与 KIT-01/02 联调");
                 }
@@ -59,8 +60,8 @@ public final class ToolCallCoordinator {
                 }
                 context.toolResult(result);
                 LifecycleDispatchOutcome post = dispatcher.dispatch(HookPoint.POST_TOOL_CALL, context,
-                        current -> new PostToolCallContext(current.snapshot().sessionId(), current.toolCall(),
-                                current.toolResult()), Set.of());
+                        (current, binding) -> new PostToolCallContext(current.snapshot().sessionId(), binding,
+                                current.toolCall(), current.toolResult()), Set.of());
                 result = context.toolResult();
                 validateAssociation(context.toolCall(), result);
                 commitOne(context, result);
@@ -96,7 +97,8 @@ public final class ToolCallCoordinator {
         }
         ToolExecutionContext executionContext = new ToolExecutionContext(context.snapshot().sessionId(),
                 context.snapshot().currentTurnNo(), context.snapshot().activeTurn().currentIteration().iterationNo(),
-                context.snapshot().userId(), null, null, context.ports().cancellationToken(),
+                context.snapshot().userId(), context.humanSubmission(), null,
+                context.ports().cancellationToken(),
                 Map.of("invocationId", invocationId));
         try {
             context.ports().cancellationToken().throwIfCancellationRequested();

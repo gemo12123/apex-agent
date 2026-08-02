@@ -7,6 +7,7 @@ import org.gemo.apex.common.conversation.ConversationCompactionResult;
 import org.gemo.apex.common.execution.IterationStatus;
 import org.gemo.apex.common.execution.SessionStatus;
 import org.gemo.apex.common.execution.TurnStatus;
+import org.gemo.apex.common.intervention.HumanSubmission;
 import org.gemo.apex.common.model.ModelRequest;
 import org.gemo.apex.common.model.ModelResponse;
 import org.gemo.apex.common.snapshot.*;
@@ -29,13 +30,16 @@ public final class ApexAgentContext {
     private ToolResult toolResult;
     private ConversationCompactionRequest compactionRequest;
     private ConversationCompactionResult compactionResult;
+    private final HumanSubmission humanSubmission;
 
     ApexAgentContext(AgentPorts ports, AgentDefinitionSnapshot definition,
-                     ToolCatalog toolCatalog, SessionSnapshot snapshot) {
+                     ToolCatalog toolCatalog, SessionSnapshot snapshot,
+                     HumanSubmission humanSubmission) {
         this.ports = ports;
         this.definition = definition;
         this.toolCatalog = toolCatalog;
         this.snapshot = snapshot;
+        this.humanSubmission = humanSubmission;
     }
 
     public AgentPorts ports() { return ports; }
@@ -54,6 +58,7 @@ public final class ApexAgentContext {
     public void compactionRequest(ConversationCompactionRequest value) { compactionRequest = value; }
     public ConversationCompactionResult compactionResult() { return compactionResult; }
     public void compactionResult(ConversationCompactionResult value) { compactionResult = value; }
+    public HumanSubmission humanSubmission() { return humanSubmission; }
 
     public void enableTools(Set<String> enable, Set<String> disable) {
         Set<String> next = new LinkedHashSet<>(snapshot.enabledTools());

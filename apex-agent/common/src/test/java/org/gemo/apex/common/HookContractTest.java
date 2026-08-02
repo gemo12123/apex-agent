@@ -1,9 +1,12 @@
 package org.gemo.apex.common;
 
 import org.gemo.apex.common.agent.AgentDefinitionOperation;
+import org.gemo.apex.common.hook.HookBinding;
 import org.gemo.apex.common.hook.HookPoint;
+import org.gemo.apex.common.hook.context.PreToolCallContext;
 import org.gemo.apex.common.hook.operation.*;
 import org.gemo.apex.common.hook.result.*;
+import org.gemo.apex.common.intervention.QuestionSubmission;
 import org.gemo.apex.common.tool.ToolResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -80,6 +83,23 @@ class HookContractTest {
         assertThrows(IllegalArgumentException.class, () -> new RemoveMessage("remove", -1));
         assertThrows(IllegalArgumentException.class, () -> new BlockTool(" "));
         assertThrows(IllegalArgumentException.class, () -> new ReturnToolResult(null));
+    }
+
+    @Test
+    void 工具调用上下文应暴露当前Binding与人工提交() {
+        HookBinding binding = new HookBinding("confirm", "confirm", 10, true,
+                List.of("search*"), Map.of("title", "确认搜索"));
+        QuestionSubmission submission = new QuestionSubmission("call-1",
+                Map.of("0", "继续"));
+
+        PreToolCallContext context = new PreToolCallContext("session-1", binding,
+                CommonFixtures.toolCall(), "invocation-1", "confirmation-1", submission);
+
+        assertEquals(binding, context.binding());
+        assertEquals("确认搜索", context.binding().options().get("title"));
+        assertEquals(submission, context.humanSubmission());
+        assertThrows(IllegalArgumentException.class, () -> new HookBinding(
+                "invalid", "invalid", 0, true, List.of(" "), Map.of()));
     }
 
     @Test

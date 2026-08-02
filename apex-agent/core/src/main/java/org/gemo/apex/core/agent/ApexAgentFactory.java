@@ -41,7 +41,8 @@ public final class ApexAgentFactory {
         ports.conversationRepository().append(List.of(user));
         ports.cancellationToken().throwIfCancellationRequested();
         ports.sessionRepository().save(snapshot);
-        return new ApexAgent(new ApexAgentContext(ports, assembly.definition(), assembly.toolCatalog(), snapshot));
+        return new ApexAgent(new ApexAgentContext(ports, assembly.definition(), assembly.toolCatalog(), snapshot,
+                null));
     }
 
     public ApexAgent createResumed(HumanResponseCommand command, AgentPorts ports) {
@@ -63,7 +64,8 @@ public final class ApexAgentFactory {
                 .containsAll(recovery.availableTools())) {
             throw new InvalidAgentDefinitionException("恢复快照中的工具无法解析");
         }
-        return new ApexAgent(new ApexAgentContext(ports, new AgentDefinitionSnapshot(definition), catalog, snapshot));
+        return new ApexAgent(new ApexAgentContext(ports, new AgentDefinitionSnapshot(definition), catalog, snapshot,
+                null));
     }
 
     private void validateNewOwner(AgentRequest request, SessionSnapshot snapshot) {

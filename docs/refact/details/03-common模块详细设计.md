@@ -102,7 +102,7 @@ record SubAgentCallTrace(String traceId, List<String> agentKeys, int maxDepth) {
 ### 核心流程
 
 1. 定义 HookPoint 与 `HookContextView`、`LifecycleHookResult` 标记接口。
-2. 为每个生命周期建立专用 Context record，只暴露该阶段允许读取的快照。
+2. 为每个生命周期建立专用 Context record，只暴露当前 `HookBinding` 及该阶段允许读取的快照；Hook 通过 Binding 读取自身 tools/options，不依赖运行时私有配置对象。
 3. 为每个动作建立独立 record，让 Java 类型表达流控，而非再加一个万能 action enum。
 4. Operation/Patch 构造时做局部校验；整体状态校验仍由 core 原子应用器完成。
 5. 提供 `HookTypeDescriptor`，解决运行注册表在泛型擦除后无法可靠判断 Context/Result 类型的问题。
@@ -127,7 +127,7 @@ record ToolActivationDelta(Set<String> enable, Set<String> disable) {}
 
 专用 Patch：`ToolCallPatch`、`ToolResultPatch`、`ModelRequestPatch`、`ModelResponsePatch`、`ConversationCompactionRequestPatch`、`ConversationCompactionResultPatch`。Patch 只携带允许修改字段；例如 ToolCallPatch 只允许替换 arguments，不允许改 toolCallId/name。
 
-`PreToolCallContext` 还包含当前 ToolCall 的稳定 `invocationId` 和本次 Binding 调用预分配的 `proposedInterventionId`。Hook 若请求确认，必须使用后者作为 confirmationId；这样 kit 不依赖 UUID/IdGenerator，core 仍能在测试中提供确定性 ID。未请求介入时该预分配 ID 可以废弃。
+`PreToolCallContext` 还包含当前 ToolCall 的稳定 `invocationId`、本次 Binding 调用预分配的 `proposedInterventionId` 和可空 `humanSubmission`。Hook 若请求确认，必须使用预分配 ID 作为 confirmationId；恢复误重入时可通过 typed submission 返回 Continue，避免重复挂起。这样 kit 不依赖 UUID/IdGenerator，core 仍能在测试中提供确定性 ID。未请求介入时该预分配 ID 可以废弃。
 
 结果族和合法动作严格采用跨模块契约表。`TurnEndHookResult` 只有 `ContinueTurnEnd`。
 

@@ -1,13 +1,13 @@
 # core 模块任务
 
 > 模块职责：实现 Agent 定义构造、Session/Turn/Iteration、生命周期、唯一 ReAct 循环、工具编排、压缩门和恢复状态机
-> 当前总体进度：受阻（2026-08-01）；CORE-01～CORE-06 已完成并通过全 Fake 专项验证，CORE-07A～CORE-07C 等待尚未落地的 KIT-01/02 介入请求接口与行为契约
+> 当前总体进度：受阻（2026-08-02）；CORE-01～CORE-06 已完成并通过 24 项全 Fake 专项验证，生命周期 Binding/options、`*` glob 与 typed submission 传递缺口已修正；CORE-07A～CORE-07C 仍等待尚未落地的 KIT-01/02 介入实现
 
 ## CORE-01 实现 AgentDefinitionAssembler 与 ApexAgentFactory
 
 - **任务名称**：实现 Agent 定义构造、权威校验、冻结和 NEW/恢复工厂分流。
 - **任务目标**：把 AGENT_BUILD、定义级校验和不可变快照冻结收敛到 core，runtime 只提供端口并调用入口。
-- **当前进度**：已完成（2026-08-01）。已实现唯一 Assembler/Validator、NEW/恢复工厂分流、AGENT_BUILD 进入点快照、不可用新绑定拒绝与旧绑定历史迁移；恢复路径不访问 DefinitionProvider 或 AGENT_BUILD。
+- **当前进度**：已完成（2026-08-02）。已实现唯一 Assembler/Validator、NEW/恢复工厂分流、AGENT_BUILD 进入点快照、不可用新绑定拒绝与旧绑定历史迁移；Hook tools 定义校验支持精确名称和 `*` glob；恢复路径不访问 DefinitionProvider 或 AGENT_BUILD。
 - **设计依据**：设计文档第 2.30、2.32、5.4、7.3 节；架构文档第 5.4、6.2、8.1 节。
 - **涉及范围**：core `AgentDefinitionAssembler`、定义校验器、`ApexAgentFactory.createNew/createResumed`、AgentDefinitionSnapshot 恢复投影。
 - **前置依赖**：COM-01～03、EXT-01～02。
@@ -32,17 +32,18 @@
 
 - **任务名称**：统一生命周期分发、排序、类型防御、异常处理和流控。
 - **任务目标**：用一套 core 调度器替代现有重复 Hook Runtime，并严格执行各生命周期允许的结果族与动作。
-- **当前进度**：已完成（2026-08-01）。已实现统一 LifecycleDispatcher，覆盖 11 个生命周期的排序、descriptor/结果族校验、普通异常跳过、原子 mutation 应用与 END_TURN 流控。
+- **当前进度**：已完成（2026-08-02）。已实现统一 LifecycleDispatcher，覆盖 11 个生命周期的排序、descriptor/结果族校验、普通异常跳过、原子 mutation 应用与 END_TURN 流控；调度器按 Binding 构造上下文并支持精确/`*` 工具匹配，typed HumanSubmission 同时传给 PRE_TOOL_CALL 与真实工具执行上下文。
 - **设计依据**：设计文档第 8 节、第 21.2 节；架构文档第 7 节。
 - **涉及范围**：core 生命周期调度器、Hook Binding 排序、上下文视图构造、结果校验/原子应用、错误与审计日志。
 - **前置依赖**：CORE-01、COM-02、EXT-02。
 - **具体执行内容**：
   1. 支持 AGENT_BUILD、TURN_START、ITERATION_START、PRE/POST_MESSAGE_COMPRESSION、PRE/POST_MODEL_CALL、PRE/POST_TOOL_CALL、ITERATION_END、TURN_END。
   2. 按 Hook Binding order 和稳定 ID 分发，运行时再次校验 Context/Result 类型。
-  3. 先验证整个 record，再原子应用消息、工具、参数、结果或压缩修改；非 AGENT_BUILD 结果一律不能携带定义/Hook 链修改。
-  4. 所有 Hook 执行异常统一记录 warn，丢弃当前 Hook 的全部修改并继续后续 Hook；不提供 `FAIL_FAST` 配置。
-  5. 实现 END_TURN 的非递归结束语义，禁止 SKIP_ITERATION 和非法动作。
-  6. 审计写日志/Tracing/Metrics，不写通用 Hook 执行历史到快照。
+  3. 为每次调用构造携带当前 Binding 的只读 Context；工具 Binding 支持精确名称与 `*` glob。
+  4. 先验证整个 record，再原子应用消息、工具、参数、结果或压缩修改；非 AGENT_BUILD 结果一律不能携带定义/Hook 链修改。
+  5. 所有 Hook 执行异常统一记录 warn，丢弃当前 Hook 的全部修改并继续后续 Hook；不提供 `FAIL_FAST` 配置。
+  6. 实现 END_TURN 的非递归结束语义，禁止 SKIP_ITERATION 和非法动作。
+  7. 审计写日志/Tracing/Metrics，不写通用 Hook 执行历史到快照。
 - **预期产出**：单一生命周期调度器、动作处理器、结构化日志和完整单元测试。
 - **验收标准**：
   - 11 个生命周期的顺序和条件执行可由 Fake Hook 精确断言。

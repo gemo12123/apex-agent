@@ -33,7 +33,8 @@ public final class ModelStepExecutor {
     public ModelStepOutcome execute(ApexAgentContext context, ModelRequest base) {
         context.modelRequest(base);
         LifecycleDispatchOutcome pre = dispatcher.dispatch(HookPoint.PRE_MODEL_CALL, context,
-                current -> new PreModelCallContext(current.snapshot().sessionId(), current.modelRequest()), Set.of());
+                (current, binding) -> new PreModelCallContext(current.snapshot().sessionId(), binding,
+                        current.modelRequest()), Set.of());
         if (pre instanceof LifecycleDispatchOutcome.EndTurn end) return new ModelStepOutcome.EndTurn(end.reason());
         validateHardLimit(context.modelRequest(), context.ports().modelRequestHardLimit());
         String contentId = context.ports().idGenerator().newInvocationId();
@@ -53,7 +54,8 @@ public final class ModelStepExecutor {
         context.ports().cancellationToken().throwIfCancellationRequested();
         context.modelResponse(response);
         LifecycleDispatchOutcome post = dispatcher.dispatch(HookPoint.POST_MODEL_CALL, context,
-                current -> new PostModelCallContext(current.snapshot().sessionId(), current.modelResponse()), Set.of());
+                (current, binding) -> new PostModelCallContext(current.snapshot().sessionId(), binding,
+                        current.modelResponse()), Set.of());
         if (post instanceof LifecycleDispatchOutcome.EndTurn end) return new ModelStepOutcome.EndTurn(end.reason());
         commitAssistant(context);
         return context.modelResponse().toolCalls().isEmpty()

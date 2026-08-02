@@ -8,6 +8,7 @@ import org.gemo.apex.common.hook.context.*;
 import org.gemo.apex.common.hook.result.*;
 import org.gemo.apex.core.agent.AgentPorts;
 import org.gemo.apex.core.exception.InvalidAgentDefinitionException;
+import org.gemo.apex.core.lifecycle.ToolBindingMatcher;
 import org.gemo.apex.core.tool.ToolCatalog;
 import org.gemo.apex.extension.hook.LifecycleHook;
 
@@ -16,6 +17,7 @@ import java.util.Map;
 import java.util.Set;
 
 public final class AgentDefinitionValidator {
+    private final ToolBindingMatcher toolMatcher = new ToolBindingMatcher();
     private static final Map<HookPoint, Class<? extends HookContextView>> CONTEXT_TYPES = Map.ofEntries(
             Map.entry(HookPoint.AGENT_BUILD, AgentBuildContext.class),
             Map.entry(HookPoint.TURN_START, TurnStartContext.class),
@@ -71,7 +73,8 @@ public final class AgentDefinitionValidator {
                 if (!ids.add(binding.id())) {
                     throw new InvalidAgentDefinitionException(point + " Hook ID 重复: " + binding.id());
                 }
-                if (!definition.tools().availableTools().containsAll(binding.tools())) {
+                if (binding.tools().stream().anyMatch(pattern -> definition.tools().availableTools().stream()
+                        .noneMatch(toolName -> toolMatcher.matches(pattern, toolName)))) {
                     throw new InvalidAgentDefinitionException("Hook 工具匹配超出 availableTools: " + binding.id());
                 }
                 LifecycleHook<?, ?> hook = ports.hookResolver().resolve(point, binding.name());

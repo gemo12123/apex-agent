@@ -1,13 +1,21 @@
 package org.gemo.apex.core.agent;
 
+import org.gemo.apex.common.agent.AgentDefinitionSnapshot;
 import org.gemo.apex.common.execution.AgentRequest;
 import org.gemo.apex.common.hook.*;
 import org.gemo.apex.common.hook.context.*;
 import org.gemo.apex.common.hook.operation.*;
 import org.gemo.apex.common.hook.result.*;
+import org.gemo.apex.common.intervention.QuestionSubmission;
 import org.gemo.apex.common.model.ModelResponse;
 import org.gemo.apex.common.tool.ToolCall;
 import org.gemo.apex.common.tool.ToolResult;
+import org.gemo.apex.core.event.AgentEventEmitter;
+import org.gemo.apex.core.event.AgentEventFactory;
+import org.gemo.apex.core.lifecycle.LifecycleDispatcher;
+import org.gemo.apex.core.tool.ToolCallCoordinator;
+import org.gemo.apex.core.tool.ToolCatalog;
+import org.gemo.apex.core.tool.ToolResultFactory;
 import org.gemo.apex.extension.hook.LifecycleHook;
 import org.junit.jupiter.api.Test;
 
@@ -92,6 +100,70 @@ class LifecycleCoverageTest {
         assertEquals(0, fixture.modelCalls);
     }
 
+    @Test
+    void 工具Binding应支持精确与星号匹配并向Hook暴露自身配置() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        List<String> invoked = new ArrayList<>();
+        fixture.hooks.put("capture", preToolHook(context -> {
+            invoked.add(context.binding().id() + ":" + context.binding().options().get("label"));
+            return new ContinuePreToolCall(HookMutations.none(),
+                    new ToolCallPatch(context.toolCall().arguments()));
+        }));
+        fixture.tool("search_web", (call, context, observer) ->
+                new ToolResult(call.toolCallId(), call.name(), "ok", Map.of()));
+        fixture.tool("lookup", (call, context, observer) ->
+                new ToolResult(call.toolCallId(), call.name(), "unused", Map.of()));
+        fixture.definition = fixture.definition(Map.of(HookPoint.PRE_TOOL_CALL, List.of(
+                new HookBinding("glob", "capture", 0, true, List.of("search_*"), Map.of("label", "glob")),
+                new HookBinding("exact", "capture", 1, true, List.of("search_web"), Map.of("label", "exact")),
+                new HookBinding("other", "capture", 2, true, List.of("lookup"), Map.of("label", "other")),
+                new HookBinding("disabled", "capture", 3, false, List.of("*"), Map.of("label", "disabled")))),
+                Set.of("search_web", "lookup"), Set.of("search_web"));
+        fixture.modelResponses.add(new ModelResponse("", List.of(
+                new ToolCall("call-1", "search_web", 0, Map.of(), Map.of())), Map.of()));
+        fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
+
+        AgentRunOutcome outcome = new ApexAgentFactory().createNew(
+                new AgentRequest("session-1", "demo", "user-1", "你好"), fixture.ports()).run();
+
+        assertInstanceOf(AgentRunOutcome.Completed.class, outcome, outcome.toString());
+        assertEquals(List.of("glob:glob", "exact:exact"), invoked);
+    }
+
+    @Test
+    void 人工提交应同时传给PreToolHook和真实工具() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        QuestionSubmission submission = new QuestionSubmission("call-1", Map.of("0", "答案"));
+        List<Object> observed = new ArrayList<>();
+        fixture.hooks.put("ask-hook", preToolHook(context -> {
+            observed.add(context.humanSubmission());
+            return new ContinuePreToolCall(HookMutations.none(),
+                    new ToolCallPatch(context.toolCall().arguments()));
+        }));
+        fixture.tool("ask_human", (call, context, observer) -> {
+            observed.add(context.humanSubmission());
+            return new ToolResult(call.toolCallId(), call.name(), "ok", Map.of());
+        });
+        fixture.definition = fixture.definition(Map.of(HookPoint.PRE_TOOL_CALL, List.of(
+                new HookBinding("ask", "ask-hook", 0, true, List.of("ask_*"), Map.of()))),
+                Set.of("ask_human"), Set.of("ask_human"));
+        AgentPorts ports = fixture.ports();
+        ApexAgent fresh = new ApexAgentFactory().createNew(
+                new AgentRequest("session-1", "demo", "user-1", "你好"), ports);
+        ApexAgentContext context = new ApexAgentContext(ports, new AgentDefinitionSnapshot(fixture.definition),
+                new ToolCatalog(List.copyOf(fixture.tools.values())), fresh.snapshot(), submission);
+        context.startIteration(1);
+        AgentEventFactory events = new AgentEventFactory();
+        ToolCallCoordinator coordinator = new ToolCallCoordinator(new LifecycleDispatcher(),
+                new ToolResultFactory(), new AgentEventEmitter(ports.eventPublisher(), events));
+
+        var outcome = coordinator.process(context, List.of(
+                new ToolCall("call-1", "ask_human", 0, Map.of(), Map.of())));
+
+        assertInstanceOf(ToolCallCoordinator.ToolCallsOutcome.Completed.class, outcome);
+        assertEquals(List.of(submission, submission), observed);
+    }
+
     private LifecycleHook<TurnStartContext, LoopHookResult> loopHook(
             java.util.function.Function<TurnStartContext, LoopHookResult> function) {
         return new LifecycleHook<>() {
@@ -100,6 +172,19 @@ class LifecycleCoverageTest {
                         LoopHookResult.class);
             }
             @Override public LoopHookResult apply(TurnStartContext context) { return function.apply(context); }
+        };
+    }
+
+    private LifecycleHook<PreToolCallContext, PreToolCallHookResult> preToolHook(
+            java.util.function.Function<PreToolCallContext, PreToolCallHookResult> function) {
+        return new LifecycleHook<>() {
+            @Override public HookTypeDescriptor descriptor() {
+                return new HookTypeDescriptor(HookPoint.PRE_TOOL_CALL, PreToolCallContext.class,
+                        PreToolCallHookResult.class);
+            }
+            @Override public PreToolCallHookResult apply(PreToolCallContext context) {
+                return function.apply(context);
+            }
         };
     }
 

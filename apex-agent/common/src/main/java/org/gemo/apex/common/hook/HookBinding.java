@@ -13,7 +13,9 @@ public record HookBinding(String id, String name, int order, boolean enabled,
         id = required(id, "id");
         name = required(name, "name");
         nonNegative(order, "order");
-        tools = immutableList(tools, "tools");
+        tools = immutableList(tools, "tools").stream()
+                .map(tool -> required(tool, "tools"))
+                .toList();
         options = DomainValues.jsonMap(options, "options");
     }
 }
