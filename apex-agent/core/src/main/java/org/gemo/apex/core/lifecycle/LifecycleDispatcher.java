@@ -16,6 +16,7 @@ import org.gemo.apex.extension.hook.LifecycleHook;
 
 import java.util.*;
 import java.util.function.BiFunction;
+import java.util.function.Consumer;
 
 public final class LifecycleDispatcher {
     private static final System.Logger LOG = System.getLogger(LifecycleDispatcher.class.getName());
@@ -25,6 +26,22 @@ public final class LifecycleDispatcher {
     public LifecycleDispatchOutcome dispatch(HookPoint point, ApexAgentContext context,
                                              BiFunction<ApexAgentContext, HookBinding, HookContextView> contextFactory,
                                              Set<String> skippedBindingIds) {
+        return dispatch(point, context, contextFactory, skippedBindingIds, ignored -> {});
+    }
+
+    public PreToolDispatchOutcome dispatchPreTool(ApexAgentContext context,
+                                                  BiFunction<ApexAgentContext, HookBinding, HookContextView> contextFactory,
+                                                  Collection<String> executedBindingIds) {
+        List<String> completed = new ArrayList<>(executedBindingIds);
+        LifecycleDispatchOutcome outcome = dispatch(HookPoint.PRE_TOOL_CALL, context, contextFactory,
+                Set.copyOf(executedBindingIds), binding -> completed.add(binding.id()));
+        return new PreToolDispatchOutcome(outcome, completed);
+    }
+
+    private LifecycleDispatchOutcome dispatch(HookPoint point, ApexAgentContext context,
+                                              BiFunction<ApexAgentContext, HookBinding, HookContextView> contextFactory,
+                                              Set<String> skippedBindingIds,
+                                              Consumer<HookBinding> completedBinding) {
         if (point != HookPoint.PRE_TOOL_CALL && !skippedBindingIds.isEmpty()) {
             throw new HookContractException("只有 PRE_TOOL_CALL 恢复允许跳过 Hook");
         }
@@ -56,6 +73,7 @@ public final class LifecycleDispatcher {
                 throw new HookContractException("Hook Result 类型不匹配: " + binding.id());
             }
             LifecycleDispatchOutcome outcome = validateAndApply(point, context, raw);
+            completedBinding.accept(binding);
             if (!(outcome instanceof LifecycleDispatchOutcome.Continued)) return outcome;
         }
         return new LifecycleDispatchOutcome.Continued();

@@ -9,6 +9,8 @@ import org.gemo.apex.core.event.AgentEventFactory;
 import org.gemo.apex.core.lifecycle.LifecycleDispatchOutcome;
 import org.gemo.apex.core.lifecycle.LifecycleDispatcher;
 import org.gemo.apex.core.model.ModelStepExecutor;
+import org.gemo.apex.core.exception.SuspensionEventPublishException;
+import org.gemo.apex.core.exception.ResumePersistenceException;
 import org.gemo.apex.core.tool.ToolCallCoordinator;
 import org.gemo.apex.core.tool.ToolResultFactory;
 
@@ -29,18 +31,40 @@ public final class ApexAgent {
         this.emitter = new AgentEventEmitter(context.ports().eventPublisher(), eventFactory);
         this.preparer = new ModelRequestPreparer(dispatcher);
         this.modelStep = new ModelStepExecutor(dispatcher, emitter, eventFactory);
-        this.tools = new ToolCallCoordinator(dispatcher, new ToolResultFactory(), emitter);
+        this.tools = new ToolCallCoordinator(dispatcher, new ToolResultFactory(), emitter, eventFactory);
     }
 
     public AgentRunOutcome run() {
         try {
-            LifecycleDispatchOutcome turnStart = dispatcher.dispatch(HookPoint.TURN_START, context,
-                    (current, binding) -> new TurnStartContext(current.snapshot().sessionId(), binding,
-                            current.snapshot()), Set.of());
-            if (turnStart instanceof LifecycleDispatchOutcome.EndTurn end) {
-                return finalizeTurn(end.reason(), true, false);
+            int firstIteration = 1;
+            if (context.humanSubmission() != null) {
+                ToolCallCoordinator.ToolCallsOutcome resumed = tools.resume(context);
+                if (resumed instanceof ToolCallCoordinator.ToolCallsOutcome.Suspended) {
+                    return new AgentRunOutcome.Suspended();
+                }
+                if (resumed instanceof ToolCallCoordinator.ToolCallsOutcome.Cancelled) {
+                    return new AgentRunOutcome.Cancelled();
+                }
+                if (resumed instanceof ToolCallCoordinator.ToolCallsOutcome.EndTurn) {
+                    return finalizeTurn("resume-hook", true, true);
+                }
+                int currentIteration = context.snapshot().activeTurn().currentIteration().iterationNo();
+                context.completeIteration();
+                LifecycleDispatchOutcome iterationEnd = dispatchIterationEnd();
+                context.save();
+                if (iterationEnd instanceof LifecycleDispatchOutcome.EndTurn end) {
+                    return finalizeTurn(end.reason(), true, false);
+                }
+                firstIteration = currentIteration + 1;
+            } else {
+                LifecycleDispatchOutcome turnStart = dispatcher.dispatch(HookPoint.TURN_START, context,
+                        (current, binding) -> new TurnStartContext(current.snapshot().sessionId(), binding,
+                                current.snapshot()), Set.of());
+                if (turnStart instanceof LifecycleDispatchOutcome.EndTurn end) {
+                    return finalizeTurn(end.reason(), true, false);
+                }
             }
-            for (int iterationNo = 1; iterationNo <= context.ports().maxIterations(); iterationNo++) {
+            for (int iterationNo = firstIteration; iterationNo <= context.ports().maxIterations(); iterationNo++) {
                 context.ports().cancellationToken().throwIfCancellationRequested();
                 context.startIteration(iterationNo);
                 context.save();
@@ -86,6 +110,8 @@ public final class ApexAgent {
                 }
             }
             throw new IllegalStateException("ReAct 循环未在最大轮次内收口");
+        } catch (SuspensionEventPublishException | ResumePersistenceException error) {
+            return new AgentRunOutcome.Failed(error);
         } catch (CancellationRequestedException cancellation) {
             context.cancel();
             bestEffortSave(cancellation);

@@ -155,7 +155,7 @@ class LifecycleCoverageTest {
         context.startIteration(1);
         AgentEventFactory events = new AgentEventFactory();
         ToolCallCoordinator coordinator = new ToolCallCoordinator(new LifecycleDispatcher(),
-                new ToolResultFactory(), new AgentEventEmitter(ports.eventPublisher(), events));
+                new ToolResultFactory(), new AgentEventEmitter(ports.eventPublisher(), events), events);
 
         var outcome = coordinator.process(context, List.of(
                 new ToolCall("call-1", "ask_human", 0, Map.of(), Map.of())));

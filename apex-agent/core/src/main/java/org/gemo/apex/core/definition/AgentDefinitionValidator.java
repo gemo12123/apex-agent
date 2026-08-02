@@ -66,6 +66,10 @@ public final class AgentDefinitionValidator {
         validateBindings(definition, ports, definition.hooks().keySet());
     }
 
+    public void validateRecoveryBindings(AgentDefinition definition, AgentPorts ports) {
+        validateBindings(definition, ports, definition.hooks().keySet());
+    }
+
     private void validateBindings(AgentDefinition definition, AgentPorts ports, Set<HookPoint> points) {
         for (HookPoint point : points) {
             Set<String> ids = new HashSet<>();

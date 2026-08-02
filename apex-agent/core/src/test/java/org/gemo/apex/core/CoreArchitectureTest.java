@@ -24,7 +24,7 @@ class CoreArchitectureTest {
     @Test
     void core只有一处业务迭代循环且固定文案只归ToolResultFactory所有() throws IOException {
         String source = readJava(Path.of("src/main/java"));
-        assertEquals(1, occurrences(source, "for (int iterationNo = 1"));
+        assertEquals(1, occurrences(source, "for (int iterationNo = firstIteration"));
         assertFalse(source.contains("PlanExecutor"));
         assertFalse(source.contains("StageToolResolver"));
         assertEquals(1, occurrences(source, "用户拒绝执行"));

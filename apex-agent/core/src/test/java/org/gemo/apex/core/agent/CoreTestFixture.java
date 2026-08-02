@@ -36,6 +36,8 @@ final class CoreTestFixture {
     int modelCalls;
     int toolCalls;
     RuntimeException modelFailure;
+    boolean failSuspensionSave;
+    int remainingSessionSaveFailures;
 
     CoreTestFixture() {
         definition = definition(Map.of(), Set.of(), Set.of());
@@ -82,12 +84,25 @@ final class CoreTestFixture {
                         calls.add("session.load"); return Optional.ofNullable(sessions.get(sessionId));
                     }
                     @Override public void save(SessionSnapshot snapshot) {
+                        if (failSuspensionSave
+                                && snapshot.status() == org.gemo.apex.common.execution.SessionStatus.HUMAN_IN_THE_LOOP) {
+                            throw new IllegalStateException("suspension save failed");
+                        }
+                        if (remainingSessionSaveFailures > 0) {
+                            remainingSessionSaveFailures--;
+                            throw new IllegalStateException("session save failed");
+                        }
                         calls.add("session.save"); sessions.put(snapshot.sessionId(), snapshot);
                     }
                 },
                 new org.gemo.apex.extension.repository.ConversationRepository() {
                     @Override public void append(List<AgentMessageEntry> entries) {
-                        calls.add("conversation.append"); conversation.addAll(entries);
+                        calls.add("conversation.append");
+                        for (AgentMessageEntry entry : entries) {
+                            if (conversation.stream().noneMatch(existing -> existing.entryId().equals(entry.entryId()))) {
+                                conversation.add(entry);
+                            }
+                        }
                     }
                     @Override public List<AgentMessageEntry> load(ConversationQuery query) {
                         return conversation.stream().filter(item -> item.sessionId().equals(query.sessionId()))

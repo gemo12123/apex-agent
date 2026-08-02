@@ -82,7 +82,8 @@ class ApexAgentFactoryTest {
         fixture.calls.clear();
 
         ApexAgent resumed = new ApexAgentFactory().createResumed(
-                new HumanResponseCommand("session-1", "demo", "user-1", Map.of("answers", Map.of())), ports);
+                new HumanResponseCommand("session-1", "demo", "user-1",
+                        Map.of("interaction_type", "ASK_HUMAN", "answers", Map.of())), ports);
 
         assertNotNull(resumed);
         assertEquals(0, fixture.providerLoads);

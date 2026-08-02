@@ -12,7 +12,9 @@ import org.gemo.apex.common.model.ModelRequest;
 import org.gemo.apex.common.model.ModelResponse;
 import org.gemo.apex.common.snapshot.*;
 import org.gemo.apex.common.tool.ToolCall;
+import org.gemo.apex.common.tool.ToolOrigin;
 import org.gemo.apex.common.tool.ToolResult;
+import org.gemo.apex.common.tool.UnavailableToolSource;
 import org.gemo.apex.core.tool.ToolCatalog;
 
 import java.time.Instant;
@@ -59,6 +61,10 @@ public final class ApexAgentContext {
     public ConversationCompactionResult compactionResult() { return compactionResult; }
     public void compactionResult(ConversationCompactionResult value) { compactionResult = value; }
     public HumanSubmission humanSubmission() { return humanSubmission; }
+    public HumanSubmission currentHumanSubmission() {
+        return humanSubmission != null && toolCall != null
+                && humanSubmission.toolCallId().equals(toolCall.toolCallId()) ? humanSubmission : null;
+    }
 
     public void enableTools(Set<String> enable, Set<String> disable) {
         Set<String> next = new LinkedHashSet<>(snapshot.enabledTools());
@@ -102,6 +108,52 @@ public final class ApexAgentContext {
         List<ToolResult> all = new ArrayList<>(old.completedToolResults());
         all.addAll(results);
         updateIteration(old.modelRequest(), old.modelResponse(), all, old.status(), old.endedTime());
+    }
+
+    public void suspend(SuspendedToolCall suspended, boolean replaceExisting) {
+        if (!replaceExisting && snapshot.suspendedToolCall() != null) {
+            throw new IllegalStateException("当前会话已经存在挂起工具调用");
+        }
+        Instant now = ports.timeProvider().now();
+        TurnSnapshot oldTurn = snapshot.activeTurn();
+        IterationSnapshot oldIteration = oldTurn.currentIteration();
+        IterationSnapshot iteration = new IterationSnapshot(oldIteration.iterationNo(), IterationStatus.SUSPENDED,
+                oldIteration.modelRequest(), oldIteration.modelResponse(), oldIteration.completedToolResults(),
+                oldIteration.startedTime(), null);
+        TurnSnapshot turn = new TurnSnapshot(oldTurn.turnNo(), TurnStatus.SUSPENDED, iteration,
+                oldTurn.startedTime(), null);
+        replaceSnapshot(SessionStatus.HUMAN_IN_THE_LOOP, snapshot.enabledTools(), turn, suspended, now);
+    }
+
+    public void resumeFromSuspension() {
+        Instant now = ports.timeProvider().now();
+        TurnSnapshot oldTurn = snapshot.activeTurn();
+        IterationSnapshot oldIteration = oldTurn.currentIteration();
+        IterationSnapshot iteration = new IterationSnapshot(oldIteration.iterationNo(), IterationStatus.IN_PROGRESS,
+                oldIteration.modelRequest(), oldIteration.modelResponse(), oldIteration.completedToolResults(),
+                oldIteration.startedTime(), null);
+        TurnSnapshot turn = new TurnSnapshot(oldTurn.turnNo(), TurnStatus.IN_PROGRESS, iteration,
+                oldTurn.startedTime(), null);
+        replaceSnapshot(SessionStatus.IN_PROGRESS, snapshot.enabledTools(), turn, null, now);
+    }
+
+    public void migrateUnavailableTool(String toolName) {
+        var availability = ports.toolAvailabilityProvider().current();
+        UnavailableToolSource source = availability.unavailableSources().stream()
+                .filter(item -> toolName.startsWith(item.stableNamePrefix())).findFirst().orElse(null);
+        ToolOrigin origin = source == null ? ToolOrigin.LOCAL : source.origin();
+        String sourceId = source == null ? toolName : source.sourceId();
+        String reason = source == null ? "UNAVAILABLE" : source.reasonCode();
+        HistoricalToolBinding addition = new HistoricalToolBinding(toolName, origin, sourceId, reason,
+                ports.timeProvider().now());
+        List<HistoricalToolBinding> history = new ArrayList<>(snapshot.historicalToolBindings());
+        if (history.stream().noneMatch(item -> item.identity().equals(addition.identity()))) history.add(addition);
+        Set<String> enabled = new LinkedHashSet<>(snapshot.enabledTools());
+        enabled.remove(toolName);
+        snapshot = new SessionSnapshot(snapshot.schemaVersion(), snapshot.sessionId(), snapshot.userId(),
+                snapshot.agentKey(), snapshot.status(), snapshot.currentTurnNo(), enabled,
+                snapshot.activatedSkills(), history, snapshot.activeDefinition(), snapshot.activeTurn(),
+                snapshot.suspendedToolCall(), snapshot.nextMessageSortNo(), ports.timeProvider().now());
     }
 
     public void completeTurn(boolean endedByHook) {

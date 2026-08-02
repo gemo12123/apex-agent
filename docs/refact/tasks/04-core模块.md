@@ -1,7 +1,7 @@
 # core 模块任务
 
 > 模块职责：实现 Agent 定义构造、Session/Turn/Iteration、生命周期、唯一 ReAct 循环、工具编排、压缩门和恢复状态机
-> 当前总体进度：受阻（2026-08-02）；CORE-01～CORE-06 已完成并通过 24 项全 Fake 专项验证，生命周期 Binding/options、`*` glob 与 typed submission 传递缺口已修正；CORE-07A～CORE-07C 仍等待尚未落地的 KIT-01/02 介入实现
+> 当前总体进度：已完成（2026-08-02）；CORE-01～CORE-07C 已完成并通过 35 项全 Fake 专项验证，挂起、typed submission 恢复、五分支状态机、多 ToolCall、固定 ToolResult 与不可用工具迁移均已覆盖
 
 ## CORE-01 实现 AgentDefinitionAssembler 与 ApexAgentFactory
 
@@ -211,7 +211,7 @@
 
 - **任务名称**：统一生成并保存 QUESTION/TOOL_CONFIRMATION 挂起状态。
 - **任务目标**：在 PRE_TOOL_CALL 请求人工介入时可靠保存原 Turn/Iteration/ToolCall 和已执行 Hook ID。
-- **当前进度**：受阻（2026-08-01）。前置 KIT-01/02 尚未提供可联调的 ask_human/工具确认介入 Hook 与工具行为；按任务边界未在 core 复制 kit 实现。
+- **当前进度**：已完成（2026-08-02）。已实现统一 InterventionSuspender、PRE Hook Binding ID 游标、唯一 SuspendedToolCall、Session/Turn/Iteration 挂起状态及“先保存、后交互事件、再 END”顺序；QUESTION/TOOL_CONFIRMATION 共用同一保存入口，保存失败不发布交互事件。
 - **设计依据**：设计文档第 10.2～10.3 节；架构文档第 6.5、8.5 节。
 - **涉及范围**：HumanInterventionRequest、SuspendedToolCall、executedPreToolHookIds、SessionSnapshot 保存和交互事件。
 - **前置依赖**：CORE-02/03/04/06、KIT-01/02、COM-03。
@@ -234,7 +234,7 @@
 
 - **任务名称**：验证恢复请求并重建原执行位置。
 - **任务目标**：从 SessionSnapshot 恢复同一 Turn、Iteration 和 ToolCall，跳过已完成生命周期。
-- **当前进度**：受阻（2026-08-01）。依赖 CORE-07A 的正式挂起快照以及 KIT-01/02 typed submission 行为，当前仅保留 CORE-01 的恢复定义投影入口，未提前实现恢复状态机。
+- **当前进度**：已完成（2026-08-02）。已实现 HumanResponseParser 与恢复工厂校验，按挂起介入类型解析 QuestionSubmission/ToolConfirmationSubmission，通过 toolCallId 唯一定位原调用，只从 recovery snapshot 重建定义、Hook 与工具；非法恢复在解析阶段零写入，已知不可用工具保留到恢复状态机迁移。
 - **设计依据**：设计文档第 10.1、10.2、10.4 节；架构文档第 8.5 节。
 - **涉及范围**：userId/agentKey/状态/交互标识校验、toolCallId 定位、定义快照、Hook/Tool 重新解析、humanResponse。
 - **前置依赖**：CORE-01、CORE-07A、COM-03；RUN-04B 的 lease 可先用 Fake。
@@ -255,7 +255,7 @@
 
 - **任务名称**：继续未执行 PRE_TOOL_CALL Hook 并完成恢复收口。
 - **任务目标**：完整实现再次介入、END_TURN、BLOCK_TOOL、RETURN_TOOL_RESULT 和全部 CONTINUE 五类路径。
-- **当前进度**：受阻（2026-08-01）。依赖 CORE-07B 与 KIT-01/02 的确认批准/拒绝和 ask_human 行为契约，未实现五分支恢复或复制 kit 固定行为。
+- **当前进度**：已完成（2026-08-02）。已实现再次介入、END_TURN、BLOCK_TOOL、RETURN_TOOL_RESULT、全部 CONTINUE 五分支；确认批准只合并 editable 参数，拒绝复用 core 唯一 ToolResultFactory，ask_human typed submission 传入真实工具，并覆盖多 ToolCall 前后序、不可用迁移及稳定 entryId 重试。
 - **设计依据**：设计文档第 10.4～10.5、21.3 节；架构文档第 8.5 节。
 - **涉及范围**：Hook 跳过/累计、参数合并、五分支动作、工具执行、POST_TOOL_CALL、挂起清理和剩余 ToolCall。
 - **前置依赖**：CORE-07B、CORE-06、KIT-01/02。
