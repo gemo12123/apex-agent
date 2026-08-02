@@ -21,6 +21,7 @@ import org.gemo.apex.core.tool.ToolCatalog;
 import java.util.*;
 
 public final class ApexAgentFactory {
+    private static final System.Logger LOG = System.getLogger(ApexAgentFactory.class.getName());
     private final AgentDefinitionAssembler assembler = new AgentDefinitionAssembler();
     private final AgentDefinitionValidator validator = new AgentDefinitionValidator();
     private final HumanResponseParser responseParser = new HumanResponseParser();
@@ -33,7 +34,13 @@ public final class ApexAgentFactory {
         long turnNo = existing.map(snapshot -> snapshot.currentTurnNo() + 1).orElse(1L);
         var now = ports.timeProvider().now();
         TurnSnapshot turn = new TurnSnapshot(turnNo, TurnStatus.IN_PROGRESS, null, now, null);
-        Set<String> activated = existing.map(SessionSnapshot::activatedSkills).orElse(Set.of());
+        Set<String> activated = new LinkedHashSet<>(existing.map(SessionSnapshot::activatedSkills).orElse(Set.of()));
+        Set<String> removedSkills = new LinkedHashSet<>(activated);
+        activated.retainAll(assembly.definition().definition().enabledSkills());
+        removedSkills.removeAll(activated);
+        if (!removedSkills.isEmpty()) {
+            LOG.log(System.Logger.Level.WARNING, "Agent 定义已移除激活 Skill，当前 Turn 清理: " + removedSkills);
+        }
         long nextSort = existing.map(SessionSnapshot::nextMessageSortNo).orElse(0L);
         SessionSnapshot snapshot = new SessionSnapshot(SnapshotSchemaVersion.V1, request.sessionId(),
                 request.userId(), request.agentKey(), SessionStatus.IN_PROGRESS, turnNo,

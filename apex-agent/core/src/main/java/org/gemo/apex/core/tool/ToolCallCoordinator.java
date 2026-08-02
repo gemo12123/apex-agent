@@ -20,6 +20,7 @@ import org.gemo.apex.core.exception.ResumePersistenceException;
 import org.gemo.apex.core.lifecycle.LifecycleDispatchOutcome;
 import org.gemo.apex.core.lifecycle.LifecycleDispatcher;
 import org.gemo.apex.core.lifecycle.PreToolDispatchOutcome;
+import org.gemo.apex.core.skill.SkillActivationCoordinator;
 import org.gemo.apex.extension.tool.AgentTool;
 
 import java.util.*;
@@ -29,6 +30,7 @@ public final class ToolCallCoordinator {
     private final ToolResultFactory results;
     private final AgentEventEmitter emitter;
     private final InterventionSuspender suspender;
+    private final SkillActivationCoordinator skillActivation = new SkillActivationCoordinator();
 
     public ToolCallCoordinator(LifecycleDispatcher dispatcher, ToolResultFactory results,
                                AgentEventEmitter emitter, AgentEventFactory eventFactory) {
@@ -179,9 +181,11 @@ public final class ToolCallCoordinator {
                 Map.of("invocationId", invocationId));
         try {
             context.ports().cancellationToken().throwIfCancellationRequested();
-            ToolResult result = tool.execute(call, executionContext,
-                    new RestrictedToolExecutionObserver(invocationId, emitter,
-                            context.ports().cancellationToken()));
+            ToolResult result = SkillActivationCoordinator.TOOL_NAME.equals(call.name())
+                    ? skillActivation.activate(context, call)
+                    : tool.execute(call, executionContext,
+                            new RestrictedToolExecutionObserver(invocationId, emitter,
+                                    context.ports().cancellationToken()));
             context.ports().cancellationToken().throwIfCancellationRequested();
             validateAssociation(call, result);
             return result;
@@ -195,6 +199,7 @@ public final class ToolCallCoordinator {
     private void commitOne(ApexAgentContext context, ToolResult result) {
         AgentMessageEntry entry = entry(context, result);
         context.ports().conversationRepository().append(List.of(entry));
+        context.applyPendingSkillActivation();
         context.addToolResults(List.of(result));
         context.save();
     }
@@ -203,6 +208,7 @@ public final class ToolCallCoordinator {
         try {
             AgentMessageEntry entry = entry(context, result, "tool-result-" + invocationId);
             context.ports().conversationRepository().append(List.of(entry));
+            context.applyPendingSkillActivation();
             context.addToolResults(List.of(result));
             context.resumeFromSuspension();
             context.save();

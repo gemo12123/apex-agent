@@ -208,6 +208,83 @@ class ApexAgentExecutionTest {
                 .filter(entry -> entry.messageType() == MessageType.TOOL_RESULT).findFirst().orElseThrow().content());
     }
 
+    @Test
+    void activateSkill由core更新session且重复激活跨Turn幂等保留() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        fixture.tool("activate_skill", (call, context, observer) -> {
+            throw new AssertionError("activate_skill 不应进入普通 AgentTool.execute");
+        });
+        fixture.definition = fixture.definition(Map.of(), Set.of("activate_skill"),
+                Set.of("activate_skill"), Set.of("pdf"));
+        fixture.modelResponses.add(activationResponse("activate-1"));
+        fixture.modelResponses.add(new ModelResponse("第一轮完成", List.of(), Map.of()));
+
+        ApexAgent first = create(fixture);
+        assertInstanceOf(AgentRunOutcome.Completed.class, first.run());
+
+        assertEquals(Set.of("pdf"), first.snapshot().activatedSkills());
+        assertEquals(List.of(Set.of()), fixture.skillActivationInputs);
+        assertEquals("instructions:pdf", fixture.conversation.stream()
+                .filter(entry -> entry.messageType() == MessageType.TOOL_RESULT).findFirst().orElseThrow().content());
+        assertEquals(0, fixture.toolCalls);
+
+        fixture.modelResponses.add(activationResponse("activate-2"));
+        fixture.modelResponses.add(new ModelResponse("第二轮完成", List.of(), Map.of()));
+        ApexAgent second = new ApexAgentFactory().createNew(
+                new AgentRequest("session-1", "demo", "user-1", "继续"), fixture.ports());
+        assertInstanceOf(AgentRunOutcome.Completed.class, second.run());
+
+        assertEquals(Set.of("pdf"), second.snapshot().activatedSkills());
+        assertEquals(List.of(Set.of(), Set.of("pdf")), fixture.skillActivationInputs);
+        assertEquals(2, fixture.skillActivations);
+    }
+
+    @Test
+    void 新Turn按最新定义清理已移除的激活Skill() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        fixture.tool("activate_skill", (call, context, observer) -> {
+            throw new AssertionError("activate_skill 不应进入普通 AgentTool.execute");
+        });
+        fixture.definition = fixture.definition(Map.of(), Set.of("activate_skill"),
+                Set.of("activate_skill"), Set.of("pdf"));
+        fixture.modelResponses.add(activationResponse("activate-1"));
+        fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
+        create(fixture).run();
+        fixture.definition = fixture.definition(Map.of(), Set.of("activate_skill"),
+                Set.of("activate_skill"), Set.of());
+
+        ApexAgent next = new ApexAgentFactory().createNew(
+                new AgentRequest("session-1", "demo", "user-1", "下一轮"), fixture.ports());
+
+        assertTrue(next.snapshot().activatedSkills().isEmpty());
+        assertEquals(2, next.snapshot().currentTurnNo());
+    }
+
+    @Test
+    void activateSkill结果追加失败时不持久化激活状态() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        fixture.tool("activate_skill", (call, context, observer) -> {
+            throw new AssertionError("activate_skill 不应进入普通 AgentTool.execute");
+        });
+        fixture.definition = fixture.definition(Map.of(), Set.of("activate_skill"),
+                Set.of("activate_skill"), Set.of("pdf"));
+        fixture.modelResponses.add(activationResponse("activate-1"));
+        ApexAgent agent = create(fixture);
+        fixture.failToolResultAppend = true;
+
+        AgentRunOutcome outcome = agent.run();
+
+        assertInstanceOf(AgentRunOutcome.Failed.class, outcome);
+        assertTrue(agent.snapshot().activatedSkills().isEmpty());
+        assertTrue(fixture.sessions.get("session-1").activatedSkills().isEmpty());
+        assertEquals(1, fixture.skillActivations);
+    }
+
+    private ModelResponse activationResponse(String callId) {
+        return new ModelResponse("", List.of(
+                new ToolCall(callId, "activate_skill", 0, Map.of("command", "pdf"), Map.of())), Map.of());
+    }
+
     private ApexAgent create(CoreTestFixture fixture) {
         return new ApexAgentFactory().createNew(
                 new AgentRequest("session-1", "demo", "user-1", "你好"), fixture.ports());

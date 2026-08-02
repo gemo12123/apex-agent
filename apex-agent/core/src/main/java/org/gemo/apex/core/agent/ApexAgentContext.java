@@ -11,6 +11,7 @@ import org.gemo.apex.common.intervention.HumanSubmission;
 import org.gemo.apex.common.model.ModelRequest;
 import org.gemo.apex.common.model.ModelResponse;
 import org.gemo.apex.common.snapshot.*;
+import org.gemo.apex.common.skill.SkillActivationResult;
 import org.gemo.apex.common.tool.ToolCall;
 import org.gemo.apex.common.tool.ToolOrigin;
 import org.gemo.apex.common.tool.ToolResult;
@@ -32,6 +33,7 @@ public final class ApexAgentContext {
     private ToolResult toolResult;
     private ConversationCompactionRequest compactionRequest;
     private ConversationCompactionResult compactionResult;
+    private SkillActivationResult pendingSkillActivation;
     private final HumanSubmission humanSubmission;
 
     ApexAgentContext(AgentPorts ports, AgentDefinitionSnapshot definition,
@@ -154,6 +156,23 @@ public final class ApexAgentContext {
                 snapshot.agentKey(), snapshot.status(), snapshot.currentTurnNo(), enabled,
                 snapshot.activatedSkills(), history, snapshot.activeDefinition(), snapshot.activeTurn(),
                 snapshot.suspendedToolCall(), snapshot.nextMessageSortNo(), ports.timeProvider().now());
+    }
+
+    public void stageSkillActivation(SkillActivationResult activation) {
+        if (!definition.definition().enabledSkills().containsAll(activation.activatedSkills())) {
+            throw new IllegalArgumentException("activatedSkills 必须是 enabledSkills 的子集");
+        }
+        pendingSkillActivation = activation;
+    }
+
+    public void applyPendingSkillActivation() {
+        if (pendingSkillActivation == null) return;
+        snapshot = new SessionSnapshot(snapshot.schemaVersion(), snapshot.sessionId(), snapshot.userId(),
+                snapshot.agentKey(), snapshot.status(), snapshot.currentTurnNo(), snapshot.enabledTools(),
+                pendingSkillActivation.activatedSkills(), snapshot.historicalToolBindings(), snapshot.activeDefinition(),
+                snapshot.activeTurn(), snapshot.suspendedToolCall(), snapshot.nextMessageSortNo(),
+                ports.timeProvider().now());
+        pendingSkillActivation = null;
     }
 
     public void completeTurn(boolean endedByHook) {

@@ -1,7 +1,7 @@
 # core 模块任务
 
 > 模块职责：实现 Agent 定义构造、Session/Turn/Iteration、生命周期、唯一 ReAct 循环、工具编排、压缩门和恢复状态机
-> 当前总体进度：已完成（2026-08-02）；CORE-01～CORE-07C 已完成并通过 35 项全 Fake 专项验证，挂起、typed submission 恢复、五分支状态机、多 ToolCall、固定 ToolResult 与不可用工具迁移均已覆盖
+> 当前总体进度：已完成（2026-08-02）；CORE-01～CORE-07C 已完成并通过 38 项全 Fake 专项验证，挂起、typed submission 恢复、五分支状态机、多 ToolCall、固定 ToolResult、不可用工具迁移及 Skill 激活状态持久化均已覆盖
 
 ## CORE-01 实现 AgentDefinitionAssembler 与 ApexAgentFactory
 
@@ -56,7 +56,7 @@
 
 - **任务名称**：建立唯一执行层级和持久化状态流转。
 - **任务目标**：用明确状态而非 Hook 历史表达新 Turn、Iteration、挂起、恢复、完成、失败和取消。
-- **当前进度**：已完成（2026-08-01）。已实现 ApexAgentContext 中唯一 Session/Turn/Iteration 状态编排、有序 Repository 提交、失败/取消终态和执行前取消；后续 Turn 保留 session 工具与 Skill 状态。
+- **当前进度**：已完成（2026-08-02）。已实现 ApexAgentContext 中唯一 Session/Turn/Iteration 状态编排、有序 Repository 提交、失败/取消终态和执行前取消；core 消费 SkillActivator，在 activate_skill 工具结果提交时更新 session activatedSkills，重复激活幂等、后续 Turn 保留，并在新定义移除 Skill 时清理旧激活项。
 - **设计依据**：设计文档第 6、10.2、16.4 节；架构文档第 6.1、8.1 节。
 - **涉及范围**：`ApexAgentContext`、`AgentRuntimeContext`、Session/Turn/Iteration 创建和状态机、Session/Conversation Repository 调用。
 - **前置依赖**：CORE-01、CORE-02、COM-03、EXT-01。

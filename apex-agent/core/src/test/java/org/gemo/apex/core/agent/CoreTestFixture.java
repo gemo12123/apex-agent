@@ -35,9 +35,12 @@ final class CoreTestFixture {
     int providerLoads;
     int modelCalls;
     int toolCalls;
+    int skillActivations;
+    final List<Set<String>> skillActivationInputs = new ArrayList<>();
     RuntimeException modelFailure;
     boolean failSuspensionSave;
     int remainingSessionSaveFailures;
+    boolean failToolResultAppend;
 
     CoreTestFixture() {
         definition = definition(Map.of(), Set.of(), Set.of());
@@ -45,10 +48,16 @@ final class CoreTestFixture {
 
     AgentDefinition definition(Map<HookPoint, List<HookBinding>> bindings,
                                Set<String> available, Set<String> defaults) {
+        return definition(bindings, available, defaults, Set.of());
+    }
+
+    AgentDefinition definition(Map<HookPoint, List<HookBinding>> bindings,
+                               Set<String> available, Set<String> defaults,
+                               Set<String> enabledSkills) {
         return new AgentDefinition(DefinitionSchemaVersion.V1,
                 new AgentMetadata("demo", "Demo", "测试 Agent"),
                 new PromptDefinition("你是测试助手", 30), new MessageCompressionDefinition(true, 20),
-                new ToolSetDefinition(available, defaults), Set.of(), Map.of(), bindings);
+                new ToolSetDefinition(available, defaults), enabledSkills, Map.of(), bindings);
     }
 
     AgentPorts ports() {
@@ -97,6 +106,10 @@ final class CoreTestFixture {
                 },
                 new org.gemo.apex.extension.repository.ConversationRepository() {
                     @Override public void append(List<AgentMessageEntry> entries) {
+                        if (failToolResultAppend && entries.stream()
+                                .anyMatch(entry -> entry.messageType() == org.gemo.apex.common.message.MessageType.TOOL_RESULT)) {
+                            throw new IllegalStateException("tool result append failed");
+                        }
                         calls.add("conversation.append");
                         for (AgentMessageEntry entry : entries) {
                             if (conversation.stream().noneMatch(existing -> existing.entryId().equals(entry.entryId()))) {
@@ -127,8 +140,17 @@ final class CoreTestFixture {
                     return new ConversationCompactionResult(request.compactionId(), "摘要",
                             request.retainedMessages(), Map.of());
                 },
-                () -> List.of(),
-                (name, enabled, activated) -> new org.gemo.apex.common.skill.SkillActivationResult("instructions", activated),
+                () -> definition.enabledSkills().stream()
+                        .map(name -> new SkillDefinition(name, "测试 Skill", "instructions:" + name, Map.of()))
+                        .toList(),
+                (name, enabled, activated) -> {
+                    skillActivations++;
+                    skillActivationInputs.add(Set.copyOf(activated));
+                    if (!enabled.contains(name)) throw new IllegalArgumentException("skill 未启用");
+                    Set<String> next = new LinkedHashSet<>(activated);
+                    next.add(name);
+                    return new org.gemo.apex.common.skill.SkillActivationResult("instructions:" + name, next);
+                },
                 message -> { calls.add("event." + message.getClass().getSimpleName()); events.add(message); },
                 token,
                 new org.gemo.apex.extension.id.IdGenerator() {
