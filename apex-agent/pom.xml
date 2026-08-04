@@ -18,8 +18,6 @@
         <module>runtime</module>
         <module>platform</module>
         <module>memory</module>
-        <module>legacy</module>
-        <module>architecture-tests</module>
     </modules>
 
     <properties>
@@ -34,7 +32,6 @@
         <jackson.version>2.16.1</jackson.version>
         <maven-jar-plugin.version>3.4.2</maven-jar-plugin.version>
         <asm.version>9.8</asm.version>
-        <junit.version>4.13.2</junit.version>
         <junit-jupiter.version>5.11.4</junit-jupiter.version>
         <mockito.version>5.14.2</mockito.version>
         <byte-buddy.version>1.15.11</byte-buddy.version>
@@ -119,26 +116,6 @@
                 <version>${lombok.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.alibaba</groupId>
-                <artifactId>fastjson</artifactId>
-                <version>1.2.83</version>
-            </dependency>
-            <dependency>
-                <groupId>com.google.guava</groupId>
-                <artifactId>guava</artifactId>
-                <version>33.5.0-jre</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.httpcomponents</groupId>
-                <artifactId>httpclient</artifactId>
-                <version>4.5.14</version>
-            </dependency>
-            <dependency>
-                <groupId>junit</groupId>
-                <artifactId>junit</artifactId>
-                <version>${junit.version}</version>
-            </dependency>
-            <dependency>
                 <groupId>org.junit.jupiter</groupId>
                 <artifactId>junit-jupiter</artifactId>
                 <version>${junit-jupiter.version}</version>
@@ -167,36 +144,6 @@
                 <groupId>net.bytebuddy</groupId>
                 <artifactId>byte-buddy-agent</artifactId>
                 <version>${byte-buddy.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>cn.hutool</groupId>
-                <artifactId>hutool-all</artifactId>
-                <version>5.8.20</version>
-            </dependency>
-            <dependency>
-                <groupId>io.minio</groupId>
-                <artifactId>minio</artifactId>
-                <version>8.5.12</version>
-            </dependency>
-            <dependency>
-                <groupId>org.springaicommunity</groupId>
-                <artifactId>spring-ai-agent-utils</artifactId>
-                <version>0.4.1</version>
-            </dependency>
-            <dependency>
-                <groupId>mysql</groupId>
-                <artifactId>mysql-connector-java</artifactId>
-                <version>8.0.28</version>
-            </dependency>
-            <dependency>
-                <groupId>com.baomidou</groupId>
-                <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
-                <version>3.5.5</version>
-            </dependency>
-            <dependency>
-                <groupId>org.commonmark</groupId>
-                <artifactId>commonmark-ext-yaml-front-matter</artifactId>
-                <version>0.24.0</version>
             </dependency>
             <dependency>
                 <groupId>org.yaml</groupId>
@@ -296,41 +243,7 @@
                         <configuration>
                             <rules>
                                 <banDuplicatePomDependencyVersions/>
-                                <bannedDependencies>
-                                    <searchTransitive>true</searchTransitive>
-                                    <excludes>
-                                        <exclude>org.gemo.apex:apex-agent-legacy</exclude>
-                                    </excludes>
-                                    <message>目标模块不得依赖 legacy；整改任务：CLEAN-02。</message>
-                                </bannedDependencies>
-                                <dependencyConvergence>
-                                    <excludes>
-                                        <exclude>com.fasterxml.jackson.core:jackson-annotations</exclude>
-                                        <exclude>com.fasterxml.jackson.core:jackson-core</exclude>
-                                        <exclude>com.fasterxml.jackson.core:jackson-databind</exclude>
-                                        <exclude>com.fasterxml.jackson.datatype:jackson-datatype-jdk8</exclude>
-                                        <exclude>com.fasterxml.jackson.datatype:jackson-datatype-jsr310</exclude>
-                                        <exclude>com.fasterxml.jackson.module:jackson-module-jsonSchema</exclude>
-                                        <exclude>commons-codec:commons-codec</exclude>
-                                        <exclude>io.micrometer:micrometer-commons</exclude>
-                                        <exclude>io.micrometer:micrometer-observation</exclude>
-                                        <exclude>io.modelcontextprotocol.sdk:mcp</exclude>
-                                        <exclude>io.modelcontextprotocol.sdk:mcp-json</exclude>
-                                        <exclude>io.modelcontextprotocol.sdk:mcp-json-jackson2</exclude>
-                                        <exclude>io.projectreactor:reactor-core</exclude>
-                                        <exclude>io.swagger.core.v3:swagger-annotations-jakarta</exclude>
-                                        <exclude>jakarta.xml.bind:jakarta.xml.bind-api</exclude>
-                                        <exclude>net.minidev:json-smart</exclude>
-                                        <exclude>org.apache.commons:commons-lang3</exclude>
-                                        <exclude>org.hamcrest:hamcrest</exclude>
-                                        <exclude>org.jetbrains.kotlin:kotlin-stdlib-common</exclude>
-                                        <exclude>org.jetbrains.kotlin:kotlin-stdlib-jdk8</exclude>
-                                        <exclude>org.jetbrains:annotations</exclude>
-                                        <exclude>org.junit.jupiter:junit-jupiter-api</exclude>
-                                        <exclude>org.slf4j:slf4j-api</exclude>
-                                        <exclude>org.springframework.boot:spring-boot-autoconfigure</exclude>
-                                    </excludes>
-                                </dependencyConvergence>
+                                <dependencyConvergence/>
                             </rules>
                         </configuration>
                     </execution>
