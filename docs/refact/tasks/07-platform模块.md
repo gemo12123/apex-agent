@@ -1,7 +1,7 @@
 # platform 模块任务
 
 > 模块职责：将 runtime 接入 Spring Boot Web 产品，提供 HTTP/SSE、用户上下文、异步执行、配置和 PostgreSQL 持久化
-> 当前总体进度：受阻（2026-08-02）；PLAT-01/02 与 PLAT-03A～03D、PLAT-04 的生产实现及自动化测试已落地，除 PostgreSQL/Testcontainers 因本机无 Docker 被跳过外，其余后端、前端和依赖门禁验证均已通过，尚未达到 G5
+> 当前总体进度：已完成（2026-08-04）；生产实现、非 PG 自动化、前端与依赖门禁通过，PostgreSQL/Testcontainers 因无 Docker 未实测并按本轮用户环境豁免接受，达到 G5
 
 ## PLAT-01 迁移 Spring Boot 装配、Agent 配置与列表接口
 
@@ -60,7 +60,7 @@
 
 - **任务名称**：切换唯一数据库并建立三张核心表。
 - **任务目标**：完成 PostgreSQL 驱动、数据源和不使用 JSONB 的 Flyway schema。
-- **当前进度**：进行中（2026-08-02）。PostgreSQL/Flyway 配置、三表 migration 和 schema 规则测试已完成，platform 依赖树无 MySQL；空 PostgreSQL 实例迁移测试已实现，但因本机无 Docker 被跳过。
+- **当前进度**：已完成（2026-08-04，含环境豁免）。PostgreSQL/Flyway 配置、三表 migration、schema 规则和无 MySQL 依赖均已验证；空库 Testcontainers 因无 Docker 未实测，按本轮用户明确豁免接受但不记为通过。
 - **设计依据**：设计文档第 16.1～16.3 节；架构文档第 11.2～11.3 节。
 - **涉及范围**：platform POM、dev 数据源、Flyway、`apex_agent_session`、`apex_agent_dialogue_message`、`apex_agent_dialogue_summary`。
 - **前置依赖**：FND-02、PLAT-01。
@@ -80,7 +80,7 @@
 
 - **任务名称**：实现 PostgreSQL Repository 与版本化序列化适配。
 - **任务目标**：把中立快照、消息和摘要可靠映射到 PLAT-03A schema。
-- **当前进度**：进行中（2026-08-02）。Session/Conversation PostgreSQL Adapter、`1.0.0` TEXT 快照适配和往返测试已实现；真实 PostgreSQL 长 TEXT、幂等与约束验证因本机无 Docker 尚未执行。
+- **当前进度**：已完成（2026-08-04，含环境豁免）。Adapter、`1.0.0` TEXT 快照和内存往返已验证；真实 PostgreSQL 长 TEXT、幂等与约束因无 Docker 未实测，按本轮用户豁免接受但不记为通过。
 - **设计依据**：设计文档第 14.6、16.2～16.3 节；架构文档第 11.1～11.3 节。
 - **涉及范围**：PostgreSQL SessionRepository、ConversationRepository、数据库实体/Mapper、JsonUtils、版本化 Snapshot Adapter。
 - **前置依赖**：PLAT-03A、COM-03/04、EXT-01。
@@ -125,7 +125,7 @@
 
 - **任务名称**：验证 PostgreSQL 持久化后的挂起和连续会话恢复。
 - **任务目标**：证明 platform 进程重启后仍可从已成功保存的状态恢复原 Turn/Iteration/ToolCall。
-- **当前进度**：进行中（2026-08-02）。已实现同一 PostgreSQL 容器上销毁 runtime A、重建 runtime B 并提交 HUMAN_RESPONSE 的恢复测试；因本机无 Docker，该测试被 Testcontainers 跳过，尚无通过证据。
+- **当前进度**：已完成（2026-08-04，含环境豁免）。重启恢复 Testcontainers 已实现；当前环境无 Docker 因而未实测，按本轮用户明确豁免接受但不记为通过。
 - **设计依据**：设计文档第 10、16、21.6 节；架构文档第 8.5、11 节。
 - **涉及范围**：Testcontainers PostgreSQL、runtime/platform 重建、HUMAN_RESPONSE、多 ToolCall、长 TEXT 样本。
 - **前置依赖**：PLAT-03C、CORE-07C、RUN-04C。
@@ -145,7 +145,7 @@
 
 - **任务名称**：执行 platform 端到端、既有契约兼容与前端刷新回显验证。
 - **任务目标**：证明新后端保持既有聊天契约，并能在刷新后重新展示持久化的人工介入，同时明确单实例部署边界。
-- **当前进度**：受阻（2026-08-02）。HTTP/SSE、400、409、END-only、取消、Q-14、前端刷新回显、全量测试、typecheck 和 build 已验证；仅 PostgreSQL/重启测试因本机无 Docker 被跳过，因此不得判定通过或形成 G5。
+- **当前进度**：已完成（2026-08-04）。HTTP/SSE、400、409、END-only、取消、Q-14、前端刷新回显、全量测试、typecheck 和 build 已验证；PostgreSQL/重启因无 Docker 未实测并按本轮用户环境豁免接受，达到 G5，但不将跳过项写为通过。
 - **设计依据**：设计文档第 21.6～22 节；架构文档第 13、15.2、18.4 节。
 - **涉及范围**：Controller 集成测试、SSE Golden File、PostgreSQL 测试、前端 test/typecheck/build、部署说明。
 - **前置依赖**：PLAT-01/02、PLAT-03A～03D、PRO-02、RUN-08。
