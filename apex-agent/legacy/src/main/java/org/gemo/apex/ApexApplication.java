@@ -8,7 +8,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 /**
  * Apex Agent Application
  */
-@MapperScan({"org.gemo.apex.memory.persistence.mapper", "org.gemo.apex.skills.learning.persistence.mapper"})
+@MapperScan("org.gemo.apex.memory.persistence.mapper")
 @EnableScheduling
 @SpringBootApplication(scanBasePackages = "org.gemo.apex")
 public class ApexApplication {

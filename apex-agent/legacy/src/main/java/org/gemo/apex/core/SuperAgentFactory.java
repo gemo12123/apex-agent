@@ -10,7 +10,6 @@ import org.gemo.apex.core.engine.ToolCallProcessor;
 import org.gemo.apex.domain.dto.ChatRequest;
 import org.gemo.apex.memory.conversation.ConversationMemoryManager;
 import org.gemo.apex.memory.session.SessionContextStore;
-import org.gemo.apex.memory.write.MemoryLifecycleManager;
 import org.gemo.apex.definition.agent.IAgentDefinitionLoader;
 import org.gemo.apex.hook.lifecycle.AgentExecutionStore;
 import org.gemo.apex.hook.lifecycle.AgentLifecycleHookRuntime;
@@ -37,7 +36,6 @@ public class SuperAgentFactory {
     private final ToolCallProcessor toolCallProcessor;
     private final ConversationMemoryManager conversationMemoryManager;
     private final SessionContextStore sessionContextStore;
-    private final MemoryLifecycleManager memoryLifecycleManager;
     private final IAgentDefinitionLoader agentDefinitionLoader;
     private final AgentLifecycleHookRuntime lifecycleHookRuntime;
     private final AgentExecutionStore agentExecutionStore;
@@ -50,8 +48,7 @@ public class SuperAgentFactory {
             ToolInterceptor toolInterceptor,
             ToolCallProcessor toolCallProcessor,
             ConversationMemoryManager conversationMemoryManager,
-            SessionContextStore sessionContextStore,
-            MemoryLifecycleManager memoryLifecycleManager) {
+            SessionContextStore sessionContextStore) {
         this(sessionService,
                 humanInLoopResumer,
                 stageToolResolver,
@@ -61,7 +58,6 @@ public class SuperAgentFactory {
                 toolCallProcessor,
                 conversationMemoryManager,
                 sessionContextStore,
-                memoryLifecycleManager,
                 agentKey -> new AgentDefinition(agentKey, ModeEnum.REACT, java.util.List.of(), java.util.List.of(),
                         java.util.List.of(), AgentHooksConfig.empty(), "", "", "", ""),
                 (point, runtime, skipped) -> HookDispatchResult.continued(),
@@ -78,7 +74,6 @@ public class SuperAgentFactory {
             ToolCallProcessor toolCallProcessor,
             ConversationMemoryManager conversationMemoryManager,
             SessionContextStore sessionContextStore,
-            MemoryLifecycleManager memoryLifecycleManager,
             IAgentDefinitionLoader agentDefinitionLoader,
             AgentLifecycleHookRuntime lifecycleHookRuntime,
             AgentExecutionStore agentExecutionStore) {
@@ -91,7 +86,6 @@ public class SuperAgentFactory {
         this.toolCallProcessor = toolCallProcessor;
         this.conversationMemoryManager = conversationMemoryManager;
         this.sessionContextStore = sessionContextStore;
-        this.memoryLifecycleManager = memoryLifecycleManager;
         this.agentDefinitionLoader = agentDefinitionLoader;
         this.lifecycleHookRuntime = lifecycleHookRuntime;
         this.agentExecutionStore = agentExecutionStore;
@@ -139,7 +133,6 @@ public class SuperAgentFactory {
                 toolCallProcessor,
                 conversationMemoryManager,
                 sessionContextStore,
-                memoryLifecycleManager,
                 agentDefinitionLoader,
                 lifecycleHookRuntime,
                 agentExecutionStore);

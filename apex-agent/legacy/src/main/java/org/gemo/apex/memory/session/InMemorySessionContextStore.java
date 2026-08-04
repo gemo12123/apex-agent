@@ -6,7 +6,6 @@ import org.gemo.apex.memory.persistence.convert.SessionContextEntityConverter;
 import org.gemo.apex.memory.persistence.entity.AgentSessionDialogueMessageEntity;
 import org.gemo.apex.memory.persistence.entity.AgentSessionDialogueSummaryEntity;
 import org.gemo.apex.memory.persistence.entity.AgentSessionEntity;
-import org.gemo.apex.skills.learning.model.SkillSessionMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.stereotype.Component;
 
@@ -79,19 +78,6 @@ public class InMemorySessionContextStore implements SessionContextStore {
         return dialogueMessageMap.getOrDefault(sessionId, List.of()).stream()
                 .sorted(Comparator.comparing(AgentSessionDialogueMessageEntity::getSortNo))
                 .map(entity -> MessageEntityConverter.fromPayload(entity.getMessagePayload(), entity.getRole(),
-                        entity.getContent()))
-                .toList();
-    }
-
-    @Override
-    public List<SkillSessionMessage> loadSkillSessionMessages(String sessionId) {
-        return dialogueMessageMap.getOrDefault(sessionId, List.of()).stream()
-                .sorted(Comparator.comparing(AgentSessionDialogueMessageEntity::getSortNo))
-                .map(entity -> new SkillSessionMessage(
-                        entity.getSortNo(),
-                        entity.getRole(),
-                        entity.getToolName(),
-                        entity.getMessagePayload(),
                         entity.getContent()))
                 .toList();
     }

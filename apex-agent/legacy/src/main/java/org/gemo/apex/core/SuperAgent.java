@@ -29,7 +29,6 @@ import org.gemo.apex.constant.ModeEnum;
 import org.gemo.apex.definition.agent.AgentDefinition;
 import org.gemo.apex.memory.conversation.ConversationMemoryManager;
 import org.gemo.apex.memory.session.SessionContextStore;
-import org.gemo.apex.memory.write.MemoryLifecycleManager;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
@@ -57,7 +56,6 @@ public class SuperAgent {
     private final ToolCallProcessor toolCallProcessor;
     private final ConversationMemoryManager conversationMemoryManager;
     private final SessionContextStore sessionContextStore;
-    private final MemoryLifecycleManager memoryLifecycleManager;
     private final IAgentDefinitionLoader agentDefinitionLoader;
     private final AgentLifecycleHookRuntime lifecycleHookRuntime;
     private final AgentExecutionStore agentExecutionStore;
@@ -72,8 +70,7 @@ public class SuperAgent {
             ToolInterceptor toolInterceptor,
             ToolCallProcessor toolCallProcessor,
             ConversationMemoryManager conversationMemoryManager,
-            SessionContextStore sessionContextStore,
-            MemoryLifecycleManager memoryLifecycleManager) {
+            SessionContextStore sessionContextStore) {
         this(context,
                 humanInLoopResumer,
                 stageToolResolver,
@@ -83,7 +80,6 @@ public class SuperAgent {
                 toolCallProcessor,
                 conversationMemoryManager,
                 sessionContextStore,
-                memoryLifecycleManager,
                 agentKey -> new AgentDefinition(agentKey, ModeEnum.REACT, List.of(), List.of(), List.of(),
                         AgentHooksConfig.empty(), "", "", "", ""),
                 (point, runtime, skipped) -> HookDispatchResult.continued(),
@@ -99,7 +95,6 @@ public class SuperAgent {
             ToolCallProcessor toolCallProcessor,
             ConversationMemoryManager conversationMemoryManager,
             SessionContextStore sessionContextStore,
-            MemoryLifecycleManager memoryLifecycleManager,
             IAgentDefinitionLoader agentDefinitionLoader,
             AgentLifecycleHookRuntime lifecycleHookRuntime,
             AgentExecutionStore agentExecutionStore) {
@@ -112,7 +107,6 @@ public class SuperAgent {
         this.toolCallProcessor = toolCallProcessor;
         this.conversationMemoryManager = conversationMemoryManager;
         this.sessionContextStore = sessionContextStore;
-        this.memoryLifecycleManager = memoryLifecycleManager;
         this.agentDefinitionLoader = agentDefinitionLoader;
         this.lifecycleHookRuntime = lifecycleHookRuntime;
         this.agentExecutionStore = agentExecutionStore;
@@ -485,9 +479,6 @@ public class SuperAgent {
         context.setNextMessageSortNo(context.getTurnStartSortNo() + context.getPersistedDialogueMessageIndex() + 1L);
         context.setLastActiveTime(LocalDateTime.now());
         sessionContextStore.save(context);
-        if (turnCompleted) {
-            memoryLifecycleManager.onTurnCompleted(context);
-        }
     }
 
     private void persistDialogueMessages() {

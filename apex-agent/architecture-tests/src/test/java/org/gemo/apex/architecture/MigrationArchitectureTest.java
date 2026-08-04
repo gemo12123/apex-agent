@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -59,6 +60,57 @@ class MigrationArchitectureTest {
         Map<String, Set<String>> cyclic = new LinkedHashMap<>(EXPECTED_DEPENDENCIES);
         cyclic.put("protocol", Set.of("common"));
         assertThrows(IllegalStateException.class, () -> assertAcyclic(cyclic));
+    }
+
+    @Test
+    void memoryArchiveIsACompleteNonCompiledPomModule() throws Exception {
+        Path memoryRoot = reactorRoot.resolve("memory");
+        Path pom = memoryRoot.resolve("pom.xml");
+        var document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(pom.toFile());
+
+        assertEquals("pom", document.getElementsByTagName("packaging").item(0).getTextContent().trim());
+        assertEquals(0, document.getElementsByTagName("dependency").getLength());
+        assertEquals(0, document.getElementsByTagName("plugin").getLength());
+        assertEquals(0, document.getElementsByTagName("sourceDirectory").getLength());
+        assertEquals(0, document.getElementsByTagName("resource").getLength());
+        assertFalse(Files.exists(memoryRoot.resolve("src/main")));
+        assertFalse(Files.exists(memoryRoot.resolve("src/test")));
+
+        Path manifest = memoryRoot.resolve("archive/MANIFEST.md");
+        List<String> records = Files.readAllLines(manifest, StandardCharsets.UTF_8).stream()
+                .filter(line -> line.startsWith("apex-agent/legacy/src/main/"))
+                .toList();
+        assertFalse(records.isEmpty());
+        Set<String> originals = new HashSet<>();
+        Set<String> archived = new HashSet<>();
+        Path repositoryRoot = reactorRoot.getParent();
+        for (String record : records) {
+            String[] columns = record.split("\\s+\\|\\s+", 5);
+            assertEquals(5, columns.length, "归档记录字段不完整：" + record);
+            assertEquals("archive", columns[2]);
+            assertTrue(originals.add(columns[0]), "原路径重复：" + columns[0]);
+            assertTrue(archived.add(columns[1]), "归档路径重复：" + columns[1]);
+            assertFalse(Files.exists(repositoryRoot.resolve(columns[0])));
+            assertTrue(Files.isRegularFile(repositoryRoot.resolve(columns[1])), "归档目标缺失：" + columns[1]);
+        }
+
+        try (var files = Files.walk(memoryRoot.resolve("archive/main"))) {
+            long archivedFileCount = files.filter(Files::isRegularFile).count();
+            assertEquals(records.size(), archivedFileCount, "MANIFEST 与归档文件数量不一致");
+        }
+        for (String module : TARGET_MODULES) {
+            if ("memory".equals(module)) {
+                continue;
+            }
+            Path sourceRoot = reactorRoot.resolve(module).resolve("src");
+            if (!Files.exists(sourceRoot)) {
+                continue;
+            }
+            try (var files = Files.walk(sourceRoot)) {
+                assertTrue(files.filter(Files::isRegularFile).noneMatch(this::referencesMemoryArchive),
+                        module + " 不得引用 memory/archive");
+            }
+        }
     }
 
     @Test
@@ -166,5 +218,13 @@ class MigrationArchitectureTest {
         Object value = entry.get(key);
         assertTrue(value instanceof String && !((String) value).isBlank(), "豁免缺少必填字段：" + key);
         return (String) value;
+    }
+
+    private boolean referencesMemoryArchive(Path file) {
+        try {
+            return Files.readString(file, StandardCharsets.UTF_8).contains("memory/archive");
+        } catch (IOException exception) {
+            throw new IllegalStateException("读取源码失败：" + file, exception);
+        }
     }
 }

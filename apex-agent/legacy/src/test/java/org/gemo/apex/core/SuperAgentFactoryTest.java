@@ -11,7 +11,6 @@ import org.gemo.apex.core.engine.ToolCallProcessor;
 import org.gemo.apex.domain.dto.ChatRequest;
 import org.gemo.apex.memory.conversation.ConversationMemoryManager;
 import org.gemo.apex.memory.session.SessionContextStore;
-import org.gemo.apex.memory.write.MemoryLifecycleManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -54,9 +53,6 @@ class SuperAgentFactoryTest {
     @Mock
     private SessionContextStore sessionContextStore;
 
-    @Mock
-    private MemoryLifecycleManager memoryLifecycleManager;
-
     private SuperAgentFactory superAgentFactory;
 
     @BeforeEach
@@ -70,8 +66,7 @@ class SuperAgentFactoryTest {
                 toolInterceptor,
                 toolCallProcessor,
                 conversationMemoryManager,
-                sessionContextStore,
-                memoryLifecycleManager);
+                sessionContextStore);
     }
 
     @Test

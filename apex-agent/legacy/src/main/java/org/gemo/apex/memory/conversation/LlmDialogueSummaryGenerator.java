@@ -1,6 +1,5 @@
 package org.gemo.apex.memory.conversation;
 
-import org.gemo.apex.memory.extract.PromptTemplateLoader;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.stereotype.Component;
@@ -14,11 +13,8 @@ import java.util.List;
 public class LlmDialogueSummaryGenerator implements DialogueSummaryGenerator {
 
     private final ChatClient chatClient;
-    private final PromptTemplateLoader promptTemplateLoader;
-
-    public LlmDialogueSummaryGenerator(ChatClient chatClient, PromptTemplateLoader promptTemplateLoader) {
+    public LlmDialogueSummaryGenerator(ChatClient chatClient) {
         this.chatClient = chatClient;
-        this.promptTemplateLoader = promptTemplateLoader;
     }
 
     @Override
@@ -36,8 +32,7 @@ public class LlmDialogueSummaryGenerator implements DialogueSummaryGenerator {
                         .append(message.getText()).append("\n\n");
             }
         }
-        String prompt = promptTemplateLoader.load("classpath:prompts/memory/dialogue-summary.st")
-                .replace("{conversation}", conversation.toString());
+        String prompt = "请总结以下对话，保留关键事实、决策和待办事项：\n\n" + conversation;
         try {
             return chatClient.prompt(prompt).call().content();
         } catch (Exception ex) {

@@ -11,9 +11,6 @@ import org.gemo.apex.definition.agent.IAgentDefinitionLoader;
 import org.gemo.apex.domain.Plan;
 import org.gemo.apex.exception.SessionResumeNotAllowedException;
 import org.gemo.apex.memory.context.UserContextHolder;
-import org.gemo.apex.memory.model.MemoryItem;
-import org.gemo.apex.memory.model.MemoryRecallPackage;
-import org.gemo.apex.memory.recall.MemoryRecallService;
 import org.gemo.apex.memory.session.SessionContextStore;
 import org.gemo.apex.hook.lifecycle.AgentExecutionStore;
 import org.junit.jupiter.api.AfterEach;
@@ -60,9 +57,6 @@ class SuperAgentSessionServiceTest {
     private SessionContextStore sessionContextStore;
 
     @Mock
-    private MemoryRecallService memoryRecallService;
-
-    @Mock
     private AgentExecutionStore agentExecutionStore;
 
     @InjectMocks
@@ -88,9 +82,6 @@ class SuperAgentSessionServiceTest {
     @Test
     void createContextShouldCreateNewSessionWhenSessionDoesNotExist() {
         when(sessionContextStore.load("session-1")).thenReturn(Optional.empty());
-        MemoryRecallPackage recallPackage = recallPackage();
-        when(memoryRecallService.recall(any(SuperAgentContext.class))).thenReturn(recallPackage);
-
         SuperAgentContext context = sessionService.createContext("session-1", "agent-1", "hello");
 
         assertEquals("session-1", context.getSessionId());
@@ -104,13 +95,11 @@ class SuperAgentSessionServiceTest {
         assertEquals(1, context.getDialogueMessages().size());
         assertInstanceOf(UserMessage.class, context.getDialogueMessages().getFirst());
         assertEquals("hello", context.getDialogueMessages().getFirst().getText());
-        assertSame(recallPackage, context.getMemoryRecallPackage());
 
         ArgumentCaptor<List<Message>> messagesCaptor = ArgumentCaptor.forClass(List.class);
         verify(sessionContextStore).appendDialogueMessages(eq("session-1"), eq(1L), eq(0L), messagesCaptor.capture());
         assertEquals(1, messagesCaptor.getValue().size());
         assertEquals("hello", messagesCaptor.getValue().getFirst().getText());
-        verify(memoryRecallService).recall(context);
         verify(sessionContextStore).save(context);
     }
 
@@ -142,9 +131,6 @@ class SuperAgentSessionServiceTest {
         existingContext.setPendingToolResult(java.util.Map.of("approved", true));
         when(sessionContextStore.load("session-1")).thenReturn(Optional.of(existingContext));
         when(agentExecutionStore.nextTurnNo()).thenReturn(3L);
-        MemoryRecallPackage recallPackage = recallPackage();
-        when(memoryRecallService.recall(existingContext)).thenReturn(recallPackage);
-
         SuperAgentContext context = sessionService.createContext("session-1", "agent-1", "follow up");
 
         assertEquals(existingContext, context);
@@ -157,7 +143,6 @@ class SuperAgentSessionServiceTest {
         assertNull(context.getPlan());
         assertNull(context.getCurrentStageId());
         assertNull(context.getPendingToolResult());
-        assertSame(recallPackage, context.getMemoryRecallPackage());
         assertEquals(2, context.getDialogueMessages().size());
         assertEquals("follow up", context.getDialogueMessages().getLast().getText());
 
@@ -165,7 +150,6 @@ class SuperAgentSessionServiceTest {
         verify(sessionContextStore).appendDialogueMessages(eq("session-1"), eq(3L), eq(5L), messagesCaptor.capture());
         assertEquals(1, messagesCaptor.getValue().size());
         assertEquals("follow up", messagesCaptor.getValue().getFirst().getText());
-        verify(memoryRecallService).recall(existingContext);
         verify(sessionContextStore).save(context);
     }
 
@@ -267,31 +251,14 @@ class SuperAgentSessionServiceTest {
         existingContext.setTurnStartSortNo(5L);
         existingContext.setPersistedDialogueMessageIndex(2);
         when(sessionContextStore.load("session-1")).thenReturn(Optional.of(existingContext));
-        MemoryRecallPackage recallPackage = recallPackage();
-        when(memoryRecallService.recall(existingContext)).thenReturn(recallPackage);
-
         SuperAgentContext context = sessionService.resumeContext("session-1", "agent-1", Map.of("k", "v"));
 
         assertSame(existingContext, context);
         assertEquals(ModeEnum.REACT, context.getExecutionMode());
         assertEquals(Map.of("k", "v"), context.getPendingToolResult());
         assertEquals(8L, context.getNextMessageSortNo());
-        assertSame(recallPackage, context.getMemoryRecallPackage());
     }
 
-    private MemoryRecallPackage recallPackage() {
-        MemoryRecallPackage recallPackage = new MemoryRecallPackage();
-        recallPackage.setProfileItems(List.of(memoryItem("profile", "prefers coffee")));
-        recallPackage.setExperienceItems(List.of(memoryItem("experience", "prefer clear options")));
-        return recallPackage;
-    }
-
-    private MemoryItem memoryItem(String title, String content) {
-        MemoryItem item = new MemoryItem();
-        item.setTitle(title);
-        item.setContent(content);
-        return item;
-    }
 
     private AgentDefinition definition(ModeEnum mode) {
         return new AgentDefinition(

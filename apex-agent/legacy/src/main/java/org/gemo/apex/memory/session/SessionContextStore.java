@@ -1,7 +1,6 @@
 package org.gemo.apex.memory.session;
 
 import org.gemo.apex.context.SuperAgentContext;
-import org.gemo.apex.skills.learning.model.SkillSessionMessage;
 import org.springframework.ai.chat.messages.Message;
 
 import java.util.List;
@@ -29,8 +28,6 @@ public interface SessionContextStore {
     }
 
     List<Message> loadAllRawDialogueMessages(String sessionId);
-
-    List<SkillSessionMessage> loadSkillSessionMessages(String sessionId);
 
     int countUncompactedMessagesBeforeTurn(String sessionId, Long turnNo);
 

@@ -1,13 +1,13 @@
 # memory 模块任务
 
 > 模块职责：把长期 Memory、会话搜索、管理和 Skill Learning 的旧源码/资源保存为非编译历史归档
-> 当前总体进度：未开始；现有 memory 与 learning 代码仍混在生产源码和默认配置中
+> 当前总体进度：已完成（2026-08-04）；长期 Memory、搜索、管理和 Skill Learning 已退出标准源码，memory 为无依赖、无字节码的非编译归档占位模块
 
 ## MEM-01 归档长期 Memory、会话搜索与管理代码
 
 - **任务名称**：分离主链职责并原样归档长期 Memory 相关旧代码。
 - **任务目标**：保留历史实现供后续整理，同时确保当前 Session/Conversation 正式实现不依赖归档。
-- **当前进度**：未开始。
+- **当前进度**：已完成（2026-08-04）。76 个归档文件中的长期 Memory/search/manage 部分已迁入非标准目录；legacy 默认工具、索引维护、生命周期写入、Mapper 扫描与配置引用已移除。
 - **设计依据**：已确认 Q-16；设计文档第 5.8、阶段 7；架构文档第 5.8、15.3 节。
 - **涉及范围**：长期 Memory model/recall/extract/write/manage/persistence、`session_search`、旧 SQL/Prompt/配置；排除主链 Session/Conversation 正式实现。
 - **前置依赖**：FND-02、CORE/RUN/PLAT 对 Session/Conversation 的替代任务。
@@ -28,7 +28,7 @@
 
 - **任务名称**：迁移 Skill Learning 历史源码并保留普通 Skill 生产能力。
 - **任务目标**：让 learning 代码退出生产构建，同时保证普通 Skill、资源读取和 `activate_skill` 继续由 runtime 工作。
-- **当前进度**：未开始。
+- **当前进度**：已完成（2026-08-04）。RUN-05 已确认完成，Skill Learning 源码、Prompt、Hook、scheduler、Repository 与配置已归档；普通 Skill 回归 11 项通过。
 - **设计依据**：已确认 Q-16；设计文档第 5.8、阶段 7；架构文档第 5.8、6.4 节。
 - **涉及范围**：`org.gemo.apex.skills.learning`、使用记录、经验抽取/调度/增强 Hook、Repository、SQL、Prompt 和配置。
 - **前置依赖**：MEM-01、RUN-05。
@@ -48,7 +48,7 @@
 
 - **任务名称**：建立无依赖、无字节码的 memory 占位模块和可审计归档。
 - **任务目标**：保留八模块目录，同时证明 memory 不参与生产编译、测试、资源打包或运行。
-- **当前进度**：未开始。
+- **当前进度**：已完成（2026-08-04）。memory POM/README/MANIFEST、自动归档边界守卫与构建隔离报告已完成；父 reactor verify 成功，runtime/platform jar 无归档内容，memory 产出 0 jar、0 class。
 - **设计依据**：已确认 Q-16；设计文档第 4.1、5.8、22 节；架构文档第 4.2、15.3、18.1 节。
 - **涉及范围**：memory POM/README/MANIFEST、父 POM、七个代码模块依赖树和发布物、FND/CLEAN 检查。
 - **前置依赖**：MEM-01、MEM-02、FND-03A。

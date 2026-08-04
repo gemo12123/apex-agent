@@ -1,20 +1,17 @@
 package org.gemo.apex.component.tool;
 
-import org.gemo.apex.memory.search.SessionSearchService;
-import org.gemo.apex.tool.SessionSearchTool;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
 
 class BuiltInToolProviderTest {
 
     @Test
     void initShouldNotRegisterLegacyStageTools() {
-        BuiltInToolProvider provider = new BuiltInToolProvider(new SessionSearchTool(mock(SessionSearchService.class)));
+        BuiltInToolProvider provider = new BuiltInToolProvider();
 
         provider.init();
 
@@ -24,7 +21,7 @@ class BuiltInToolProviderTest {
         assertTrue(toolNames.contains("ask_human"));
         assertTrue(toolNames.contains("write_plan_tool"));
         assertTrue(toolNames.contains("update_plan_tool"));
-        assertTrue(toolNames.contains("session_search"));
+        assertFalse(toolNames.contains("session_search"));
         assertFalse(toolNames.contains("direct_answer"));
         assertFalse(toolNames.contains("write_mode"));
     }

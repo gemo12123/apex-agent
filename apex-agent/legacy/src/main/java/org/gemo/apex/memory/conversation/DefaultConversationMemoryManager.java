@@ -2,11 +2,8 @@ package org.gemo.apex.memory.conversation;
 
 import lombok.extern.slf4j.Slf4j;
 import org.gemo.apex.context.SuperAgentContext;
-import org.gemo.apex.memory.config.MemoryConfigService;
-import org.gemo.apex.memory.model.MemoryItem;
-import org.gemo.apex.memory.model.MemoryRecallPackage;
+import org.gemo.apex.memory.config.MemoryProperties;
 import org.gemo.apex.memory.session.SessionContextStore;
-import org.gemo.apex.memory.write.MemoryLifecycleManager;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -24,19 +21,16 @@ public class DefaultConversationMemoryManager implements ConversationMemoryManag
 
     private final TokenEstimator tokenEstimator;
     private final DialogueSummaryGenerator dialogueSummaryGenerator;
-    private final MemoryConfigService memoryConfigService;
-    private final MemoryLifecycleManager memoryLifecycleManager;
+    private final MemoryProperties memoryProperties;
     private final SessionContextStore sessionContextStore;
 
     public DefaultConversationMemoryManager(TokenEstimator tokenEstimator,
             DialogueSummaryGenerator dialogueSummaryGenerator,
-            MemoryConfigService memoryConfigService,
-            MemoryLifecycleManager memoryLifecycleManager,
+            MemoryProperties memoryProperties,
             SessionContextStore sessionContextStore) {
         this.tokenEstimator = tokenEstimator;
         this.dialogueSummaryGenerator = dialogueSummaryGenerator;
-        this.memoryConfigService = memoryConfigService;
-        this.memoryLifecycleManager = memoryLifecycleManager;
+        this.memoryProperties = memoryProperties;
         this.sessionContextStore = sessionContextStore;
     }
 
@@ -47,11 +41,6 @@ public class DefaultConversationMemoryManager implements ConversationMemoryManag
         if (context.getUserId() != null && !context.getUserId().isBlank()) {
             fixedMessages.add(new UserMessage("Current user id: " + context.getUserId()));
         }
-        String recallText = renderRecallText(context.getMemoryRecallPackage());
-        if (!recallText.isBlank()) {
-            fixedMessages.add(new UserMessage(recallText));
-        }
-
         context.setFixedMessages(fixedMessages);
     }
 
@@ -63,7 +52,7 @@ public class DefaultConversationMemoryManager implements ConversationMemoryManag
 
     @Override
     public void compactIfNeeded(SuperAgentContext context) {
-        if (!memoryConfigService.isCompactionEnabled()) {
+        if (!memoryProperties.getCompaction().isEnabled()) {
             return;
         }
 
@@ -76,11 +65,11 @@ public class DefaultConversationMemoryManager implements ConversationMemoryManag
         nonFixedMessages.addAll(context.getDialogueMessages());
 
         if (tokenEstimator.estimate(nonFixedMessages)
-                <= memoryConfigService.getProperties().getCompaction().getTokenThreshold()) {
+                <= memoryProperties.getCompaction().getTokenThreshold()) {
             return;
         }
 
-        int retainCount = memoryConfigService.getProperties().getCompaction().getRetainRecentMessages();
+        int retainCount = memoryProperties.getCompaction().getRetainRecentMessages();
         int dialogueSize = context.getDialogueMessages().size();
         int retainedCount = Math.min(retainCount, dialogueSize);
         int eligibleCount = sessionContextStore.countUncompactedMessagesBeforeTurn(context.getSessionId(),
@@ -132,33 +121,6 @@ public class DefaultConversationMemoryManager implements ConversationMemoryManag
                 messagesToPersist);
         context.setPersistedDialogueMessageIndex(context.getDialogueMessages().size());
         context.setNextMessageSortNo(context.getTurnStartSortNo() + context.getPersistedDialogueMessageIndex() + 1L);
-    }
-
-    private String renderRecallText(MemoryRecallPackage recallPackage) {
-        if (recallPackage == null) {
-            return "";
-        }
-        StringBuilder builder = new StringBuilder();
-        appendSection(builder, "用户画像记忆", recallPackage.getProfileItems());
-        appendSection(builder, "智能体经验记忆", recallPackage.getExperienceItems());
-        return builder.toString();
-    }
-
-    private void appendSection(StringBuilder builder, String title, List<MemoryItem> items) {
-        if (items == null || items.isEmpty()) {
-            return;
-        }
-        if (builder.length() > 0) {
-            builder.append("\n\n");
-        }
-        builder.append(title).append(":\n");
-        for (MemoryItem item : items) {
-            builder.append("- ")
-                    .append(item.getTitle() != null ? item.getTitle() : "未命名记忆")
-                    .append(": ")
-                    .append(item.getContent())
-                    .append("\n");
-        }
     }
 
 }

@@ -26,7 +26,6 @@ import org.gemo.apex.hook.lifecycle.InMemoryAgentExecutionStore;
 import org.gemo.apex.hook.lifecycle.MessageOperation;
 import org.gemo.apex.memory.conversation.ConversationMemoryManager;
 import org.gemo.apex.memory.session.SessionContextStore;
-import org.gemo.apex.memory.write.MemoryLifecycleManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
@@ -87,9 +86,6 @@ class SuperAgentTest {
     @Mock
     private SessionContextStore sessionContextStore;
 
-    @Mock
-    private MemoryLifecycleManager memoryLifecycleManager;
-
     private SuperAgentContext context;
     private SuperAgent superAgent;
 
@@ -115,8 +111,7 @@ class SuperAgentTest {
                 toolInterceptor,
                 toolCallProcessor,
                 conversationMemoryManager,
-                sessionContextStore,
-                memoryLifecycleManager);
+                sessionContextStore);
     }
 
     @Test
@@ -129,7 +124,6 @@ class SuperAgentTest {
         verify(humanInLoopResumer).resume(same(context), any());
         verify(conversationMemoryManager).appendDialogueMessage(any(), any(AssistantMessage.class));
         verify(sessionContextStore).save(context);
-        verify(memoryLifecycleManager).onTurnCompleted(context);
     }
 
     @Test
@@ -164,7 +158,6 @@ class SuperAgentTest {
 
         assertEquals(ExecutionStatus.HUMAN_IN_THE_LOOP, context.getExecutionStatus());
         verify(sessionContextStore, times(1)).save(context);
-        verify(memoryLifecycleManager, never()).onTurnCompleted(context);
     }
 
     @Test
@@ -175,7 +168,6 @@ class SuperAgentTest {
 
         assertEquals(ExecutionStatus.FAILED, context.getExecutionStatus());
         verify(sessionContextStore).save(context);
-        verify(memoryLifecycleManager).onTurnCompleted(context);
     }
 
     @Test
@@ -348,7 +340,6 @@ class SuperAgentTest {
                 toolCallProcessor,
                 conversationMemoryManager,
                 sessionContextStore,
-                memoryLifecycleManager,
                 agentKey -> new AgentDefinition(
                         agentKey, ModeEnum.REACT, List.of(), List.of(), List.of(),
                         hookConfig, "", "", "", ""),

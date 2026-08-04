@@ -9,7 +9,6 @@ import org.gemo.apex.definition.agent.AgentDefinition;
 import org.gemo.apex.definition.agent.IAgentDefinitionLoader;
 import org.gemo.apex.exception.SessionResumeNotAllowedException;
 import org.gemo.apex.memory.context.UserContextHolder;
-import org.gemo.apex.memory.recall.MemoryRecallService;
 import org.gemo.apex.memory.session.SessionContextStore;
 import org.gemo.apex.hook.lifecycle.AgentExecutionStore;
 import org.gemo.apex.hook.lifecycle.InMemoryAgentExecutionStore;
@@ -42,9 +41,6 @@ public class SuperAgentSessionService {
 
     @Autowired
     private SessionContextStore sessionContextStore;
-
-    @Autowired
-    private MemoryRecallService memoryRecallService;
 
     @Autowired(required = false)
     private AgentExecutionStore agentExecutionStore = new InMemoryAgentExecutionStore();
@@ -84,7 +80,6 @@ public class SuperAgentSessionService {
         context.setUserId(userId);
         context.setPendingToolResult(humanResponse != null && !humanResponse.isEmpty() ? humanResponse : new HashMap<>());
         context.setNextMessageSortNo(context.getTurnStartSortNo() + context.getPersistedDialogueMessageIndex() + 1L);
-        context.setMemoryRecallPackage(memoryRecallService.recall(context));
         return context;
     }
 
@@ -144,7 +139,6 @@ public class SuperAgentSessionService {
 
         UserMessage userMessage = new UserMessage(userQuery);
         context.addMessage(userMessage);
-        context.setMemoryRecallPackage(memoryRecallService.recall(context));
         persistNewTurn(context, userMessage);
         return context;
     }
