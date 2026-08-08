@@ -6,6 +6,7 @@ import org.gemo.apex.common.tool.*;
 import org.gemo.apex.extension.model.*;
 import org.springframework.ai.chat.messages.*;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import reactor.core.Disposable;
 
@@ -41,7 +42,11 @@ public final class SpringAiModelGateway implements ModelGateway {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         CountDownLatch done = new CountDownLatch(1);
         Disposable sub = model.stream(new Prompt(ms, options)).subscribe(x -> {
-            var out = x.getResult().getOutput();
+            Generation result = x.getResult();
+            if (result == null) {
+                return;
+            }
+            var out = result.getOutput();
             if (out.getText() != null) text.append(out.getText());
             int base = calls.size();
             for (int i = 0; i < out.getToolCalls().size(); i++)

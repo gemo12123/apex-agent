@@ -27,3 +27,6 @@ apex:
         skills: []
         sub-agents: {}
         hooks: {}
+
+server:
+  port: 18083
