@@ -24,8 +24,11 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class LifecycleCoverageTest {
+    /**
+     * 十一个生命周期均由同一调度器按定义触发
+     */
     @Test
-    void 十一个生命周期均由同一调度器按定义触发() {
+    void dispatchesAllElevenLifecycleStagesByDefinitionThroughSameDispatcher() {
         CoreTestFixture fixture = new CoreTestFixture();
         Map<HookPoint, Integer> counts = new EnumMap<>(HookPoint.class);
         Map<HookPoint, List<HookBinding>> bindings = new EnumMap<>(HookPoint.class);
@@ -60,8 +63,11 @@ class LifecycleCoverageTest {
         assertEquals(1, counts.get(HookPoint.TURN_END));
     }
 
+    /**
+     * Hook普通异常只跳过当前Binding并继续后续Hook
+     */
     @Test
-    void Hook普通异常只跳过当前Binding并继续后续Hook() {
+    void ordinaryHookExceptionSkipsOnlyCurrentBindingAndContinuesSubsequentHooks() {
         CoreTestFixture fixture = new CoreTestFixture();
         List<String> invoked = new ArrayList<>();
         fixture.hooks.put("broken", loopHook(context -> {
@@ -82,8 +88,11 @@ class LifecycleCoverageTest {
         assertEquals(List.of("broken", "next"), invoked);
     }
 
+    /**
+     * Hook非法工具变更不会留下部分状态
+     */
     @Test
-    void Hook非法工具变更不会留下部分状态() {
+    void illegalHookToolChangesDoNotLeavePartialState() {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.hooks.put("illegal", loopHook(context -> new ContinueLoop(new HookMutations(List.of(),
                 new ToolActivationDelta(Set.of("unknown"), Set.of())))));
@@ -100,8 +109,11 @@ class LifecycleCoverageTest {
         assertEquals(0, fixture.modelCalls);
     }
 
+    /**
+     * 工具Binding应支持精确与星号匹配并向Hook暴露自身配置
+     */
     @Test
-    void 工具Binding应支持精确与星号匹配并向Hook暴露自身配置() {
+    void toolBindingSupportsExactAndWildcardMatchingAndExposesItsConfigurationToHook() {
         CoreTestFixture fixture = new CoreTestFixture();
         List<String> invoked = new ArrayList<>();
         fixture.hooks.put("capture", preToolHook(context -> {
@@ -130,8 +142,11 @@ class LifecycleCoverageTest {
         assertEquals(List.of("glob:glob", "exact:exact"), invoked);
     }
 
+    /**
+     * 人工提交应同时传给PreToolHook和真实工具
+     */
     @Test
-    void 人工提交应同时传给PreToolHook和真实工具() {
+    void passesHumanSubmissionToBothPreToolHookAndActualTool() {
         CoreTestFixture fixture = new CoreTestFixture();
         QuestionSubmission submission = new QuestionSubmission("call-1", Map.of("0", "答案"));
         List<Object> observed = new ArrayList<>();

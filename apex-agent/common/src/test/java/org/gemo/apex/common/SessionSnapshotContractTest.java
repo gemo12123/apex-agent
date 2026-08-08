@@ -17,8 +17,11 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 
 class SessionSnapshotContractTest {
+    /**
+     * v1快照应完整往返并按ToolCallId定位挂起调用
+     */
     @Test
-    void v1快照应完整往返并按ToolCallId定位挂起调用() {
+    void v1SnapshotsRoundTripCompletelyAndLocateSuspendedCallsByToolCallId() {
         SessionSnapshot snapshot = CommonFixtures.suspendedSnapshot();
         SessionSnapshotJsonAdapter adapter = new SessionSnapshotJsonAdapter();
 
@@ -29,23 +32,32 @@ class SessionSnapshotContractTest {
         assertEquals(List.of("audit", "confirm"), copy.suspendedToolCall().executedPreToolHookIds());
     }
 
+    /**
+     * 未知版本应显式拒绝且不尝试升级
+     */
     @Test
-    void 未知版本应显式拒绝且不尝试升级() {
+    void rejectsUnknownVersionExplicitlyWithoutUpgradeAttempt() {
         String json = new SessionSnapshotJsonAdapter().write(CommonFixtures.suspendedSnapshot())
                 .replace("\"1.0.0\"", "\"2.0.0\"");
         assertThrows(UnsupportedSnapshotVersionException.class,
                 () -> new SessionSnapshotJsonAdapter().read(json));
     }
 
+    /**
+     * 损坏Json应包装为不泄露正文的快照解码异常
+     */
     @Test
-    void 损坏Json应包装为不泄露正文的快照解码异常() {
+    void wrapsCorruptedJsonInSnapshotDecodingExceptionWithoutBodyLeak() {
         SnapshotDecodingException exception = assertThrows(SnapshotDecodingException.class,
                 () -> new SessionSnapshotJsonAdapter().read("{not-json"));
         assertFalse(exception.getMessage().contains("not-json"));
     }
 
+    /**
+     * 历史工具不能回填enabledTools且preHookId不能重复
+     */
     @Test
-    void 历史工具不能回填enabledTools且preHookId不能重复() {
+    void doesNotBackfillEnabledToolsForHistoricalToolsAndRejectsDuplicatePreHookIds() {
         SessionSnapshot source = CommonFixtures.suspendedSnapshot();
         HistoricalToolBinding historical = new HistoricalToolBinding("search",
                 org.gemo.apex.common.tool.ToolOrigin.MCP, "github", "DOWN", CommonFixtures.NOW);
@@ -61,8 +73,11 @@ class SessionSnapshotContractTest {
                 suspended.intervention(), List.of("same", "same"), suspended.suspensionPoint()));
     }
 
+    /**
+     * 快照类型图不得包含CancellationToken
+     */
     @Test
-    void 快照类型图不得包含CancellationToken() {
+    void snapshotTypeGraphExcludesCancellationToken() {
         Set<Class<?>> seen = new HashSet<>();
         ArrayDeque<Class<?>> queue = new ArrayDeque<>();
         queue.add(SessionSnapshot.class);

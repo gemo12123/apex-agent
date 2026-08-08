@@ -38,21 +38,30 @@ class HookContractTest {
                 new Contract(HookPoint.TURN_END, TurnEndHookResult.class));
     }
 
+    /**
+     * 十一个生命周期均有明确结果族
+     */
     @ParameterizedTest
     @MethodSource("contracts")
-    void 十一个生命周期均有明确结果族(Contract contract) {
+    void allElevenLifecycleStagesHaveExplicitResultFamilies(Contract contract) {
         assertTrue(LifecycleHookResult.class.isAssignableFrom(contract.resultType()));
         assertNotEquals(LifecycleHookResult.class, contract.resultType());
     }
 
+    /**
+     * turnEnd结果族只能Continue
+     */
     @Test
-    void turnEnd结果族只能Continue() {
+    void turnEndResultFamilyAllowsOnlyContinue() {
         assertArrayEquals(new Class<?>[]{ContinueTurnEnd.class}, TurnEndHookResult.class.getPermittedSubclasses());
         assertFalse(TurnEndHookResult.class.isAssignableFrom(EndTurnLoop.class));
     }
 
+    /**
+     * 运行生命周期结果闭包不得出现Agent定义操作
+     */
     @Test
-    void 运行生命周期结果闭包不得出现Agent定义操作() {
+    void runtimeLifecycleResultClosureExcludesAgentDefinitionOperations() {
         List<Class<?>> resultRecords = List.of(ContinueLoop.class, EndTurnLoop.class,
                 ContinuePreMessageCompression.class, EndTurnPreMessageCompression.class,
                 ContinuePostMessageCompression.class, EndTurnPostMessageCompression.class,
@@ -71,8 +80,11 @@ class HookContractTest {
         }
     }
 
+    /**
+     * mutation构造时应拒绝重复操作和冲突工具变更
+     */
     @Test
-    void mutation构造时应拒绝重复操作和冲突工具变更() {
+    void mutationRejectsDuplicateOperationsAndConflictingToolChangesAtConstruction() {
         ToolResult result = new ToolResult("call", "tool", "done", Map.of());
         MessageOperation first = new AppendMessage("same", CommonFixtures.userMessage());
         MessageOperation second = new ReplaceMessage("same", 0, CommonFixtures.userMessage());
@@ -85,8 +97,11 @@ class HookContractTest {
         assertThrows(IllegalArgumentException.class, () -> new ReturnToolResult(null));
     }
 
+    /**
+     * 工具调用上下文应暴露当前Binding与人工提交
+     */
     @Test
-    void 工具调用上下文应暴露当前Binding与人工提交() {
+    void toolCallContextExposesCurrentBindingAndHumanSubmission() {
         HookBinding binding = new HookBinding("confirm", "confirm", 10, true,
                 List.of("search*"), Map.of("title", "确认搜索"));
         QuestionSubmission submission = new QuestionSubmission("call-1",
@@ -102,8 +117,11 @@ class HookContractTest {
                 "invalid", "invalid", 0, true, List.of(" "), Map.of()));
     }
 
+    /**
+     * 枚举中不存在SkipIteration
+     */
     @Test
-    void 枚举中不存在SkipIteration() {
+    void enumExcludesSkipIteration() {
         assertThrows(IllegalArgumentException.class, () -> HookPoint.valueOf("SKIP_ITERATION"));
     }
 }

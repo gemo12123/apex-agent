@@ -26,6 +26,9 @@ import java.util.concurrent.atomic.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RuntimeContractTest {
+    /**
+     * 无IoC默认Agent执行且End精确一次
+     */
     @Test
     void executesDefaultAgentWithoutIoCAndPublishesEndExactlyOnce() {
         List<AgentMessage> events = new CopyOnWriteArrayList<>();
@@ -37,6 +40,9 @@ class RuntimeContractTest {
         }
     }
 
+    /**
+     * provider在build不加载请求时加载
+     */
     @Test
     void loadsProviderOnRequestRatherThanBuild() {
         var count = new AtomicInteger();
@@ -58,6 +64,9 @@ class RuntimeContractTest {
         }
     }
 
+    /**
+     * builder互斥与同sessionLease
+     */
     @Test
     void rejectsInvalidBuilderConfigurationAndEnforcesSameSessionLease() {
         assertThrows(RuntimeConfigurationException.class, () -> ApexAgentRuntime.builder().build());
@@ -69,6 +78,9 @@ class RuntimeContractTest {
         }
     }
 
+    /**
+     * 内存Conversation幂等与冲突
+     */
     @Test
     void makesInMemoryConversationOperationsIdempotentAndDetectsConflicts() {
         var r = new InMemoryConversationRepository();
@@ -82,6 +94,9 @@ class RuntimeContractTest {
         r.compact(c);
     }
 
+    /**
+     * 取消前后注册命令均精确一次
+     */
     @Test
     void invokesCancellationCallbacksExactlyOnceBeforeAndAfterCancellation() {
         var s = new RuntimeCancellationSource();
@@ -93,6 +108,9 @@ class RuntimeContractTest {
         assertEquals(2, a.get());
     }
 
+    /**
+     * SpringAiToolCall往返保留字段顺序
+     */
     @Test
     void preservesSpringAiToolCallFieldsAndOrdinalOnRoundTrip() {
         var m = new SpringAiMessageMapper();
@@ -104,6 +122,9 @@ class RuntimeContractTest {
         assertEquals(0, out.ordinal());
     }
 
+    /**
+     * mcp仅发送工具参数
+     */
     @Test
     void sendsOnlyToolArgumentsToMcp() {
         List<Map<String, Object>> sent = new ArrayList<>();
@@ -136,6 +157,9 @@ class RuntimeContractTest {
         assertEquals(List.of(Map.of("value", 7)), sent);
     }
 
+    /**
+     * sse多行与边界
+     */
     @Test
     void decodesMultilineSseEventsAtEventBoundary() {
         var d = new SseEventDecoder();
@@ -144,6 +168,9 @@ class RuntimeContractTest {
         assertEquals(List.of("{\n}"), d.accept(""));
     }
 
+    /**
+     * fileProvider初始化缓存且列出元数据
+     */
     @Test
     void cachesFileProviderAtInitializationAndListsMetadata() throws Exception {
         Path f = Files.createTempFile("agents", ".yml");
@@ -165,6 +192,9 @@ class RuntimeContractTest {
         assertEquals(1, p.listAgents().size());
     }
 
+    /**
+     * owned资源反向关闭且borrowed不关闭
+     */
     @Test
     void closesOwnedResourcesInReverseOrderButNotBorrowedResources() {
         List<String> closed = new ArrayList<>();
@@ -176,6 +206,9 @@ class RuntimeContractTest {
         assertThrows(IllegalStateException.class, () -> r.newAgent(new AgentRequest("closed", "default", "u", "q")));
     }
 
+    /**
+     * 普通Skill重复激活幂等且资源限制为enabled
+     */
     @Test
     void activatesRegularSkillIdempotentlyAndRestrictsResourcesToEnabledSkills() throws Exception {
         Path root = Files.createTempDirectory("skills"), dir = Files.createDirectory(root.resolve("pdf"));

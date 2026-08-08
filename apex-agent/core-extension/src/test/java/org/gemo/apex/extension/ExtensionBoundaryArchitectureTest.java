@@ -33,16 +33,22 @@ class ExtensionBoundaryArchitectureTest {
             "java.", "org.gemo.apex.protocol.", "org.gemo.apex.common.",
             "org.gemo.apex.extension.");
 
+    /**
+     * 生产字节码只能包含无状态无实现无注解的接口
+     */
     @Test
-    void 生产字节码只能包含无状态无实现无注解的接口() throws Exception {
+    void productionBytecodeContainsOnlyStatelessUnimplementedUnannotatedInterfaces() throws Exception {
         List<Class<?>> types = productionTypes();
 
         assertEquals(20, types.size(), "新增或删除端口时必须显式评审接口清单");
         types.forEach(this::validatePortType);
     }
 
+    /**
+     * 典型非法fixture会被纯接口规则拒绝
+     */
     @Test
-    void 典型非法fixture会被纯接口规则拒绝() {
+    void pureInterfaceRuleRejectsTypicalIllegalFixture() {
         assertThrows(IllegalStateException.class, () -> validatePortType(RecordFixture.class));
         assertThrows(IllegalStateException.class, () -> validatePortType(DefaultMethodFixture.class));
         assertThrows(IllegalStateException.class, () -> validatePortType(AnnotatedFixture.class));

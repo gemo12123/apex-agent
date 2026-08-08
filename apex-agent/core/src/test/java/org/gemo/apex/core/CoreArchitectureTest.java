@@ -9,8 +9,11 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.*;
 
 class CoreArchitectureTest {
+    /**
+     * core源码不依赖SpringServletSse数据库或Mcp客户端
+     */
     @Test
-    void core源码不依赖SpringServletSse数据库或Mcp客户端() throws IOException {
+    void coreProductionSourceDoesNotDependOnSpringServletSseDatabaseOrMcpClient() throws IOException {
         String source = readJava(Path.of("src/main/java"));
         assertFalse(source.contains("org.springframework"));
         assertFalse(source.contains("SseEmitter"));
@@ -21,8 +24,11 @@ class CoreArchitectureTest {
         assertFalse(source.contains("java.sql"));
     }
 
+    /**
+     * core只有一处业务迭代循环且固定文案只归ToolResultFactory所有
+     */
     @Test
-    void core只有一处业务迭代循环且固定文案只归ToolResultFactory所有() throws IOException {
+    void coreHasSingleBusinessIterationLoopAndReservesFixedTextForToolResultFactory() throws IOException {
         String source = readJava(Path.of("src/main/java"));
         assertEquals(1, occurrences(source, "for (int iterationNo = firstIteration"));
         assertFalse(source.contains("PlanExecutor"));

@@ -11,8 +11,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class SessionStateQueryServiceTest {
+    /**
+     * 查询只读取一次Repository并统一隐藏归属错误
+     */
     @Test
-    void 查询只读取一次Repository并统一隐藏归属错误() {
+    void readsRepositoryOnceAndConsistentlyHidesOwnershipErrors() {
         AtomicInteger loads = new AtomicInteger();
         SessionRepository repository = new SessionRepository() {
             @Override public Optional<org.gemo.apex.common.snapshot.SessionSnapshot> load(String sessionId) {

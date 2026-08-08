@@ -66,8 +66,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExtensionApiCompileTest {
 
+    /**
+     * 全部端口可由纯JDKFake实现且无需Spring
+     */
     @Test
-    void 全部端口可由纯JDKFake实现且无需Spring() {
+    void allPortsCanBeImplementedByPureJdkFakesWithoutSpring() {
         CancellationToken token = new TestCancellationToken();
         ModelStreamObserver modelObserver = new ModelStreamObserver() {
             @Override public void onChunk(ModelStreamChunk chunk) { }
@@ -107,16 +110,22 @@ class ExtensionApiCompileTest {
         assertSame(token, toolObserver.cancellationToken());
     }
 
+    /**
+     * Agent列表端口不需要加载完整定义
+     */
     @Test
-    void Agent列表端口不需要加载完整定义() {
+    void agentListPortDoesNotRequireLoadingFullDefinition() {
         FakeDefinitionProvider provider = new FakeDefinitionProvider();
 
         assertEquals(List.of(new AgentMetadata("agent", "Agent", "测试 Agent")), provider.listAgents());
         assertEquals(0, provider.loadCalls);
     }
 
+    /**
+     * 生命周期和压缩端口可独立驱动正常与失败路径
+     */
     @Test
-    void 生命周期和压缩端口可独立驱动正常与失败路径() {
+    void lifecycleAndCompressionPortsIndependentlyDriveSuccessAndFailurePaths() {
         ConversationCompactionPolicy falsePolicy = check -> false;
         ConversationCompactionPolicy truePolicy = check -> true;
         ConversationCompactor failingCompactor = request -> {
@@ -128,8 +137,11 @@ class ExtensionApiCompileTest {
         assertThrows(IllegalStateException.class, () -> failingCompactor.compact(null));
     }
 
+    /**
+     * Repository命令携带稳定幂等ID
+     */
     @Test
-    void Repository命令携带稳定幂等ID() {
+    void repositoryCommandsCarryStableIdempotencyIds() {
         CapturingConversationRepository repository = new CapturingConversationRepository();
         AgentMessageEntry entry = new AgentMessageEntry("entry-1", "session", 1, 1,
                 MessageRole.USER, MessageType.TEXT, "你好", Map.of(), Instant.EPOCH);

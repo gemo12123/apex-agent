@@ -13,6 +13,9 @@ import java.nio.charset.StandardCharsets;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class ProtocolJsonUtilsConsumerTest {
+    /**
+     * 产品JsonUtils应消费全部事件GoldenFile
+     */
     @ParameterizedTest
     @ValueSource(strings = {
             "artifact-change.compat.json", "artifact-declared.compat.json", "ask-human.json", "end.json",
@@ -20,18 +23,21 @@ class ProtocolJsonUtilsConsumerTest {
             "plan-declared.compat.json", "stream-content.json", "stream-think.compat.json",
             "task-think-change.compat.json", "task-think-declared.compat.json", "tool-confirmation.json"
     })
-    void 产品JsonUtils应消费全部事件GoldenFile(String fileName) throws IOException {
+    void productJsonUtilsConsumesAllEventGoldenFiles(String fileName) throws IOException {
         String golden = resource(fileName);
         AgentMessage message = JsonUtils.fromJson(golden, AgentMessage.class);
         assertEquals(JsonUtils.parseTree(golden), JsonUtils.toTree(message));
     }
 
+    /**
+     * 产品JsonUtils应消费全部会话GoldenFile
+     */
     @ParameterizedTest
     @ValueSource(strings = {
             "session-state-ask-human.json", "session-state-completed.json",
             "session-state-tool-confirmation.json"
     })
-    void 产品JsonUtils应消费全部会话GoldenFile(String fileName) throws IOException {
+    void productJsonUtilsConsumesAllSessionGoldenFiles(String fileName) throws IOException {
         String golden = resource(fileName);
         SessionStateView view = JsonUtils.fromJson(golden, SessionStateView.class);
         assertEquals(JsonUtils.parseTree(golden), JsonUtils.toTree(view));

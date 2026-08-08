@@ -14,8 +14,11 @@ import static org.junit.jupiter.api.Assertions.*;
 class AgentEventFactoryTest {
     private final AgentEventFactory factory = new AgentEventFactory();
 
+    /**
+     * streamContent保持react与contentId且不产生stageId
+     */
     @Test
-    void streamContent保持react与contentId且不产生stageId() {
+    void streamContentPreservesReactAndContentIdWithoutStageId() {
         var tree = JsonUtils.toTree(factory.streamContent("content-1", "hello"));
         assertEquals("STREAM_CONTENT", tree.get("event_type").asText());
         assertEquals("react", tree.at("/context/mode").asText());
@@ -23,8 +26,11 @@ class AgentEventFactoryTest {
         assertFalse(tree.get("context").has("stage_id"));
     }
 
+    /**
+     * askHuman从中立请求构造既有协议
+     */
     @Test
-    void askHuman从中立请求构造既有协议() {
+    void askHumanBuildsExistingProtocolFromNeutralRequest() {
         var request = new QuestionInterventionRequest("call-1", List.of(
                 new QuestionSpec("TEXT_INPUT", "Need input?", null, List.of())));
         var tree = JsonUtils.toTree(factory.askHuman(request, "invocation-1", "ask_human"));
@@ -33,8 +39,11 @@ class AgentEventFactoryTest {
         assertEquals("invocation-1", tree.at("/context/invocation_id").asText());
     }
 
+    /**
+     * end精确保持空消息协议
+     */
     @Test
-    void end精确保持空消息协议() {
+    void endPreservesEmptyMessageProtocolExactly() {
         assertEquals("{\"event_type\":\"END\"}", JsonUtils.toJson(factory.end()));
         assertInstanceOf(EndMessage.class, factory.end());
     }

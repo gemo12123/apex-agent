@@ -57,8 +57,11 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class RuntimeCancellationIntegrationTest {
 
+    /**
+     * SpringAi取消应释放订阅并唤醒等待线程
+     */
     @Test
-    void SpringAi取消应释放订阅并唤醒等待线程() throws Exception {
+    void cancelsSpringAiSubscriptionAndWakesWaitingThread() throws Exception {
         AtomicBoolean disposed = new AtomicBoolean();
         CountDownLatch subscribed = new CountDownLatch(1);
         ChatModel model = (ChatModel) Proxy.newProxyInstance(ChatModel.class.getClassLoader(),
@@ -89,8 +92,11 @@ class RuntimeCancellationIntegrationTest {
                 () -> assertInstanceOf(CancellationRequestedException.class, failure.get()));
     }
 
+    /**
+     * Mcp取消应调用底层句柄并转换为统一取消语义
+     */
     @Test
-    void Mcp取消应调用底层句柄并转换为统一取消语义() throws Exception {
+    void cancelsMcpUnderlyingHandleAndConvertsToUnifiedCancellationSemantics() throws Exception {
         RuntimeCancellationSource source = new RuntimeCancellationSource();
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch cancelled = new CountDownLatch(1);
@@ -133,8 +139,11 @@ class RuntimeCancellationIntegrationTest {
                 () -> assertInstanceOf(CancellationRequestedException.class, failure.get()));
     }
 
+    /**
+     * HttpSubAgent取消应取消Future且不生成普通工具失败
+     */
     @Test
-    void HttpSubAgent取消应取消Future且不生成普通工具失败() throws Exception {
+    void cancelsHttpSubAgentFutureWithoutProducingOrdinaryToolFailure() throws Exception {
         CompletableFuture<HttpResponse<Stream<String>>> future = new CompletableFuture<>();
         RuntimeCancellationSource source = new RuntimeCancellationSource();
         HttpSubAgentTool adapter = new HttpSubAgentTool(tool("child"), new FakeHttpClient(future),
@@ -157,8 +166,11 @@ class RuntimeCancellationIntegrationTest {
                 () -> assertInstanceOf(CancellationRequestedException.class, failure.get()));
     }
 
+    /**
+     * SubAgent人工介入应停止子流且不透传交互事件
+     */
     @Test
-    void SubAgent人工介入应停止子流且不透传交互事件() {
+    void stopsSubAgentStreamAndDoesNotForwardInteractionEventsForHumanIntervention() {
         String askHuman = "{\"event_type\":\"ASK_HUMAN\",\"context\":{\"executor\":\"ask_human\",\"invocation_id\":\"i\",\"mode\":\"react\"},\"messages\":[{\"input_type\":\"TEXT_INPUT\",\"question\":\"Need input?\",\"options\":[],\"tool_call_id\":\"c\"}]}";
         CompletableFuture<HttpResponse<Stream<String>>> future = CompletableFuture.completedFuture(
                 response(Stream.of("data: " + askHuman, "")));
@@ -178,8 +190,11 @@ class RuntimeCancellationIntegrationTest {
                 () -> assertEquals(0, forwarded.get()));
     }
 
+    /**
+     * 运行中取消和Runtime关闭应等待finally释放Lease与资源
+     */
     @Test
-    void 运行中取消和Runtime关闭应等待finally释放Lease与资源() throws Exception {
+    void awaitsFinallyToReleaseLeaseAndResourcesDuringCancellationAndRuntimeClose() throws Exception {
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch cancellationSeen = new CountDownLatch(1);
         CountDownLatch allowExit = new CountDownLatch(1);
@@ -215,8 +230,11 @@ class RuntimeCancellationIntegrationTest {
                 () -> assertEquals(1, closed.get()));
     }
 
+    /**
+     * OncePublisher应只发送一次End且发布失败触发取消
+     */
     @Test
-    void OncePublisher应只发送一次End且发布失败触发取消() {
+    void oncePublisherEmitsEndOnlyOnceAndCancelsOnPublishFailure() {
         RuntimeCancellationSource source = new RuntimeCancellationSource();
         AtomicInteger ends = new AtomicInteger();
         OnceAgentEventPublisher once = new OnceAgentEventPublisher(event -> {

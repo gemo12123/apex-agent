@@ -15,8 +15,11 @@ class CommonArchitectureTest {
             "jakarta.persistence", "javax.persistence", "org.apache.ibatis",
             "com.baomidou", "java.sql", "com.alibaba.fastjson", "com.alibaba.fastjson2");
 
+    /**
+     * common标准源码不得引入框架数据库或Fastjson类型
+     */
     @Test
-    void common标准源码不得引入框架数据库或Fastjson类型() throws IOException {
+    void commonProductionSourceExcludesFrameworkDatabaseAndFastjsonTypes() throws IOException {
         Path sourceRoot = Path.of("src/main/java");
         try (var files = Files.walk(sourceRoot)) {
             List<Path> violations = files.filter(path -> path.toString().endsWith(".java"))

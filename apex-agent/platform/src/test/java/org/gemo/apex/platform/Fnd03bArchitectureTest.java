@@ -46,8 +46,11 @@ class Fnd03bArchitectureTest {
             "SuperAgent", "PlanExecutor", "StageToolResolver", "WritePlanTool", "UpdatePlanTool",
             "DefaultAgentLifecycleHookRuntime", "AgentHookRuntime", "ModeEnum", "executionMode");
 
+    /**
+     * 父Reactor与项目依赖精确符合八模块最终图
+     */
     @Test
-    void 父Reactor与项目依赖精确符合八模块最终图() throws Exception {
+    void parentReactorAndProjectDependenciesExactlyMatchFinalEightModuleGraph() throws Exception {
         assertEquals(TARGET_MODULES, modules(parsePom(REACTOR_ROOT.resolve("pom.xml"))));
         assertFalse(Files.exists(REACTOR_ROOT.resolve("legacy")));
         assertFalse(Files.exists(REACTOR_ROOT.resolve("architecture-tests")));
@@ -57,8 +60,11 @@ class Fnd03bArchitectureTest {
         }
     }
 
+    /**
+     * 七个代码模块遵守包根和技术栈边界
+     */
     @Test
-    void 七个代码模块遵守包根和技术栈边界() throws IOException {
+    void sevenCodeModulesRespectPackageRootAndTechnologyBoundaries() throws IOException {
         Map<String, List<String>> forbidden = new LinkedHashMap<>();
         forbidden.put("protocol", List.of("org.gemo.apex.common", "org.gemo.apex.extension", "org.gemo.apex.core",
                 "org.gemo.apex.runtime", "org.gemo.apex.platform", "org.springframework.ai", "jakarta.servlet",
@@ -96,8 +102,11 @@ class Fnd03bArchitectureTest {
         }
     }
 
+    /**
+     * 产品入口迁移豁免与构造语义均已收口
+     */
     @Test
-    void 产品入口迁移豁免与构造语义均已收口() throws IOException {
+    void productEntryMigrationExemptionsAndConstructionSemanticsAreConsolidated() throws IOException {
         List<Path> productionSources = allProductionSources();
         List<Path> bootEntries = sourcesContaining(productionSources, "@SpringBootApplication");
         assertEquals(List.of(REACTOR_ROOT.resolve(
@@ -122,8 +131,11 @@ class Fnd03bArchitectureTest {
                 agentBuildDispatchers);
     }
 
+    /**
+     * memory保持非编译归档且不进入其他模块产物
+     */
     @Test
-    void memory保持非编译归档且不进入其他模块产物() throws Exception {
+    void memoryRemainsNonCompiledArchiveAndIsExcludedFromOtherModuleArtifacts() throws Exception {
         Path memory = REACTOR_ROOT.resolve("memory");
         Element pom = parsePom(memory.resolve("pom.xml"));
         assertEquals("pom", directText(pom, "packaging"));
@@ -145,8 +157,11 @@ class Fnd03bArchitectureTest {
         }
     }
 
+    /**
+     * 典型非法源码会被统一禁止规则拒绝
+     */
     @Test
-    void 典型非法源码会被统一禁止规则拒绝() {
+    void unifiedProhibitionRuleRejectsTypicalIllegalSource() {
         assertThrows(IllegalStateException.class,
                 () -> requireNoForbidden("fixture.java", "import org.springframework.context.ApplicationContext;",
                         List.of("org.springframework")));

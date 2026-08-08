@@ -7,15 +7,21 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class SessionSnapshotTextAdapterV1Test {
+    /**
+     * v1快照及挂起交互应完整往返
+     */
     @Test
-    void v1快照及挂起交互应完整往返() {
+    void v1SnapshotsAndSuspendedInteractionsRoundTripCompletely() {
         var adapter = new SessionSnapshotTextAdapterV1();
         var snapshot = PlatformFixtures.suspendedSnapshot();
         assertEquals(snapshot, adapter.decode(adapter.encode(snapshot)));
     }
 
+    /**
+     * 未知版本应显式拒绝
+     */
     @Test
-    void 未知版本应显式拒绝() {
+    void rejectsUnknownVersionExplicitly() {
         var adapter = new SessionSnapshotTextAdapterV1();
         var entity = adapter.encode(PlatformFixtures.suspendedSnapshot());
         var invalid = new org.gemo.apex.platform.persistence.session.AgentSessionEntity(entity.sessionId(),

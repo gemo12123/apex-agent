@@ -30,8 +30,11 @@ class ChatControllerIntegrationTest {
 
     @AfterEach void closeRuntime() { if (runtime != null) runtime.close(); }
 
+    /**
+     * 实际Sse应通过Controller和Once输出精确一次End
+     */
     @Test
-    void 实际Sse应通过Controller和Once输出精确一次End() throws Exception {
+    void actualSseUsesControllerAndOncePublisherToEmitEndExactlyOnce() throws Exception {
         var fixture = fixture(Runnable::run);
         MvcResult started = fixture.mvc().perform(post("/api/sse/chat")
                         .header("X-User-Id", "user-1").contentType(MediaType.APPLICATION_JSON)
@@ -43,8 +46,11 @@ class ChatControllerIntegrationTest {
         assertEquals(1, occurrences(body, "\"event_type\":\"END\""));
     }
 
+    /**
+     * 参数错误返回400且Busy返回409并且均无End
+     */
     @Test
-    void 参数错误返回400且Busy返回409并且均无End() throws Exception {
+    void returns400ForInvalidParametersAnd409ForBusyWithoutEnd() throws Exception {
         var fixture = fixture(Runnable::run);
         fixture.mvc().perform(post("/api/sse/chat").header("X-User-Id", "user-1")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -65,8 +71,11 @@ class ChatControllerIntegrationTest {
         publisher.completeFromExecution();
     }
 
+    /**
+     * 构造失败和线程池拒绝都只输出End
+     */
     @Test
-    void 构造失败和线程池拒绝都只输出End() throws Exception {
+    void emitsOnlyEndForConstructionFailureAndExecutorRejection() throws Exception {
         var normal = fixture(Runnable::run);
         MvcResult failed = normal.mvc().perform(post("/api/sse/chat").header("X-User-Id", "user-1")
                         .contentType(MediaType.APPLICATION_JSON)

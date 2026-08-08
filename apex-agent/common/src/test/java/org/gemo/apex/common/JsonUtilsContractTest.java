@@ -16,8 +16,11 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class JsonUtilsContractTest {
+    /**
+     * 应支持泛型时间record枚举和树转换
+     */
     @Test
-    void 应支持泛型时间record枚举和树转换() {
+    void supportsGenericsTimeRecordsEnumsAndTreeConversion() {
         Map<String, List<Instant>> value = Map.of("times", List.of(CommonFixtures.NOW));
         Map<String, List<Instant>> copy = JsonUtils.fromJson(JsonUtils.toJson(value),
                 new TypeReference<>() { });
@@ -28,8 +31,11 @@ class JsonUtilsContractTest {
                 JsonUtils.toTree(CommonFixtures.suspendedSnapshot()), SessionSnapshot.class));
     }
 
+    /**
+     * deepCopy应断开嵌套集合双向别名
+     */
     @Test
-    void deepCopy应断开嵌套集合双向别名() {
+    void deepCopyBreaksBidirectionalAliasingForNestedCollections() {
         List<Object> nested = new ArrayList<>(List.of("source"));
         Map<String, Object> source = new LinkedHashMap<>();
         source.put("nested", nested);
@@ -42,14 +48,20 @@ class JsonUtilsContractTest {
         assertEquals(List.of("source", "copy-change"), copy.get("nested"));
     }
 
+    /**
+     * mapperCopy的修改不得影响全局配置
+     */
     @Test
-    void mapperCopy的修改不得影响全局配置() {
+    void mapperCopyChangesDoNotAffectGlobalConfiguration() {
         JsonUtils.mapperCopy().enable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
         assertEquals("\"2026-08-01T08:00:00Z\"", JsonUtils.toJson(CommonFixtures.NOW));
     }
 
+    /**
+     * null约定固定且抽象目标类型被拒绝
+     */
     @Test
-    void null约定固定且抽象目标类型被拒绝() {
+    void nullContractIsFixedAndAbstractTargetTypesAreRejected() {
         assertNull(JsonUtils.toJson(null));
         assertNull(JsonUtils.fromJson(null, String.class));
         assertNull(JsonUtils.fromJson(" ", String.class));

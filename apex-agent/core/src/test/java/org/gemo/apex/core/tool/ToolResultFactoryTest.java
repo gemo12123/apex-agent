@@ -8,8 +8,11 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ToolResultFactoryTest {
+    /**
+     * 三类固定结果保留原关联并使用空metadata
+     */
     @Test
-    void 三类固定结果保留原关联并使用空metadata() {
+    void preservesOriginalAssociationAndEmptyMetadataForThreeFixedResults() {
         ToolCall call = new ToolCall("call-1", "tool", 0, Map.of(), Map.of());
         ToolResultFactory factory = new ToolResultFactory();
 

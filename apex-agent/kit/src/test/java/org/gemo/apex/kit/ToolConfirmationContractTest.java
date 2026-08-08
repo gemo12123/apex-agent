@@ -20,8 +20,11 @@ import static org.junit.jupiter.api.Assertions.*;
 class ToolConfirmationContractTest {
     private final ToolConfirmHook hook = new ToolConfirmHook();
 
+    /**
+     * 构造完整确认展示契约并使用core预分配标识
+     */
     @Test
-    void 构造完整确认展示契约并使用core预分配标识() {
+    void buildsCompleteConfirmationDisplayContractUsingCorePreallocatedId() {
         ToolCall call = KitFixtures.call("meeting_tool", Map.of("room", "A1001", "date", "2026-08-02"));
         HookBinding binding = KitFixtures.binding(ToolConfirmHook.REGISTRATION_NAME, List.of("meeting_tool"), Map.of(
                 "title", "确认会议", "description", "创建会议", "risk-level", "medium",
@@ -47,8 +50,11 @@ class ToolConfirmationContractTest {
         assertEquals("2026-08-02", request.presentation().getDisplayFields().getFirst().getValue());
     }
 
+    /**
+     * 默认展示值确定且不可编辑
+     */
     @Test
-    void 默认展示值确定且不可编辑() {
+    void usesDeterministicReadOnlyDefaultDisplayValues() {
         ToolCall call = KitFixtures.call("search", Map.of("query", "apex"));
         ToolConfirmationInterventionRequest request = assertInstanceOf(ToolConfirmationInterventionRequest.class,
                 assertInstanceOf(RequestHumanIntervention.class,
@@ -62,8 +68,11 @@ class ToolConfirmationContractTest {
         assertFalse(request.presentation().isEditable());
     }
 
+    /**
+     * 恢复误重入只继续不生成状态机结果
+     */
     @Test
-    void 恢复误重入只继续不生成状态机结果() {
+    void continuesWithoutGeneratingStateMachineResultOnResumeReentrancy() {
         ToolCall call = KitFixtures.call("search", Map.of("query", "apex"));
         ToolConfirmationSubmission submission = new ToolConfirmationSubmission(call.toolCallId(),
                 "intervention-1", ConfirmationDecision.CONFIRM, Map.of("query", "updated"));
@@ -73,8 +82,11 @@ class ToolConfirmationContractTest {
                                 List.of("search"), Map.of()), submission)));
     }
 
+    /**
+     * 重复或不存在的可编辑字段在构造确认前失败
+     */
     @Test
-    void 重复或不存在的可编辑字段在构造确认前失败() {
+    void rejectsDuplicateOrMissingEditableFieldsBeforeBuildingConfirmation() {
         ToolCall call = KitFixtures.call("search", Map.of("query", "apex"));
         assertThrows(IllegalArgumentException.class, () -> hook.apply(KitFixtures.pre(call,
                 KitFixtures.binding(ToolConfirmHook.REGISTRATION_NAME, List.of("search"), Map.of(

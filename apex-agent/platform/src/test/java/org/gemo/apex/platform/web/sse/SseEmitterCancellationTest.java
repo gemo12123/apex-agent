@@ -13,8 +13,11 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class SseEmitterCancellationTest {
+    /**
+     * callback早于Execution绑定时应通过二次检查取消并释放Lease
+     */
     @Test
-    void callback早于Execution绑定时应通过二次检查取消并释放Lease() {
+    void cancelsAndReleasesLeaseThroughSecondCheckWhenCallbackPrecedesExecutionBinding() {
         var factory = new RequestBoundAgentEventPublisherFactory();
         try (var runtime = ApexAgentRuntime.builder().modelGateway((request, observer) ->
                         new ModelResponse("完成", List.of(), Map.of()))

@@ -23,8 +23,11 @@ class ConversationContractTest {
         ConversationWindow prepare(ConversationWindowRequest request);
     }
 
+    /**
+     * 下游冻结接口签名应能只使用common类型编译
+     */
     @Test
-    void 下游冻结接口签名应能只使用common类型编译() {
+    void allowsFrozenDownstreamInterfaceSignaturesToCompileUsingOnlyCommonTypes() {
         ConversationRepositorySignature repository = query -> messages();
         ConversationWindowManagerSignature manager = request -> {
             List<AgentMessageEntry> loaded = repository.load(request.query());
@@ -37,8 +40,11 @@ class ConversationContractTest {
         assertEquals(2, window.messages().size());
     }
 
+    /**
+     * 查询和窗口请求应具有明确边界
+     */
     @Test
-    void 查询和窗口请求应具有明确边界() {
+    void definesExplicitBoundariesForQueriesAndWindowRequests() {
         ConversationQuery query = new ConversationQuery("session-1");
         ConversationWindowRequest request = new ConversationWindowRequest(query, 100, 10);
         List<AgentMessageEntry> messages = messages();
@@ -53,8 +59,11 @@ class ConversationContractTest {
                 () -> new ConversationWindow("session-1", messages, 1L, 0L));
     }
 
+    /**
+     * 压缩检查应完整记录分项估算阈值保留窗口和触发上下文
+     */
     @Test
-    void 压缩检查应完整记录分项估算阈值保留窗口和触发上下文() {
+    void recordsCompleteCompactionCheckEstimateThresholdRetainedWindowAndTriggerContext() {
         List<AgentMessageEntry> mutableMessages = new ArrayList<>(messages());
         ConversationCompactionTrigger trigger = new ConversationCompactionTrigger(
                 "session-1", 1, 1, "TOKEN_THRESHOLD");
@@ -81,8 +90,11 @@ class ConversationContractTest {
                 32, 128, 1, trigger));
     }
 
+    /**
+     * 请求结果和提交应保持保留消息及metadata并可往返
+     */
     @Test
-    void 请求结果和提交应保持保留消息及metadata并可往返() {
+    void preservesRetainedMessagesAndMetadataInRequestsResultsAndCommitsRoundTrip() {
         List<AgentMessageEntry> source = messages();
         Map<String, Object> nestedMetadata = new LinkedHashMap<>();
         nestedMetadata.put("redacted", new ArrayList<>(List.of("email")));
@@ -108,8 +120,11 @@ class ConversationContractTest {
         assertEquals(List.of("email"), request.metadata().get("redacted"));
     }
 
+    /**
+     * 压缩对象应拒绝越界保留消息和不连续身份
+     */
     @Test
-    void 压缩对象应拒绝越界保留消息和不连续身份() {
+    void rejectsCompactionObjectsWithOutOfBoundsRetainedMessagesOrDiscontinuousIdentities() {
         List<AgentMessageEntry> source = messages();
         AgentMessageEntry foreign = new AgentMessageEntry("foreign", "session-2", 1, 2,
                 MessageRole.USER, MessageType.TEXT, "foreign", Map.of(), CommonFixtures.NOW);

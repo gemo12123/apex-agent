@@ -23,8 +23,11 @@ class MatcherAndCompositeTest {
     private static final HookTypeDescriptor PRE = new HookTypeDescriptor(HookPoint.PRE_TOOL_CALL,
             PreToolCallContext.class, PreToolCallHookResult.class);
 
+    /**
+     * 匹配器支持精确名称和全局星号并拒绝非法glob
+     */
     @Test
-    void 匹配器支持精确名称和全局星号并拒绝非法glob() {
+    void matchesExactNamesAndWildcardAndRejectsInvalidGlob() {
         GlobToolMatcher exact = new GlobToolMatcher(List.of("search", "write"));
         assertTrue(exact.matches("search"));
         assertFalse(exact.matches("other"));
@@ -33,8 +36,11 @@ class MatcherAndCompositeTest {
         assertThrows(IllegalArgumentException.class, () -> new GlobToolMatcher(List.of("search", "search")));
     }
 
+    /**
+     * 组合器按显式顺序执行并在终止结果处停止
+     */
     @Test
-    void 组合器按显式顺序执行并在终止结果处停止() {
+    void executesCompositeInExplicitOrderAndStopsAtTerminalResult() {
         List<String> calls = new ArrayList<>();
         LifecycleHook<PreToolCallContext, PreToolCallHookResult> first = hook(calls, "first", continueResult());
         LifecycleHook<PreToolCallContext, PreToolCallHookResult> stop = hook(calls, "stop", new BlockTool("stop"));
@@ -46,8 +52,11 @@ class MatcherAndCompositeTest {
         assertEquals(List.of("first", "stop"), calls);
     }
 
+    /**
+     * 组合器传播异常并拒绝不同descriptor
+     */
     @Test
-    void 组合器传播异常并拒绝不同descriptor() {
+    void propagatesCompositeExceptionsAndRejectsDifferentDescriptors() {
         LifecycleHook<PreToolCallContext, PreToolCallHookResult> throwing = new LifecycleHook<>() {
             @Override public HookTypeDescriptor descriptor() { return PRE; }
             @Override public PreToolCallHookResult apply(PreToolCallContext context) { throw new IllegalStateException("boom"); }

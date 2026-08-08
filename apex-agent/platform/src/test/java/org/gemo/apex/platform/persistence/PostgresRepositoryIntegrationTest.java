@@ -33,8 +33,11 @@ class PostgresRepositoryIntegrationTest {
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
 
+    /**
+     * 空库迁移长Text幂等持久化并在进程重建后恢复HumanResponse
+     */
     @Test
-    void 空库迁移长Text幂等持久化并在进程重建后恢复HumanResponse() {
+    void migratesEmptyDatabasePersistsLongTextIdempotentlyAndRestoresHumanResponseAfterProcessRebuild() {
         var dataSource = new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(),
                 POSTGRES.getPassword());
         Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();

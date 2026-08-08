@@ -9,8 +9,11 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 
 class SpringPropertiesAgentDefinitionProviderTest {
+    /**
+     * 完整配置应转换并由轻量列表直接返回
+     */
     @Test
-    void 完整配置应转换并由轻量列表直接返回() {
+    void convertsCompleteConfigurationAndReturnsLightweightListDirectly() {
         var properties = new ApexAgentPlatformProperties();
         var agent = new ApexAgentPlatformProperties.Agent();
         agent.setName("默认");
@@ -29,8 +32,11 @@ class SpringPropertiesAgentDefinitionProviderTest {
         assertTrue(provider.load("default").prompt().systemPrompt().contains("通用智能体"));
     }
 
+    /**
+     * 多定义源和缺失Prompt应在构造期失败
+     */
     @Test
-    void 多定义源和缺失Prompt应在构造期失败() {
+    void rejectsMultipleDefinitionSourcesAndMissingPromptAtConstruction() {
         var properties = new ApexAgentPlatformProperties();
         properties.setDefinitionResource("classpath:agents.yml");
         properties.getAgents().put("default", new ApexAgentPlatformProperties.Agent());

@@ -23,8 +23,11 @@ class KitArchitectureTest {
             "org/springframework", "StandardToolResultFactory",
             "用户拒绝执行", "达到最大轮次，强制结束", "请求已取消，工具未执行完成");
 
+    /**
+     * 项目直接依赖精确为三层公共契约
+     */
     @Test
-    void 项目直接依赖精确为三层公共契约() throws Exception {
+    void hasExactlyThreePublicContractLayersAsDirectProjectDependencies() throws Exception {
         Element project = DocumentBuilderFactory.newInstance().newDocumentBuilder()
                 .parse(Path.of("pom.xml").toFile()).getDocumentElement();
         NodeList dependencies = project.getElementsByTagName("dependency");
@@ -38,8 +41,11 @@ class KitArchitectureTest {
         assertEquals(PROJECT_DEPENDENCIES, actual);
     }
 
+    /**
+     * 编译产物不包含计划工具状态机Spring或core实现引用
+     */
     @Test
-    void 编译产物不包含计划工具状态机Spring或core实现引用() throws Exception {
+    void compiledArtifactsExcludePlanToolStateMachineSpringAndCoreImplementationReferences() throws Exception {
         Path classes = Path.of("target", "classes");
         assertTrue(Files.isDirectory(classes));
         try (var files = Files.walk(classes)) {

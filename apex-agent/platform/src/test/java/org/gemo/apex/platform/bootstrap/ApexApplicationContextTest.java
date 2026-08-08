@@ -23,8 +23,11 @@ import static org.junit.jupiter.api.Assertions.*;
 })
 @Import(ApexApplicationContextTest.ModelConfiguration.class)
 class ApexApplicationContextTest {
+    /**
+     * 应装配单一Runtime和完整Agent列表
+     */
     @Test
-    void 应装配单一Runtime和完整Agent列表(@Autowired ApexAgentRuntime runtime,
+    void configuresSingleRuntimeAndCompleteAgentList(@Autowired ApexAgentRuntime runtime,
                                       @Autowired AgentDefinitionProvider definitions) {
         assertNotNull(runtime);
         assertEquals(List.of("default_agent"), definitions.listAgents().stream()

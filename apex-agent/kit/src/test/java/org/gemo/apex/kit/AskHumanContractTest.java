@@ -21,8 +21,11 @@ class AskHumanContractTest {
     private final AskHumanInterventionHook hook = new AskHumanInterventionHook();
     private final AskHumanTool tool = new AskHumanTool();
 
+    /**
+     * 首次调用产生排序稳定的提问介入请求
+     */
     @Test
-    void 首次调用产生排序稳定的提问介入请求() {
+    void createsSortedStableQuestionInterventionOnFirstInvocation() {
         ToolCall call = askCall();
 
         RequestHumanIntervention result = assertInstanceOf(RequestHumanIntervention.class,
@@ -38,8 +41,11 @@ class AskHumanContractTest {
                 request.questions().getFirst().options());
     }
 
+    /**
+     * 恢复误重入时继续且真实工具只返回用户答案
+     */
     @Test
-    void 恢复误重入时继续且真实工具只返回用户答案() {
+    void continuesOnResumeReentrancyAndReturnsOnlyUserAnswersFromRealTool() {
         ToolCall call = askCall();
         LinkedHashMap<String, Object> answers = new LinkedHashMap<>();
         answers.put("10", List.of("a", "b"));
@@ -58,8 +64,11 @@ class AskHumanContractTest {
         assertTrue(result.metadata().isEmpty());
     }
 
+    /**
+     * 可选问题没有答案时返回空答案对象
+     */
     @Test
-    void 可选问题没有答案时返回空答案对象() {
+    void returnsEmptyAnswerObjectWhenOptionalQuestionHasNoAnswer() {
         ToolCall call = askCall();
         ToolResult result = tool.execute(call,
                 KitFixtures.execution(new QuestionSubmission(call.toolCallId(), Map.of())),
@@ -67,8 +76,11 @@ class AskHumanContractTest {
         assertEquals("{\"answers\":{}}", result.content());
     }
 
+    /**
+     * 非法问题参数阻断工具且不创建空介入
+     */
     @Test
-    void 非法问题参数阻断工具且不创建空介入() {
+    void blocksToolAndAvoidsEmptyInterventionForInvalidQuestionParameters() {
         ToolCall call = KitFixtures.call(AskHumanTool.NAME, Map.of("questions", List.of()));
         BlockTool result = assertInstanceOf(BlockTool.class,
                 hook.apply(KitFixtures.pre(call,
@@ -77,8 +89,11 @@ class AskHumanContractTest {
         assertTrue(result.reason().contains("questions"));
     }
 
+    /**
+     * 缺少或错配回复时真实工具失败
+     */
     @Test
-    void 缺少或错配回复时真实工具失败() {
+    void realToolFailsWhenResponseIsMissingOrMismatched() {
         ToolCall call = askCall();
         assertThrows(IllegalStateException.class,
                 () -> tool.execute(call, KitFixtures.execution(null), KitFixtures.OBSERVER));
@@ -87,8 +102,11 @@ class AskHumanContractTest {
                 () -> tool.execute(call, KitFixtures.execution(mismatch), KitFixtures.OBSERVER));
     }
 
+    /**
+     * 非askHuman调用不触发提问Hook
+     */
     @Test
-    void 非askHuman调用不触发提问Hook() {
+    void doesNotTriggerAskHumanHookForNonAskHumanCalls() {
         ToolCall call = KitFixtures.call("search", Map.of());
         assertInstanceOf(ContinuePreToolCall.class,
                 hook.apply(KitFixtures.pre(call,

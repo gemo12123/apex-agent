@@ -14,8 +14,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class CancellationTokenContractTest {
+    /**
+     * 取消前注册应执行一次且close可注销
+     */
     @Test
-    void 取消前注册应执行一次且close可注销() {
+    void executesPreCancellationRegistrationOnceAndAllowsCloseToUnregister() {
         TestCancellationSource source = new TestCancellationSource();
         AtomicInteger called = new AtomicInteger();
         source.token().onCancel(called::incrementAndGet);
@@ -28,8 +31,11 @@ class CancellationTokenContractTest {
         assertThrows(CancellationRequestedException.class, source.token()::throwIfCancellationRequested);
     }
 
+    /**
+     * 取消后注册应立即执行
+     */
     @Test
-    void 取消后注册应立即执行() {
+    void executesPostCancellationRegistrationImmediately() {
         TestCancellationSource source = new TestCancellationSource();
         source.cancel();
         AtomicInteger called = new AtomicInteger();
@@ -39,8 +45,11 @@ class CancellationTokenContractTest {
         assertEquals(1, called.get());
     }
 
+    /**
+     * 并发注册和取消的回调至多执行一次
+     */
     @Test
-    void 并发注册和取消的回调至多执行一次() throws InterruptedException {
+    void executesConcurrentRegistrationAndCancellationCallbacksAtMostOnce() throws InterruptedException {
         for (int attempt = 0; attempt < 100; attempt++) {
             TestCancellationSource source = new TestCancellationSource();
             AtomicInteger called = new AtomicInteger();

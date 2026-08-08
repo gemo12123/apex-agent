@@ -24,8 +24,11 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ApexAgentExecutionTest {
+    /**
+     * 无工具响应完成单次ReAct并只请求一次End
+     */
     @Test
-    void 无工具响应完成单次ReAct并只请求一次End() {
+    void completesSingleReactWithToolFreeResponseAndRequestsEndOnce() {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
         ApexAgent agent = create(fixture);
@@ -38,8 +41,11 @@ class ApexAgentExecutionTest {
         assertEquals(1, fixture.events.stream().filter(EndMessage.class::isInstance).count());
     }
 
+    /**
+     * 多ToolCall按序执行并在工具异常后继续下一轮模型
+     */
     @Test
-    void 多ToolCall按序执行并在工具异常后继续下一轮模型() {
+    void executesMultipleToolCallsInOrderAndContinuesNextModelRoundAfterToolException() {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.tool("ok", (call, context, observer) ->
                 new ToolResult(call.toolCallId(), call.name(), "成功", Map.of()));
@@ -62,8 +68,11 @@ class ApexAgentExecutionTest {
         assertEquals(2, fixture.modelCalls);
     }
 
+    /**
+     * 最后一轮仍返回工具时不执行工具并补齐固定结果
+     */
     @Test
-    void 最后一轮仍返回工具时不执行工具并补齐固定结果() {
+    void doesNotExecuteToolsAndFillsFixedResultsWhenFinalRoundStillReturnsTools() {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.tool("tool", (call, context, observer) ->
                 new ToolResult(call.toolCallId(), call.name(), "真实结果", Map.of()));
@@ -85,8 +94,11 @@ class ApexAgentExecutionTest {
                 .filter(entry -> entry.messageType() == MessageType.TOOL_RESULT).toList().getLast().content());
     }
 
+    /**
+     * 工具期间取消会停止剩余工具并批量补齐取消结果
+     */
     @Test
-    void 工具期间取消会停止剩余工具并批量补齐取消结果() {
+    void stopsRemainingToolsAndFillsCancellationResultsWhenCancelledDuringToolExecution() {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.tool("cancel", (call, context, observer) -> {
             fixture.token.cancel();
@@ -109,8 +121,11 @@ class ApexAgentExecutionTest {
                         .map(entry -> entry.content()).toList());
     }
 
+    /**
+     * 压缩门按compact再session保存后才调用模型
+     */
     @Test
-    void 压缩门按compact再session保存后才调用模型() {
+    void callsModelOnlyAfterCompactionGateAndSessionSave() {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.compact = true;
         fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
@@ -125,8 +140,11 @@ class ApexAgentExecutionTest {
         assertEquals(1, fixture.calls.stream().filter("compact.execute"::equals).count());
     }
 
+    /**
+     * 模型失败后三层失败且不执行结束生命周期
+     */
     @Test
-    void 模型失败后三层失败且不执行结束生命周期() {
+    void failsAtThreeLevelsAndSkipsEndLifecycleAfterModelFailure() {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.modelFailure = new IllegalStateException("model down");
         ApexAgent agent = create(fixture);
@@ -140,8 +158,11 @@ class ApexAgentExecutionTest {
                 agent.snapshot().activeTurn().currentIteration().status());
     }
 
+    /**
+     * prepared取消不创建Iteration或调用模型工具Hook
+     */
     @Test
-    void prepared取消不创建Iteration或调用模型工具Hook() {
+    void preparedCancellationDoesNotCreateIterationOrInvokeModelToolOrHook() {
         CoreTestFixture fixture = new CoreTestFixture();
         ApexAgent agent = create(fixture);
 
@@ -154,8 +175,11 @@ class ApexAgentExecutionTest {
         assertEquals(0, fixture.toolCalls);
     }
 
+    /**
+     * Hook中途禁用会阻止同一响应中的后续伪造调用
+     */
     @Test
-    void Hook中途禁用会阻止同一响应中的后续伪造调用() {
+    void midHookToolDisablementPreventsSubsequentForgedCallsInSameResponse() {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.tool("first", (call, context, observer) ->
                 new ToolResult(call.toolCallId(), call.name(), "first-ok", Map.of()));
@@ -189,8 +213,11 @@ class ApexAgentExecutionTest {
                 .filter(entry -> entry.messageType() == MessageType.TOOL_RESULT).toList().getLast().content());
     }
 
+    /**
+     * 工具发布非白名单事件会转换为当前工具失败结果
+     */
     @Test
-    void 工具发布非白名单事件会转换为当前工具失败结果() {
+    void convertsToolPublishedNonAllowlistedEventToCurrentToolFailureResult() {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.tool("bad-event", (call, context, observer) -> {
             observer.onEvent(org.gemo.apex.protocol.event.EndMessage.builder().build());
@@ -208,8 +235,11 @@ class ApexAgentExecutionTest {
                 .filter(entry -> entry.messageType() == MessageType.TOOL_RESULT).findFirst().orElseThrow().content());
     }
 
+    /**
+     * activateSkill由core更新session且重复激活跨Turn幂等保留
+     */
     @Test
-    void activateSkill由core更新session且重复激活跨Turn幂等保留() {
+    void activateSkillUpdatesSessionInCoreAndRemainsIdempotentAcrossTurns() {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.tool("activate_skill", (call, context, observer) -> {
             throw new AssertionError("activate_skill 不应进入普通 AgentTool.execute");
@@ -239,8 +269,11 @@ class ApexAgentExecutionTest {
         assertEquals(2, fixture.skillActivations);
     }
 
+    /**
+     * 新Turn按最新定义清理已移除的激活Skill
+     */
     @Test
-    void 新Turn按最新定义清理已移除的激活Skill() {
+    void cleansRemovedActivatedSkillsUsingLatestDefinitionForNewTurn() {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.tool("activate_skill", (call, context, observer) -> {
             throw new AssertionError("activate_skill 不应进入普通 AgentTool.execute");
@@ -260,8 +293,11 @@ class ApexAgentExecutionTest {
         assertEquals(2, next.snapshot().currentTurnNo());
     }
 
+    /**
+     * activateSkill结果追加失败时不持久化激活状态
+     */
     @Test
-    void activateSkill结果追加失败时不持久化激活状态() {
+    void doesNotPersistActivationStateWhenActivateSkillResultAppendFails() {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.tool("activate_skill", (call, context, observer) -> {
             throw new AssertionError("activate_skill 不应进入普通 AgentTool.execute");

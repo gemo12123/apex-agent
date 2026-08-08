@@ -31,8 +31,11 @@ import java.util.function.Function;
 import static org.junit.jupiter.api.Assertions.*;
 
 class HumanInterventionExecutionTest {
+    /**
+     * question挂起先保存再发布且不执行工具和结束生命周期
+     */
     @Test
-    void question挂起先保存再发布且不执行工具和结束生命周期() {
+    void questionSuspensionSavesBeforePublishingAndDoesNotExecuteToolOrEndLifecycle() {
         Scenario scenario = questionScenario(context -> continued(context));
 
         AgentRunOutcome outcome = scenario.fresh.run();
@@ -53,8 +56,11 @@ class HumanInterventionExecutionTest {
         assertEquals(0, scenario.postCalls.get());
     }
 
+    /**
+     * 挂起保存失败时不发布交互事件
+     */
     @Test
-    void 挂起保存失败时不发布交互事件() {
+    void doesNotPublishInteractionEventWhenSuspensionSaveFails() {
         Scenario scenario = questionScenario(context -> continued(context));
         scenario.fixture.failSuspensionSave = true;
 
@@ -65,8 +71,11 @@ class HumanInterventionExecutionTest {
         assertEquals(0, scenario.fixture.toolCalls);
     }
 
+    /**
+     * 恢复后再次介入替换唯一挂起对象并累计HookId
+     */
     @Test
-    void 恢复后再次介入替换唯一挂起对象并累计HookId() {
+    void replacesSingleSuspensionAndAccumulatesHookIdsOnInterventionAfterResume() {
         Scenario scenario = questionScenario(context -> new RequestHumanIntervention(question(context.toolCall())));
         assertInstanceOf(AgentRunOutcome.Suspended.class, scenario.fresh.run());
 
@@ -79,8 +88,11 @@ class HumanInterventionExecutionTest {
         assertEquals(2, scenario.fixture.events.stream().filter(AskHumanMessage.class::isInstance).count());
     }
 
+    /**
+     * 恢复END_TURN为当前及剩余ToolCall补齐固定结果
+     */
     @Test
-    void 恢复END_TURN为当前及剩余ToolCall补齐固定结果() {
+    void fillsFixedResultsForCurrentAndRemainingToolCallsWhenResumingEndTurn() {
         Scenario scenario = questionScenario(context -> new EndTurnPreToolCall("stop"), true);
         assertInstanceOf(AgentRunOutcome.Suspended.class, scenario.fresh.run());
 
@@ -92,8 +104,11 @@ class HumanInterventionExecutionTest {
         assertNull(scenario.fixture.sessions.get("session-1").suspendedToolCall());
     }
 
+    /**
+     * 恢复BLOCK和RETURN均执行POST并清除挂起
+     */
     @Test
-    void 恢复BLOCK和RETURN均执行POST并清除挂起() {
+    void runsPostAndClearsSuspensionWhenResumingBlockOrReturn() {
         Scenario blocked = questionScenario(context -> new BlockTool("policy"));
         assertInstanceOf(AgentRunOutcome.Suspended.class, blocked.fresh.run());
         blocked.fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
@@ -110,8 +125,11 @@ class HumanInterventionExecutionTest {
         assertEquals(1, returned.postCalls.get());
     }
 
+    /**
+     * 恢复全部CONTINUE时askHuman读取typed答案并继续下一Iteration
+     */
     @Test
-    void 恢复全部CONTINUE时askHuman读取typed答案并继续下一Iteration() {
+    void readsTypedAnswersFromAskHumanAndContinuesNextIterationWhenAllResumeResultsContinue() {
         AtomicReference<HumanSubmission> received = new AtomicReference<>();
         Scenario scenario = questionScenario(context -> continued(context));
         scenario.fixture.tools.clear();
@@ -132,8 +150,11 @@ class HumanInterventionExecutionTest {
         assertNull(scenario.fixture.sessions.get("session-1").suspendedToolCall());
     }
 
+    /**
+     * 工具确认批准只合并可编辑参数而拒绝使用唯一固定结果
+     */
     @Test
-    void 工具确认批准只合并可编辑参数而拒绝使用唯一固定结果() {
+    void mergesOnlyEditableParametersAndRejectsFixedResultsWhenToolConfirmationApproved() {
         AtomicReference<Map<String, Object>> arguments = new AtomicReference<>();
         Scenario approved = confirmationScenario(context -> continued(context), arguments);
         assertInstanceOf(AgentRunOutcome.Suspended.class, approved.fresh.run());
@@ -158,8 +179,11 @@ class HumanInterventionExecutionTest {
         assertEquals(1, denied.postCalls.get());
     }
 
+    /**
+     * 非法恢复在解析阶段拒绝且不保存不执行扩展
+     */
     @Test
-    void 非法恢复在解析阶段拒绝且不保存不执行扩展() {
+    void rejectsInvalidResumeDuringParsingWithoutSavingOrExecutingExtensions() {
         Scenario scenario = confirmationScenario(context -> continued(context), new AtomicReference<>());
         assertInstanceOf(AgentRunOutcome.Suspended.class, scenario.fresh.run());
         scenario.fixture.calls.clear();
@@ -173,8 +197,11 @@ class HumanInterventionExecutionTest {
         assertEquals(0, scenario.fixture.toolCalls);
     }
 
+    /**
+     * 多ToolCall恢复保留前序结果并继续后序调用
+     */
     @Test
-    void 多ToolCall恢复保留前序结果并继续后序调用() {
+    void preservesPriorResultsAndContinuesSubsequentCallsWhenResumingMultipleToolCalls() {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.tool("plain", (call, context, observer) ->
                 new ToolResult(call.toolCallId(), call.name(), call.toolCallId(), Map.of()));
@@ -204,8 +231,11 @@ class HumanInterventionExecutionTest {
         assertEquals(1, resumed.snapshot().activeTurn().turnNo());
     }
 
+    /**
+     * 挂起工具恢复前转为不可用时迁移历史且不执行工具
+     */
     @Test
-    void 挂起工具恢复前转为不可用时迁移历史且不执行工具() {
+    void migratesSuspendedToolToHistoryWithoutExecutingItWhenItBecomesUnavailableBeforeResume() {
         Scenario scenario = questionScenario(context -> continued(context));
         assertInstanceOf(AgentRunOutcome.Suspended.class, scenario.fresh.run());
         scenario.fixture.tools.clear();
@@ -223,8 +253,11 @@ class HumanInterventionExecutionTest {
                 .map(binding -> binding.toolName()).toList());
     }
 
+    /**
+     * 恢复结果session保存失败时保留持久化挂起并以稳定entryId重试
+     */
     @Test
-    void 恢复结果session保存失败时保留持久化挂起并以稳定entryId重试() {
+    void retainsPersistedSuspensionAndRetriesWithStableEntryIdWhenResumeResultSessionSaveFails() {
         Scenario scenario = questionScenario(context -> continued(context));
         assertInstanceOf(AgentRunOutcome.Suspended.class, scenario.fresh.run());
         scenario.fixture.remainingSessionSaveFailures = 1;

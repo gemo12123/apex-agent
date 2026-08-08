@@ -28,8 +28,11 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ApexAgentFactoryTest {
+    /**
+     * new按加载构造冻结与持久化顺序执行
+     */
     @Test
-    void new按加载构造冻结与持久化顺序执行() {
+    void newBuildExecutesFrozenAndPersistedOrderAfterLoading() {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.hooks.put("build", new LifecycleHook<AgentBuildContext, AgentBuildHookResult>() {
             @Override public HookTypeDescriptor descriptor() {
@@ -54,8 +57,11 @@ class ApexAgentFactoryTest {
         assertEquals(1, fixture.providerLoads);
     }
 
+    /**
+     * resume只使用恢复快照且不加载定义或执行AgentBuild
+     */
     @Test
-    void resume只使用恢复快照且不加载定义或执行AgentBuild() {
+    void resumeUsesOnlyRecoverySnapshotWithoutLoadingDefinitionOrExecutingAgentBuild() {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.tool("ask", (call, context, observer) -> new ToolResult(call.toolCallId(), call.name(), "ok", Map.of()));
         fixture.definition = fixture.definition(Map.of(), Set.of("ask"), Set.of("ask"));
@@ -90,8 +96,11 @@ class ApexAgentFactoryTest {
         assertEquals(List.of("session.load", "tools.load.resume"), fixture.calls);
     }
 
+    /**
+     * 新会话绑定不可用工具时拒绝且不产生部分快照
+     */
     @Test
-    void 新会话绑定不可用工具时拒绝且不产生部分快照() {
+    void rejectsNewSessionWithUnavailableBoundToolsWithoutCreatingPartialSnapshot() {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.definition = fixture.definition(Map.of(), Set.of("offline"), Set.of("offline"));
         fixture.availability = new ToolAvailabilitySnapshot(Set.of("offline"), List.of());
@@ -102,8 +111,11 @@ class ApexAgentFactoryTest {
         assertTrue(fixture.conversation.isEmpty());
     }
 
+    /**
+     * 已有会话不可用绑定迁移为历史并移出enabledTools
+     */
     @Test
-    void 已有会话不可用绑定迁移为历史并移出enabledTools() {
+    void migratesUnavailableBoundToolsToHistoryAndRemovesThemFromEnabledToolsForExistingSession() {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.tool("offline", (call, context, observer) ->
                 new ToolResult(call.toolCallId(), call.name(), "ok", Map.of()));
