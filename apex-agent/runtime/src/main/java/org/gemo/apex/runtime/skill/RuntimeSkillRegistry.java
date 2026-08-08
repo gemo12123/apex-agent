@@ -1,3 +1,40 @@
 package org.gemo.apex.runtime.skill;
-import org.gemo.apex.common.skill.*;import org.gemo.apex.extension.skill.*;import java.util.*;
-public final class RuntimeSkillRegistry implements SkillProvider,SkillActivator{private final Map<String,SkillDefinition> skills;public RuntimeSkillRegistry(List<SkillDefinition> in){Map<String,SkillDefinition> m=new LinkedHashMap<>();for(var s:List.copyOf(in))if(m.putIfAbsent(s.name(),s)!=null)throw new IllegalArgumentException("Skill 重名: "+s.name());skills=Map.copyOf(m);}public List<SkillDefinition> loadSkills(){return List.copyOf(skills.values());}public SkillActivationResult activate(String n,Set<String> enabled,Set<String> active){if(!enabled.contains(n))throw new IllegalArgumentException("Skill 未启用: "+n);var s=Optional.ofNullable(skills.get(n)).orElseThrow();var next=new LinkedHashSet<>(active);next.add(n);return new SkillActivationResult(s.instructions(),next);}public String read(String skill,String resource,Set<String>enabled){if(!enabled.contains(skill))throw new IllegalArgumentException("Skill 未启用: "+skill);var s=Optional.ofNullable(skills.get(skill)).orElseThrow();var d=Optional.ofNullable(s.resources().get(resource)).orElseThrow();try{return java.nio.file.Files.readString(java.nio.file.Path.of(java.net.URI.create(d.location())));}catch(java.io.IOException e){throw new IllegalStateException("读取 Skill 资源失败",e);}}}
+
+import org.gemo.apex.common.skill.*;
+import org.gemo.apex.extension.skill.*;
+
+import java.util.*;
+
+public final class RuntimeSkillRegistry implements SkillProvider, SkillActivator {
+    private final Map<String, SkillDefinition> skills;
+
+    public RuntimeSkillRegistry(List<SkillDefinition> in) {
+        Map<String, SkillDefinition> m = new LinkedHashMap<>();
+        for (var s : List.copyOf(in))
+            if (m.putIfAbsent(s.name(), s) != null) throw new IllegalArgumentException("Skill 重名: " + s.name());
+        skills = Map.copyOf(m);
+    }
+
+    public List<SkillDefinition> loadSkills() {
+        return List.copyOf(skills.values());
+    }
+
+    public SkillActivationResult activate(String n, Set<String> enabled, Set<String> active) {
+        if (!enabled.contains(n)) throw new IllegalArgumentException("Skill 未启用: " + n);
+        var s = Optional.ofNullable(skills.get(n)).orElseThrow();
+        var next = new LinkedHashSet<>(active);
+        next.add(n);
+        return new SkillActivationResult(s.instructions(), next);
+    }
+
+    public String read(String skill, String resource, Set<String> enabled) {
+        if (!enabled.contains(skill)) throw new IllegalArgumentException("Skill 未启用: " + skill);
+        var s = Optional.ofNullable(skills.get(skill)).orElseThrow();
+        var d = Optional.ofNullable(s.resources().get(resource)).orElseThrow();
+        try {
+            return java.nio.file.Files.readString(java.nio.file.Path.of(java.net.URI.create(d.location())));
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("读取 Skill 资源失败", e);
+        }
+    }
+}
