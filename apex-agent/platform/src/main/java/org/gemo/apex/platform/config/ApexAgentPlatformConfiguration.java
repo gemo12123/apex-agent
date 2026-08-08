@@ -19,6 +19,9 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.concurrent.Executor;
 
+/**
+ * 将 Spring Bean 装配为独立于 IoC 的 {@link ApexAgentRuntime}，并配置执行线程池。
+ */
 @Configuration
 @EnableConfigurationProperties(ApexAgentPlatformProperties.class)
 public class ApexAgentPlatformConfiguration {
@@ -33,6 +36,9 @@ public class ApexAgentPlatformConfiguration {
         return new RequestBoundAgentEventPublisherFactory();
     }
 
+    /**
+     * 收集平台提供的端口、工具、Hook 与 Skill。模型 Bean 必须唯一，避免运行时隐式选择模型。
+     */
     @Bean(destroyMethod = "close")
     ApexAgentRuntime apexAgentRuntime(AgentDefinitionProvider definitions, SessionRepository sessions,
                                       ConversationRepository conversations,
@@ -56,6 +62,7 @@ public class ApexAgentPlatformConfiguration {
         return builder.build();
     }
 
+    /** 创建承载 Agent 的线程池，并通过 decorator 传播请求用户上下文。 */
     @Bean(name = "agentExecutionExecutor")
     Executor agentExecutionExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();

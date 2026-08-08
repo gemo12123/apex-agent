@@ -18,6 +18,9 @@ import org.gemo.apex.extension.model.ModelStreamObserver;
 
 import java.util.*;
 
+/**
+ * 执行一次模型步骤，并把流式文本和最终模型响应接入 Agent 状态。
+ */
 public final class ModelStepExecutor {
     private final LifecycleDispatcher dispatcher;
     private final AgentEventEmitter emitter;
@@ -30,6 +33,9 @@ public final class ModelStepExecutor {
         this.events = events;
     }
 
+    /**
+     * 分发 PRE_MODEL_CALL、校验请求上限、转发流式文本、分发 POST_MODEL_CALL，最后持久化助手消息。
+     */
     public ModelStepOutcome execute(ApexAgentContext context, ModelRequest base) {
         context.modelRequest(base);
         LifecycleDispatchOutcome pre = dispatcher.dispatch(HookPoint.PRE_MODEL_CALL, context,
@@ -39,6 +45,7 @@ public final class ModelStepExecutor {
         validateHardLimit(context.modelRequest(), context.ports().modelRequestHardLimit());
         String contentId = context.ports().idGenerator().newInvocationId();
         context.ports().cancellationToken().throwIfCancellationRequested();
+        // 流式分片只向客户端转发；完整响应仍由 gateway 返回后一次性进入快照。
         ModelResponse response = context.ports().modelGateway().stream(context.modelRequest(),
                 new ModelStreamObserver() {
                     @Override public void onChunk(ModelStreamChunk chunk) {
@@ -63,6 +70,7 @@ public final class ModelStepExecutor {
                 : new ModelStepOutcome.ToolCalls(context.modelResponse().toolCalls());
     }
 
+    /** 以协议内容的保守字符量预检请求，避免把超大上下文交给模型实现。 */
     private void validateHardLimit(ModelRequest request, long limit) {
         long actual = request.systemPrompt().length()
                 + request.messages().stream().mapToLong(message ->
@@ -72,6 +80,7 @@ public final class ModelStepExecutor {
         if (actual > limit) throw new ModelContextLimitException(actual, limit);
     }
 
+    /** 将模型文本和 ToolCall 一并写为一条助手消息，以维持会话顺序。 */
     private void commitAssistant(ApexAgentContext context) {
         Map<String, Object> payload = new LinkedHashMap<>();
         if (!context.modelResponse().toolCalls().isEmpty()) {

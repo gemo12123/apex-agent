@@ -20,16 +20,26 @@ import org.gemo.apex.core.tool.ToolCatalog;
 
 import java.util.*;
 
+/**
+ * 将请求、定义和持久化快照组装为可运行的 {@link ApexAgent}。
+ *
+ * <p>新请求建立新的 Turn；恢复请求严格复用快照中的定义和挂起 ToolCall，避免运行时配置变化
+ * 改写历史执行语义。</p>
+ */
 public final class ApexAgentFactory {
     private static final System.Logger LOG = System.getLogger(ApexAgentFactory.class.getName());
     private final AgentDefinitionAssembler assembler = new AgentDefinitionAssembler();
     private final AgentDefinitionValidator validator = new AgentDefinitionValidator();
     private final HumanResponseParser responseParser = new HumanResponseParser();
 
+    /**
+     * 创建新 Turn，并先后追加用户消息和保存 IN_PROGRESS 会话快照。
+     */
     public ApexAgent createNew(AgentRequest request, AgentPorts ports) {
         ports.cancellationToken().throwIfCancellationRequested();
         Optional<SessionSnapshot> existing = ports.sessionRepository().load(request.sessionId());
         existing.ifPresent(snapshot -> validateNewOwner(request, snapshot));
+        // 先把当前定义解析为快照，后续 Turn 可在配置变更后仍按该快照恢复。
         AgentAssemblyResult assembly = assembler.assemble(request.sessionId(), request.agentKey(), existing, ports);
         long turnNo = existing.map(snapshot -> snapshot.currentTurnNo() + 1).orElse(1L);
         var now = ports.timeProvider().now();
@@ -56,6 +66,9 @@ public final class ApexAgentFactory {
                 null));
     }
 
+    /**
+     * 创建人工介入后的恢复执行，并校验所有权、挂起状态和 ToolCall 的唯一对应关系。
+     */
     public ApexAgent createResumed(HumanResponseCommand command, AgentPorts ports) {
         SessionSnapshot snapshot = ports.sessionRepository().load(command.sessionId())
                 .orElseThrow(() -> new SessionStateException("恢复会话不存在"));
@@ -91,6 +104,7 @@ public final class ApexAgentFactory {
                 submission));
     }
 
+    /** 拒绝越权请求及尚未结束或等待人工响应的会话上创建新 Turn。 */
     private void validateNewOwner(AgentRequest request, SessionSnapshot snapshot) {
         if (!snapshot.userId().equals(request.userId()) || !snapshot.agentKey().equals(request.agentKey())) {
             throw new SessionOwnershipException("会话不属于当前用户或 Agent");

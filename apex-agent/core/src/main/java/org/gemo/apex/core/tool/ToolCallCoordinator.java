@@ -25,6 +25,11 @@ import org.gemo.apex.extension.tool.AgentTool;
 
 import java.util.*;
 
+/**
+ * 顺序执行同一模型响应中的 ToolCall，并维持 ToolCall/ToolResult 的一一配对。
+ *
+ * <p>人工介入会中断批次：先写入挂起快照，再发布交互事件；恢复时只继续原批次中尚未完成的调用。</p>
+ */
 public final class ToolCallCoordinator {
     private final LifecycleDispatcher dispatcher;
     private final ToolResultFactory results;
@@ -40,6 +45,10 @@ public final class ToolCallCoordinator {
         this.suspender = new InterventionSuspender(emitter, eventFactory);
     }
 
+    /**
+     * 处理新模型响应的工具调用。每个调用前后均经过 Hook，已完成结果会立即提交，
+     * 从而使挂起或异常时的快照仍保持一致。
+     */
     public ToolCallsOutcome process(ApexAgentContext context, List<ToolCall> calls) {
         List<ToolResult> completed = new ArrayList<>();
         for (int index = 0; index < calls.size(); index++) {
@@ -96,6 +105,9 @@ public final class ToolCallCoordinator {
         return new ToolCallsOutcome.Completed();
     }
 
+    /**
+     * 将人工提交结果绑定到挂起调用，再按原顺序继续余下调用。
+     */
     public ToolCallsOutcome resume(ApexAgentContext context) {
         context.ports().cancellationToken().throwIfCancellationRequested();
         var suspended = Objects.requireNonNull(context.snapshot().suspendedToolCall(), "suspendedToolCall");
@@ -160,10 +172,12 @@ public final class ToolCallCoordinator {
         return process(context, calls.subList(index + 1, calls.size()));
     }
 
+    /** 最大轮次到达时为未执行调用生成固定结束结果，避免留下无配对的 ToolCall。 */
     public void forceEnd(ApexAgentContext context, List<ToolCall> calls) {
         commitBatch(context, calls.stream().map(results::forcedEnd).toList());
     }
 
+    /** 执行当前上下文中的调用；Skill 激活工具由 core 协调，其余调用交给已绑定工具。 */
     private ToolResult execute(ApexAgentContext context, String invocationId) {
         ToolCall call = context.toolCall();
         if (!context.snapshot().enabledTools().contains(call.name())) return results.disabled(call);

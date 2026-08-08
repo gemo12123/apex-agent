@@ -18,17 +18,25 @@ import java.util.*;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
+/**
+ * 生命周期 Hook 的统一分发器。
+ *
+ * <p>每次分发从当前定义取得按 {@code (order, id)} 排序的不可变 Binding 快照，保证 Hook 在
+ * 本轮执行期间不会因定义变更而改变顺序或集合。</p>
+ */
 public final class LifecycleDispatcher {
     private static final System.Logger LOG = System.getLogger(LifecycleDispatcher.class.getName());
     private final ToolBindingMatcher toolMatcher = new ToolBindingMatcher();
 
     @SuppressWarnings({"rawtypes", "unchecked"})
+    /** 分发非工具生命周期点，并在每个 Hook 返回后校验和应用允许的状态变更。 */
     public LifecycleDispatchOutcome dispatch(HookPoint point, ApexAgentContext context,
                                              BiFunction<ApexAgentContext, HookBinding, HookContextView> contextFactory,
                                              Set<String> skippedBindingIds) {
         return dispatch(point, context, contextFactory, skippedBindingIds, ignored -> {});
     }
 
+    /** 分发单个 ToolCall 的 PRE_TOOL_CALL；工具匹配在调用前完成，结果可阻止或请求人工介入。 */
     public PreToolDispatchOutcome dispatchPreTool(ApexAgentContext context,
                                                   BiFunction<ApexAgentContext, HookBinding, HookContextView> contextFactory,
                                                   Collection<String> executedBindingIds) {
@@ -83,6 +91,9 @@ public final class LifecycleDispatcher {
         return point == HookPoint.PRE_TOOL_CALL || point == HookPoint.POST_TOOL_CALL;
     }
 
+    /**
+     * 验证 Hook 只能返回与生命周期点匹配的结果类型，再将声明式 mutations 写回上下文。
+     */
     private LifecycleDispatchOutcome validateAndApply(HookPoint point, ApexAgentContext context, Object result) {
         if (point == HookPoint.TURN_END && !(result instanceof ContinueTurnEnd)) {
             throw new HookContractException("TURN_END 只允许 Continue");
@@ -140,6 +151,7 @@ public final class LifecycleDispatcher {
         };
     }
 
+    /** 将消息、模型请求、工具调用和激活工具等补丁按既定顺序应用。 */
     private void applyMutations(ApexAgentContext context, HookMutations mutations) {
         Set<String> nextEnabled = new LinkedHashSet<>(context.snapshot().enabledTools());
         if (!context.definition().definition().tools().availableTools()

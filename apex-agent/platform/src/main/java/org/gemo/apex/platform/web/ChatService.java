@@ -18,6 +18,12 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.util.concurrent.Executor;
 import java.util.Map;
 
+/**
+ * HTTP 请求到异步 Agent execution 的编排服务。
+ *
+ * <p>SSE 发布器在提交线程池前完成绑定，因此连接提前关闭、准备失败和线程池拒绝都能触发同一取消与
+ * 收尾路径。</p>
+ */
 @Service
 public class ChatService {
     private final ApexAgentRuntime runtime;
@@ -34,6 +40,7 @@ public class ChatService {
         this.timeout = properties.getSseTimeoutMillis();
     }
 
+    /** 创建 SSE 通道、同步准备 execution，再将实际执行提交到带用户上下文的线程池。 */
     public SseEmitter chat(ChatRequest request, String userId) {
         SseEmitter emitter = new SseEmitter(timeout);
         SseEmitterAgentEventPublisher publisher = new SseEmitterAgentEventPublisher(emitter);
@@ -63,6 +70,7 @@ public class ChatService {
         return emitter;
     }
 
+    /** 按请求类型映射为新会话命令或人工恢复命令。 */
     private ApexAgentExecution prepare(ChatRequest request, String userId) {
         if (request.getType() == RequestType.HUMAN_RESPONSE) {
             return runtime.resumeAgent(new HumanResponseCommand(request.getSessionId(), request.getAgentKey(),
@@ -72,6 +80,7 @@ public class ChatService {
                 request.getQuery()));
     }
 
+    /** 兼容客户端历史上的一层嵌套人工响应结构。 */
     private Map<String, Object> normalizedResponse(Map<String, Object> response) {
         if (response.containsKey("interaction_type")) return response;
         if (response.size() == 1 && response.values().iterator().next() instanceof Map<?, ?> nested) {

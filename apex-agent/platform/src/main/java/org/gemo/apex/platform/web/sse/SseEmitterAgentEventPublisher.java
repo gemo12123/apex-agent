@@ -10,6 +10,9 @@ import java.io.IOException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
+/**
+ * 将协议消息序列化为 SSE，并把客户端断连反向传播为 execution 取消。
+ */
 public final class SseEmitterAgentEventPublisher implements AgentEventPublisher {
     private final SseEmitter emitter;
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -23,6 +26,7 @@ public final class SseEmitterAgentEventPublisher implements AgentEventPublisher 
     }
 
     @Override
+    /** 发送单条协议消息；底层发送失败等同于传输已关闭。 */
     public void publish(AgentMessage message) {
         if (closed.get()) throw new IllegalStateException("SSE 已关闭");
         try {
@@ -33,6 +37,7 @@ public final class SseEmitterAgentEventPublisher implements AgentEventPublisher 
         }
     }
 
+    /** 绑定后若 SSE 已断开，立即取消刚准备好的 execution，避免后台孤儿执行。 */
     public void bind(ApexAgentExecution value) {
         if (!execution.compareAndSet(null, value)) throw new IllegalStateException("execution 已绑定");
         if (closed.get()) cancelQuietly(value);
@@ -45,6 +50,7 @@ public final class SseEmitterAgentEventPublisher implements AgentEventPublisher 
         emitter.complete();
     }
 
+    /** SSE 完成、超时或异常时统一关闭发送端并请求取消。 */
     void transportClosed() {
         closed.set(true);
         ApexAgentExecution value = execution.get();

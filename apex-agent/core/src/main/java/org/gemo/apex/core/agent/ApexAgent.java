@@ -16,6 +16,12 @@ import org.gemo.apex.core.tool.ToolResultFactory;
 
 import java.util.Set;
 
+/**
+ * 单次 Turn 的 ReAct 编排器。
+ *
+ * <p>负责按固定顺序驱动生命周期 Hook、模型调用和工具调用；会话快照由
+ * {@link ApexAgentContext} 持有并在状态边界持久化，因此本类不承担跨请求并发控制。</p>
+ */
 public final class ApexAgent {
     private final ApexAgentContext context;
     private final LifecycleDispatcher dispatcher;
@@ -34,9 +40,16 @@ public final class ApexAgent {
         this.tools = new ToolCallCoordinator(dispatcher, new ToolResultFactory(), emitter, eventFactory);
     }
 
+    /**
+     * 执行或恢复一个 Turn。
+     *
+     * <p>恢复请求先补完挂起工具调用；随后每轮依次保存 Iteration、分发生命周期、准备模型请求、
+     * 调用模型并处理工具。任一边界发生取消、挂起或结束时立即收口并保留可恢复状态。</p>
+     */
     public AgentRunOutcome run() {
         try {
             int firstIteration = 1;
+            // 恢复必须先消费原先挂起的 ToolCall，不能直接开始下一次模型调用。
             if (context.humanSubmission() != null) {
                 ToolCallCoordinator.ToolCallsOutcome resumed = tools.resume(context);
                 if (resumed instanceof ToolCallCoordinator.ToolCallsOutcome.Suspended) {
@@ -64,6 +77,7 @@ public final class ApexAgent {
                     return finalizeTurn(end.reason(), true, false);
                 }
             }
+            // 一次 Iteration 只对应一次模型调用及其返回的全部工具调用。
             for (int iterationNo = firstIteration; iterationNo <= context.ports().maxIterations(); iterationNo++) {
                 context.ports().cancellationToken().throwIfCancellationRequested();
                 context.startIteration(iterationNo);
@@ -125,6 +139,7 @@ public final class ApexAgent {
         }
     }
 
+    /** 在任务尚未提交线程池时取消，避免占用模型或工具资源。 */
     public AgentRunOutcome cancelBeforeRun() {
         try {
             context.cancel();
@@ -137,6 +152,9 @@ public final class ApexAgent {
 
     public org.gemo.apex.common.snapshot.SessionSnapshot snapshot() { return context.snapshot(); }
 
+    /**
+     * 统一完成 Turn：必要时先完成当前 Iteration，再分发 TURN_END 并落库。
+     */
     private AgentRunOutcome finalizeTurn(String reason, boolean endedByHook,
                                          boolean finishIteration) {
         if (finishIteration && context.snapshot().activeTurn().currentIteration() != null
@@ -163,6 +181,7 @@ public final class ApexAgent {
                         current.snapshot().activeTurn().currentIteration()), Set.of());
     }
 
+    /** 失败路径尽力保存终态；保存错误作为原始异常的 suppressed 信息保留。 */
     private void bestEffortSave(RuntimeException primary) {
         try {
             context.ports().sessionRepository().save(context.snapshot());
