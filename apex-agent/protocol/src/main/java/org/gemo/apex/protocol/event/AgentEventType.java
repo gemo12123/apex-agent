@@ -14,6 +14,5 @@ public final class AgentEventType {
     public static final String END = "END";
     public static final String HUMAN_INTERVENTION = "HUMAN_INTERVENTION";
 
-    private AgentEventType() {
-    }
+    private AgentEventType() {}
 }

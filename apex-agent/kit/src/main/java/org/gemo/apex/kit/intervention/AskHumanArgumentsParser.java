@@ -1,12 +1,11 @@
 package org.gemo.apex.kit.intervention;
 
-import org.gemo.apex.common.intervention.QuestionSpec;
-
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.gemo.apex.common.intervention.QuestionSpec;
 
 public final class AskHumanArgumentsParser {
     public List<QuestionSpec> parse(Map<String, Object> arguments) {
@@ -24,20 +23,29 @@ public final class AskHumanArgumentsParser {
             String inputType = required(question.get("input_type"), "input_type");
             String text = required(question.get("question"), "question");
             String description = optional(question.get("description"));
-            parsed.add(new IndexedQuestion(index,
-                    new QuestionSpec(inputType, text, description, options(question.get("options")))));
+            parsed.add(
+                    new IndexedQuestion(
+                            index,
+                            new QuestionSpec(
+                                    inputType,
+                                    text,
+                                    description,
+                                    options(question.get("options")))));
         }
         parsed.sort(Comparator.comparingInt(IndexedQuestion::index));
         for (int i = 1; i < parsed.size(); i++) {
             if (parsed.get(i - 1).index() == parsed.get(i).index()) {
-                throw new IllegalArgumentException("ask_human.questions.index 重复: " + parsed.get(i).index());
+                throw new IllegalArgumentException(
+                        "ask_human.questions.index 重复: " + parsed.get(i).index());
             }
         }
         return parsed.stream().map(IndexedQuestion::question).toList();
     }
 
     private List<Map<String, Object>> options(Object rawOptions) {
-        if (rawOptions == null) return List.of();
+        if (rawOptions == null) {
+            return List.of();
+        }
         if (!(rawOptions instanceof List<?> options)) {
             throw new IllegalArgumentException("ask_human.questions.options 必须是数组");
         }
@@ -47,12 +55,14 @@ public final class AskHumanArgumentsParser {
                 throw new IllegalArgumentException("ask_human.questions.options 只能包含对象");
             }
             LinkedHashMap<String, Object> copy = new LinkedHashMap<>();
-            option.forEach((key, value) -> {
-                if (!(key instanceof String stringKey)) {
-                    throw new IllegalArgumentException("ask_human.questions.options key 必须是字符串");
-                }
-                copy.put(stringKey, value);
-            });
+            option.forEach(
+                    (key, value) -> {
+                        if (!(key instanceof String stringKey)) {
+                            throw new IllegalArgumentException(
+                                    "ask_human.questions.options key 必须是字符串");
+                        }
+                        copy.put(stringKey, value);
+                    });
             normalized.add(copy);
         }
         return List.copyOf(normalized);
@@ -66,10 +76,13 @@ public final class AskHumanArgumentsParser {
             try {
                 result = Integer.parseInt(String.valueOf(value));
             } catch (RuntimeException exception) {
-                throw new IllegalArgumentException("ask_human.questions." + field + " 必须是非负整数", exception);
+                throw new IllegalArgumentException(
+                        "ask_human.questions." + field + " 必须是非负整数", exception);
             }
         }
-        if (result < 0) throw new IllegalArgumentException("ask_human.questions." + field + " 不能小于 0");
+        if (result < 0) {
+            throw new IllegalArgumentException("ask_human.questions." + field + " 不能小于 0");
+        }
         return result;
     }
 

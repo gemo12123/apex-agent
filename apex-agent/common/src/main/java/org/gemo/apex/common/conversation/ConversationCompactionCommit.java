@@ -1,18 +1,21 @@
 package org.gemo.apex.common.conversation;
 
-import org.gemo.apex.common.message.AgentMessageEntry;
+import static org.gemo.apex.common.support.DomainValues.immutableList;
+import static org.gemo.apex.common.support.DomainValues.required;
 
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import org.gemo.apex.common.message.AgentMessageEntry;
 
-import static org.gemo.apex.common.support.DomainValues.immutableList;
-import static org.gemo.apex.common.support.DomainValues.required;
-
-public record ConversationCompactionCommit(String sessionId, String compactionId,
-                                           long sourceStartSortNo, long sourceEndSortNo,
-                                           String summary, List<String> retainedEntryIds,
-                                           List<AgentMessageEntry> finalMessages) {
+public record ConversationCompactionCommit(
+        String sessionId,
+        String compactionId,
+        long sourceStartSortNo,
+        long sourceEndSortNo,
+        String summary,
+        List<String> retainedEntryIds,
+        List<AgentMessageEntry> finalMessages) {
     public ConversationCompactionCommit {
         sessionId = required(sessionId, "sessionId");
         compactionId = required(compactionId, "compactionId");

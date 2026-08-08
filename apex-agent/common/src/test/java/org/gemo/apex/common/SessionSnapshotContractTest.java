@@ -1,25 +1,24 @@
 package org.gemo.apex.common;
 
-import org.gemo.apex.common.exception.InvalidSnapshotException;
-import org.gemo.apex.common.exception.UnsupportedSnapshotVersionException;
-import org.gemo.apex.common.exception.SnapshotDecodingException;
-import org.gemo.apex.common.execution.SessionStatus;
-import org.gemo.apex.common.snapshot.*;
-import org.gemo.apex.common.tool.CancellationToken;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.lang.reflect.RecordComponent;
 import java.util.ArrayDeque;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
-
-import static org.junit.jupiter.api.Assertions.*;
+import org.gemo.apex.common.exception.InvalidSnapshotException;
+import org.gemo.apex.common.exception.SnapshotDecodingException;
+import org.gemo.apex.common.exception.UnsupportedSnapshotVersionException;
+import org.gemo.apex.common.snapshot.*;
+import org.gemo.apex.common.tool.CancellationToken;
+import org.gemo.apex.common.tool.ToolOrigin;
+import org.gemo.apex.common.tool.ToolResult;
+import org.junit.jupiter.api.Test;
 
 class SessionSnapshotContractTest {
-    /**
-     * v1快照应完整往返并按ToolCallId定位挂起调用
-     */
+    /** v1快照应完整往返并按ToolCallId定位挂起调用 */
     @Test
     void v1SnapshotsRoundTripCompletelyAndLocateSuspendedCallsByToolCallId() {
         SessionSnapshot snapshot = CommonFixtures.suspendedSnapshot();
@@ -29,49 +28,73 @@ class SessionSnapshotContractTest {
 
         assertEquals(snapshot, copy);
         assertEquals("call-1", copy.suspendedToolBatch().toolCalls().getFirst().toolCallId());
-        assertEquals(List.of("audit", "confirm"),
+        assertEquals(
+                List.of("audit", "confirm"),
                 copy.suspendedToolBatch().toolCalls().getFirst().executedPreToolHookIds());
     }
 
-    /**
-     * 未知版本应显式拒绝且不尝试升级
-     */
+    /** 未知版本应显式拒绝且不尝试升级 */
     @Test
     void rejectsUnknownVersionExplicitlyWithoutUpgradeAttempt() {
-        String json = new SessionSnapshotJsonAdapter().write(CommonFixtures.suspendedSnapshot())
-                .replace("\"1.0.0\"", "\"2.0.0\"");
-        assertThrows(UnsupportedSnapshotVersionException.class,
+        String json =
+                new SessionSnapshotJsonAdapter()
+                        .write(CommonFixtures.suspendedSnapshot())
+                        .replace("\"1.0.0\"", "\"2.0.0\"");
+        assertThrows(
+                UnsupportedSnapshotVersionException.class,
                 () -> new SessionSnapshotJsonAdapter().read(json));
     }
 
-    /**
-     * 损坏Json应包装为不泄露正文的快照解码异常
-     */
+    /** 损坏Json应包装为不泄露正文的快照解码异常 */
     @Test
     void wrapsCorruptedJsonInSnapshotDecodingExceptionWithoutBodyLeak() {
-        SnapshotDecodingException exception = assertThrows(SnapshotDecodingException.class,
-                () -> new SessionSnapshotJsonAdapter().read("{not-json"));
+        SnapshotDecodingException exception =
+                assertThrows(
+                        SnapshotDecodingException.class,
+                        () -> new SessionSnapshotJsonAdapter().read("{not-json"));
         assertFalse(exception.getMessage().contains("not-json"));
     }
 
-    /**
-     * 历史工具不能回填enabledTools且preHookId不能重复
-     */
+    /** 历史工具不能回填enabledTools且preHookId不能重复 */
     @Test
     void doesNotBackfillEnabledToolsForHistoricalToolsAndRejectsDuplicatePreHookIds() {
         SessionSnapshot source = CommonFixtures.suspendedSnapshot();
-        HistoricalToolBinding historical = new HistoricalToolBinding("search",
-                org.gemo.apex.common.tool.ToolOrigin.MCP, "github", "DOWN", CommonFixtures.NOW);
-        assertThrows(InvalidSnapshotException.class, () -> new SessionSnapshot(
-                source.schemaVersion(), source.sessionId(), source.userId(), source.agentKey(), source.status(),
-                source.currentTurnNo(), source.enabledTools(), source.activatedSkills(), List.of(historical),
-                source.activeDefinition(), source.activeTurn(), source.suspendedToolBatch(),
-                source.nextMessageSortNo(), source.lastActiveTime()));
+        HistoricalToolBinding historical =
+                new HistoricalToolBinding(
+                        "search", ToolOrigin.MCP, "github", "DOWN", CommonFixtures.NOW);
+        assertThrows(
+                InvalidSnapshotException.class,
+                () ->
+                        new SessionSnapshot(
+                                source.schemaVersion(),
+                                source.sessionId(),
+                                source.userId(),
+                                source.agentKey(),
+                                source.status(),
+                                source.currentTurnNo(),
+                                source.enabledTools(),
+                                source.activatedSkills(),
+                                List.of(historical),
+                                source.activeDefinition(),
+                                source.activeTurn(),
+                                source.suspendedToolBatch(),
+                                source.nextMessageSortNo(),
+                                source.lastActiveTime()));
         PreparedToolCallSnapshot suspended = source.suspendedToolBatch().toolCalls().getFirst();
-        assertThrows(IllegalArgumentException.class, () -> new PreparedToolCallSnapshot(
-                suspended.toolCallId(), suspended.invocationId(), suspended.toolName(), suspended.ordinal(),
-                suspended.resolvedArguments(), List.of("same", "same"), suspended.disposition(),
-                suspended.result(), suspended.intervention(), suspended.submission()));
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new PreparedToolCallSnapshot(
+                                suspended.toolCallId(),
+                                suspended.invocationId(),
+                                suspended.toolName(),
+                                suspended.ordinal(),
+                                suspended.resolvedArguments(),
+                                List.of("same", "same"),
+                                suspended.disposition(),
+                                suspended.result(),
+                                suspended.intervention(),
+                                suspended.submission()));
     }
 
     @Test
@@ -79,35 +102,79 @@ class SessionSnapshotContractTest {
         SessionSnapshot source = CommonFixtures.suspendedSnapshot();
         PreparedToolCallSnapshot prepared = source.suspendedToolBatch().toolCalls().getFirst();
 
-        assertThrows(IllegalArgumentException.class, () -> new SuspendedToolBatch(
-                source.sessionId(), source.currentTurnNo(), 1, List.of(prepared, prepared)));
-        assertThrows(IllegalArgumentException.class, () -> new PreparedToolCallSnapshot(
-                prepared.toolCallId(), prepared.invocationId(), prepared.toolName(), prepared.ordinal(),
-                prepared.resolvedArguments(), prepared.executedPreToolHookIds(),
-                PreparedToolCallDisposition.EXECUTE,
-                new org.gemo.apex.common.tool.ToolResult("call-1", "search", "result", java.util.Map.of()),
-                null, null));
-        assertThrows(IllegalArgumentException.class, () -> new PreparedToolCallSnapshot(
-                prepared.toolCallId(), prepared.invocationId(), prepared.toolName(), prepared.ordinal(),
-                prepared.resolvedArguments(), prepared.executedPreToolHookIds(),
-                PreparedToolCallDisposition.RETURN_RESULT, null, null, null));
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new SuspendedToolBatch(
+                                source.sessionId(),
+                                source.currentTurnNo(),
+                                1,
+                                List.of(prepared, prepared)));
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new PreparedToolCallSnapshot(
+                                prepared.toolCallId(),
+                                prepared.invocationId(),
+                                prepared.toolName(),
+                                prepared.ordinal(),
+                                prepared.resolvedArguments(),
+                                prepared.executedPreToolHookIds(),
+                                PreparedToolCallDisposition.EXECUTE,
+                                new ToolResult("call-1", "search", "result", Map.of()),
+                                null,
+                                null));
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new PreparedToolCallSnapshot(
+                                prepared.toolCallId(),
+                                prepared.invocationId(),
+                                prepared.toolName(),
+                                prepared.ordinal(),
+                                prepared.resolvedArguments(),
+                                prepared.executedPreToolHookIds(),
+                                PreparedToolCallDisposition.RETURN_RESULT,
+                                null,
+                                null,
+                                null));
 
-        PreparedToolCallSnapshot wrongOrdinal = new PreparedToolCallSnapshot(
-                prepared.toolCallId(), prepared.invocationId(), prepared.toolName(), 1,
-                prepared.resolvedArguments(), prepared.executedPreToolHookIds(), prepared.disposition(),
-                prepared.result(), prepared.intervention(), prepared.submission());
-        SuspendedToolBatch mismatched = new SuspendedToolBatch(source.sessionId(), source.currentTurnNo(), 1,
-                List.of(wrongOrdinal));
-        assertThrows(InvalidSnapshotException.class, () -> new SessionSnapshot(
-                source.schemaVersion(), source.sessionId(), source.userId(), source.agentKey(), source.status(),
-                source.currentTurnNo(), source.enabledTools(), source.activatedSkills(),
-                source.historicalToolBindings(), source.activeDefinition(), source.activeTurn(), mismatched,
-                source.nextMessageSortNo(), source.lastActiveTime()));
+        PreparedToolCallSnapshot wrongOrdinal =
+                new PreparedToolCallSnapshot(
+                        prepared.toolCallId(),
+                        prepared.invocationId(),
+                        prepared.toolName(),
+                        1,
+                        prepared.resolvedArguments(),
+                        prepared.executedPreToolHookIds(),
+                        prepared.disposition(),
+                        prepared.result(),
+                        prepared.intervention(),
+                        prepared.submission());
+        SuspendedToolBatch mismatched =
+                new SuspendedToolBatch(
+                        source.sessionId(), source.currentTurnNo(), 1, List.of(wrongOrdinal));
+        assertThrows(
+                InvalidSnapshotException.class,
+                () ->
+                        new SessionSnapshot(
+                                source.schemaVersion(),
+                                source.sessionId(),
+                                source.userId(),
+                                source.agentKey(),
+                                source.status(),
+                                source.currentTurnNo(),
+                                source.enabledTools(),
+                                source.activatedSkills(),
+                                source.historicalToolBindings(),
+                                source.activeDefinition(),
+                                source.activeTurn(),
+                                mismatched,
+                                source.nextMessageSortNo(),
+                                source.lastActiveTime()));
     }
 
-    /**
-     * 快照类型图不得包含CancellationToken
-     */
+    /** 快照类型图不得包含CancellationToken */
     @Test
     void snapshotTypeGraphExcludesCancellationToken() {
         Set<Class<?>> seen = new HashSet<>();
@@ -115,7 +182,9 @@ class SessionSnapshotContractTest {
         queue.add(SessionSnapshot.class);
         while (!queue.isEmpty()) {
             Class<?> type = queue.removeFirst();
-            if (!seen.add(type) || !type.isRecord()) continue;
+            if (!seen.add(type) || !type.isRecord()) {
+                continue;
+            }
             for (RecordComponent component : type.getRecordComponents()) {
                 assertNotEquals(CancellationToken.class, component.getType());
                 if (component.getType().getPackageName().startsWith("org.gemo.apex.common")) {

@@ -1,18 +1,21 @@
 package org.gemo.apex.runtime.execution;
 
+import java.util.concurrent.atomic.*;
 import org.gemo.apex.core.agent.*;
 import org.gemo.apex.runtime.event.OnceAgentEventPublisher;
-
-import java.util.concurrent.atomic.*;
 
 /**
  * 连接 core Agent 与 runtime 资源管理的单次执行句柄。
  *
- * <p>无论正常结束、执行失败还是取消，{@link #terminate()} 都会恰好一次释放会话 lease、活动登记和
- * 请求级事件发布器。</p>
+ * <p>无论正常结束、执行失败还是取消，{@link #terminate()} 都会恰好一次释放会话 lease、活动登记和 请求级事件发布器。
  */
 public final class ApexAgentExecution implements AutoCloseable {
-    public enum State {PREPARED, RUNNING, CANCEL_REQUESTED, TERMINATED}
+    public enum State {
+        PREPARED,
+        RUNNING,
+        CANCEL_REQUESTED,
+        TERMINATED
+    }
 
     private final ApexAgent agent;
     private final RuntimeCancellationSource cancel;
@@ -21,7 +24,12 @@ public final class ApexAgentExecution implements AutoCloseable {
     private final ActiveExecutionRegistry registry;
     private final AtomicReference<State> state = new AtomicReference<>(State.PREPARED);
 
-    public ApexAgentExecution(ApexAgent a, RuntimeCancellationSource c, SessionExecutionLease l, OnceAgentEventPublisher e, ActiveExecutionRegistry r) {
+    public ApexAgentExecution(
+            ApexAgent a,
+            RuntimeCancellationSource c,
+            SessionExecutionLease l,
+            OnceAgentEventPublisher e,
+            ActiveExecutionRegistry r) {
         agent = a;
         cancel = c;
         lease = l;
@@ -31,8 +39,9 @@ public final class ApexAgentExecution implements AutoCloseable {
 
     /** 将状态从 PREPARED 推进到 RUNNING 后执行 Agent；取消可在任一时刻由 cancellation source 感知。 */
     public AgentRunOutcome run() {
-        if (!state.compareAndSet(State.PREPARED, State.RUNNING))
+        if (!state.compareAndSet(State.PREPARED, State.RUNNING)) {
             throw new IllegalStateException("execution 只能运行一次");
+        }
         try {
             return agent.run();
         } finally {
@@ -55,7 +64,9 @@ public final class ApexAgentExecution implements AutoCloseable {
             }
             return true;
         }
-        if (state.compareAndSet(State.RUNNING, State.CANCEL_REQUESTED)) return cancel.cancel();
+        if (state.compareAndSet(State.RUNNING, State.CANCEL_REQUESTED)) {
+            return cancel.cancel();
+        }
         return false;
     }
 
@@ -73,7 +84,9 @@ public final class ApexAgentExecution implements AutoCloseable {
 
     /** 幂等释放执行持有的所有运行时资源。 */
     private void terminate() {
-        if (state.getAndSet(State.TERMINATED) == State.TERMINATED) return;
+        if (state.getAndSet(State.TERMINATED) == State.TERMINATED) {
+            return;
+        }
         try {
             events.end();
         } finally {

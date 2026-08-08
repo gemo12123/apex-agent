@@ -1,5 +1,6 @@
 package org.gemo.apex.core.event;
 
+import java.util.Objects;
 import org.gemo.apex.extension.event.AgentEventPublisher;
 import org.gemo.apex.protocol.event.AgentMessage;
 
@@ -9,11 +10,13 @@ public final class AgentEventEmitter {
     private boolean endRequested;
 
     public AgentEventEmitter(AgentEventPublisher publisher, AgentEventFactory factory) {
-        this.publisher = java.util.Objects.requireNonNull(publisher);
-        this.factory = java.util.Objects.requireNonNull(factory);
+        this.publisher = Objects.requireNonNull(publisher);
+        this.factory = Objects.requireNonNull(factory);
     }
 
-    public void publish(AgentMessage message) { publisher.publish(message); }
+    public void publish(AgentMessage message) {
+        publisher.publish(message);
+    }
 
     public void requestEnd() {
         if (!endRequested) {

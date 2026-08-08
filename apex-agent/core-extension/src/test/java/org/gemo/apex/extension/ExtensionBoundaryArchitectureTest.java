@@ -1,6 +1,7 @@
 package org.gemo.apex.extension;
 
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.IOException;
 import java.lang.annotation.Retention;
@@ -21,43 +22,44 @@ import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.Set;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
 
 class ExtensionBoundaryArchitectureTest {
 
     private static final String PACKAGE_PATH = "org/gemo/apex/extension";
-    private static final Set<String> ALLOWED_PREFIXES = Set.of(
-            "java.", "org.gemo.apex.protocol.", "org.gemo.apex.common.",
-            "org.gemo.apex.extension.");
+    private static final Set<String> ALLOWED_PREFIXES =
+            Set.of(
+                    "java.",
+                    "org.gemo.apex.protocol.",
+                    "org.gemo.apex.common.",
+                    "org.gemo.apex.extension.");
 
-    /**
-     * 生产字节码只能包含无状态无实现无注解的接口
-     */
+    /** 生产字节码只能包含无状态无实现无注解的接口 */
     @Test
-    void productionBytecodeContainsOnlyStatelessUnimplementedUnannotatedInterfaces() throws Exception {
+    void productionBytecodeContainsOnlyStatelessUnimplementedUnannotatedInterfaces()
+            throws Exception {
         List<Class<?>> types = productionTypes();
 
         assertEquals(20, types.size(), "新增或删除端口时必须显式评审接口清单");
         types.forEach(this::validatePortType);
     }
 
-    /**
-     * 典型非法fixture会被纯接口规则拒绝
-     */
+    /** 典型非法fixture会被纯接口规则拒绝 */
     @Test
     void pureInterfaceRuleRejectsTypicalIllegalFixture() {
         assertThrows(IllegalStateException.class, () -> validatePortType(RecordFixture.class));
-        assertThrows(IllegalStateException.class, () -> validatePortType(DefaultMethodFixture.class));
+        assertThrows(
+                IllegalStateException.class, () -> validatePortType(DefaultMethodFixture.class));
         assertThrows(IllegalStateException.class, () -> validatePortType(AnnotatedFixture.class));
-        assertThrows(IllegalStateException.class, () -> validatePortType(FrameworkLeakFixture.class));
+        assertThrows(
+                IllegalStateException.class, () -> validatePortType(FrameworkLeakFixture.class));
         assertThrows(IllegalStateException.class, () -> validatePortType(NestedTypeFixture.class));
     }
 
-    private List<Class<?>> productionTypes() throws IOException, URISyntaxException, ClassNotFoundException {
-        Enumeration<URL> roots = Thread.currentThread().getContextClassLoader().getResources(PACKAGE_PATH);
+    private List<Class<?>> productionTypes()
+            throws IOException, URISyntaxException, ClassNotFoundException {
+        Enumeration<URL> roots =
+                Thread.currentThread().getContextClassLoader().getResources(PACKAGE_PATH);
         List<Class<?>> types = new ArrayList<>();
         while (roots.hasMoreElements()) {
             URL root = roots.nextElement();
@@ -66,10 +68,12 @@ class ExtensionBoundaryArchitectureTest {
             }
             Path directory = Path.of(root.toURI());
             try (var files = Files.walk(directory)) {
-                for (Path file : files.filter(path -> path.toString().endsWith(".class")).toList()) {
+                for (Path file :
+                        files.filter(path -> path.toString().endsWith(".class")).toList()) {
                     String relative = directory.relativize(file).toString().replace('\\', '.');
-                    String className = "org.gemo.apex.extension."
-                            + relative.substring(0, relative.length() - ".class".length());
+                    String className =
+                            "org.gemo.apex.extension."
+                                    + relative.substring(0, relative.length() - ".class".length());
                     types.add(Class.forName(className));
                 }
             }
@@ -82,10 +86,14 @@ class ExtensionBoundaryArchitectureTest {
         require(type.getDeclaredAnnotations().length == 0, type, "不得声明注解");
         require(type.getDeclaredFields().length == 0, type, "不得声明字段或常量");
         require(type.getDeclaredClasses().length == 0, type, "不得声明嵌套类型");
-        require(List.of(type.getMethods()).stream().noneMatch(Method::isDefault),
-                type, "不得继承或声明 default 方法");
+        require(
+                List.of(type.getMethods()).stream().noneMatch(Method::isDefault),
+                type,
+                "不得继承或声明 default 方法");
         validateAnnotations(type, type);
-        for (Type parent : type.getGenericInterfaces()) validateSignature(type, parent);
+        for (Type parent : type.getGenericInterfaces()) {
+            validateSignature(type, parent);
+        }
         for (Method method : type.getDeclaredMethods()) {
             require(Modifier.isAbstract(method.getModifiers()), type, "不得包含 default/static 实现");
             validateAnnotations(type, method);
@@ -93,8 +101,12 @@ class ExtensionBoundaryArchitectureTest {
                 require(parameterAnnotations.length == 0, type, "方法参数不得声明注解");
             }
             validateSignature(type, method.getGenericReturnType());
-            for (Type parameter : method.getGenericParameterTypes()) validateSignature(type, parameter);
-            for (Type exception : method.getGenericExceptionTypes()) validateSignature(type, exception);
+            for (Type parameter : method.getGenericParameterTypes()) {
+                validateSignature(type, parameter);
+            }
+            for (Type exception : method.getGenericExceptionTypes()) {
+                validateSignature(type, exception);
+            }
         }
     }
 
@@ -113,19 +125,29 @@ class ExtensionBoundaryArchitectureTest {
                 validateSignature(owner, rawType.getComponentType());
                 return;
             }
-            require(ALLOWED_PREFIXES.stream().anyMatch(rawType.getName()::startsWith), owner,
+            require(
+                    ALLOWED_PREFIXES.stream().anyMatch(rawType.getName()::startsWith),
+                    owner,
                     "签名泄漏禁止类型 " + rawType.getName());
             if (rawType.getName().startsWith("org.gemo.apex.extension.")) {
                 require(rawType.isInterface(), owner, "只能组合同模块 interface " + rawType.getName());
             }
         } else if (type instanceof ParameterizedType parameterizedType) {
             validateSignature(owner, parameterizedType.getRawType());
-            for (Type argument : parameterizedType.getActualTypeArguments()) validateSignature(owner, argument);
+            for (Type argument : parameterizedType.getActualTypeArguments()) {
+                validateSignature(owner, argument);
+            }
         } else if (type instanceof TypeVariable<?> variable) {
-            for (Type bound : variable.getBounds()) validateSignature(owner, bound);
+            for (Type bound : variable.getBounds()) {
+                validateSignature(owner, bound);
+            }
         } else if (type instanceof WildcardType wildcard) {
-            for (Type bound : wildcard.getUpperBounds()) validateSignature(owner, bound);
-            for (Type bound : wildcard.getLowerBounds()) validateSignature(owner, bound);
+            for (Type bound : wildcard.getUpperBounds()) {
+                validateSignature(owner, bound);
+            }
+            for (Type bound : wildcard.getLowerBounds()) {
+                validateSignature(owner, bound);
+            }
         } else if (type instanceof GenericArrayType array) {
             validateSignature(owner, array.getGenericComponentType());
         } else {
@@ -134,26 +156,30 @@ class ExtensionBoundaryArchitectureTest {
     }
 
     private void require(boolean condition, Class<?> owner, String rule) {
-        if (!condition) throw new IllegalStateException(owner.getName() + ": " + rule);
+        if (!condition) {
+            throw new IllegalStateException(owner.getName() + ": " + rule);
+        }
     }
 
-    private record RecordFixture(String value) { }
+    private record RecordFixture(String value) {}
 
     private interface DefaultMethodFixture {
-        default String value() { return "value"; }
+        default String value() {
+            return "value";
+        }
     }
 
     @FixtureAnnotation
-    private interface AnnotatedFixture { }
+    private interface AnnotatedFixture {}
 
     private interface FrameworkLeakFixture {
-        org.junit.jupiter.api.Test leakedType();
+        Test leakedType();
     }
 
     private interface NestedTypeFixture {
-        class Implementation { }
+        class Implementation {}
     }
 
     @Retention(RetentionPolicy.RUNTIME)
-    private @interface FixtureAnnotation { }
+    private @interface FixtureAnnotation {}
 }

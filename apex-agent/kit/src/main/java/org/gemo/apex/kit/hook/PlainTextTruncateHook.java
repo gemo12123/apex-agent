@@ -16,8 +16,11 @@ public final class PlainTextTruncateHook
     public static final String MESSAGE_TYPE_METADATA_KEY = "messageType";
     public static final int DEFAULT_MAX_LENGTH = 4000;
     private static final String TRUNCATION_MARKER = "…";
-    private static final HookTypeDescriptor DESCRIPTOR = new HookTypeDescriptor(HookPoint.POST_TOOL_CALL,
-            PostToolCallContext.class, PostToolCallHookResult.class);
+    private static final HookTypeDescriptor DESCRIPTOR =
+            new HookTypeDescriptor(
+                    HookPoint.POST_TOOL_CALL,
+                    PostToolCallContext.class,
+                    PostToolCallHookResult.class);
     private final int maxLength;
 
     public PlainTextTruncateHook() {
@@ -25,7 +28,9 @@ public final class PlainTextTruncateHook
     }
 
     public PlainTextTruncateHook(int maxLength) {
-        if (maxLength <= 0) throw new IllegalArgumentException("maxLength 必须大于 0");
+        if (maxLength <= 0) {
+            throw new IllegalArgumentException("maxLength 必须大于 0");
+        }
         this.maxLength = maxLength;
     }
 
@@ -40,21 +45,32 @@ public final class PlainTextTruncateHook
         if (!isText(context) || content.codePointCount(0, content.length()) <= maxLength) {
             return keep(context);
         }
-        int contentLength = Math.max(0, maxLength - TRUNCATION_MARKER.codePointCount(0, TRUNCATION_MARKER.length()));
+        int contentLength =
+                Math.max(
+                        0,
+                        maxLength
+                                - TRUNCATION_MARKER.codePointCount(0, TRUNCATION_MARKER.length()));
         int end = content.offsetByCodePoints(0, contentLength);
-        return new ContinuePostToolCall(HookMutations.none(),
-                new ToolResultPatch(content.substring(0, end) + TRUNCATION_MARKER,
+        return new ContinuePostToolCall(
+                HookMutations.none(),
+                new ToolResultPatch(
+                        content.substring(0, end) + TRUNCATION_MARKER,
                         context.toolResult().metadata()));
     }
 
     private boolean isText(PostToolCallContext context) {
         Object rawType = context.toolResult().metadata().get(MESSAGE_TYPE_METADATA_KEY);
-        if (rawType == null) return true;
-        return rawType == MessageType.TEXT || MessageType.TEXT.name().equalsIgnoreCase(String.valueOf(rawType));
+        if (rawType == null) {
+            return true;
+        }
+        return rawType == MessageType.TEXT
+                || MessageType.TEXT.name().equalsIgnoreCase(String.valueOf(rawType));
     }
 
     private ContinuePostToolCall keep(PostToolCallContext context) {
-        return new ContinuePostToolCall(HookMutations.none(),
-                new ToolResultPatch(context.toolResult().content(), context.toolResult().metadata()));
+        return new ContinuePostToolCall(
+                HookMutations.none(),
+                new ToolResultPatch(
+                        context.toolResult().content(), context.toolResult().metadata()));
     }
 }

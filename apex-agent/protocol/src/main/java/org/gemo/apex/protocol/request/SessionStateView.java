@@ -6,5 +6,4 @@ public record SessionStateView(
         String sessionId,
         String agentKey,
         String executionStatus,
-        HumanInterventionMessage pendingInteraction) {
-}
+        HumanInterventionMessage pendingInteraction) {}

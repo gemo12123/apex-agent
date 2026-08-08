@@ -1,9 +1,8 @@
 package org.gemo.apex.kit.intervention;
 
+import java.util.Objects;
 import org.gemo.apex.common.intervention.QuestionInterventionRequest;
 import org.gemo.apex.common.tool.ToolCall;
-
-import java.util.Objects;
 
 public final class QuestionInterventionFactory {
     private final AskHumanArgumentsParser parser;

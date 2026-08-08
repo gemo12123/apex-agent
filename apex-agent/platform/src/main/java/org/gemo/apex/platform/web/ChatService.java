@@ -1,5 +1,6 @@
 package org.gemo.apex.platform.web;
 
+import java.util.concurrent.Executor;
 import org.gemo.apex.common.execution.AgentRequest;
 import org.gemo.apex.common.intervention.HumanResponseCommand;
 import org.gemo.apex.platform.config.ApexAgentPlatformProperties;
@@ -15,13 +16,10 @@ import org.springframework.core.task.TaskRejectedException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.util.concurrent.Executor;
-
 /**
  * HTTP 请求到异步 Agent execution 的编排服务。
  *
- * <p>SSE 发布器在提交线程池前完成绑定，因此连接提前关闭、准备失败和线程池拒绝都能触发同一取消与
- * 收尾路径。</p>
+ * <p>SSE 发布器在提交线程池前完成绑定，因此连接提前关闭、准备失败和线程池拒绝都能触发同一取消与 收尾路径。
  */
 @Service
 public class ChatService {
@@ -30,9 +28,11 @@ public class ChatService {
     private final Executor executor;
     private final long timeout;
 
-    public ChatService(ApexAgentRuntime runtime, RequestBoundAgentEventPublisherFactory publishers,
-                       @Qualifier("agentExecutionExecutor") Executor executor,
-                       ApexAgentPlatformProperties properties) {
+    public ChatService(
+            ApexAgentRuntime runtime,
+            RequestBoundAgentEventPublisherFactory publishers,
+            @Qualifier("agentExecutionExecutor") Executor executor,
+            ApexAgentPlatformProperties properties) {
         this.runtime = runtime;
         this.publishers = publishers;
         this.executor = executor;
@@ -45,23 +45,33 @@ public class ChatService {
         SseEmitterAgentEventPublisher publisher = new SseEmitterAgentEventPublisher(emitter);
         ApexAgentExecution execution;
         try {
-            execution = publishers.prepare(request.getSessionId(), request.getAgentKey(), userId, publisher,
-                    () -> prepare(request, userId));
+            execution =
+                    publishers.prepare(
+                            request.getSessionId(),
+                            request.getAgentKey(),
+                            userId,
+                            publisher,
+                            () -> prepare(request, userId));
         } catch (AgentPreparationException exception) {
-            if (!exception.endPublished()) throw exception;
+            if (!exception.endPublished()) {
+                throw exception;
+            }
             publisher.completeFromExecution();
             return emitter;
         }
         publisher.bind(execution);
-        if (publisher.isClosed()) return emitter;
+        if (publisher.isClosed()) {
+            return emitter;
+        }
         try {
-            executor.execute(() -> {
-                try {
-                    execution.execute();
-                } finally {
-                    publisher.completeFromExecution();
-                }
-            });
+            executor.execute(
+                    () -> {
+                        try {
+                            execution.execute();
+                        } finally {
+                            publisher.completeFromExecution();
+                        }
+                    });
         } catch (TaskRejectedException exception) {
             execution.cancelBeforeStart();
             publisher.completeFromExecution();
@@ -72,11 +82,15 @@ public class ChatService {
     /** 按请求类型映射为新会话命令或人工恢复命令。 */
     private ApexAgentExecution prepare(ChatRequest request, String userId) {
         if (request.getType() == RequestType.HUMAN_RESPONSE) {
-            return runtime.resumeAgent(new HumanResponseCommand(request.getSessionId(), request.getAgentKey(),
-                    userId, request.getHumanResponse()));
+            return runtime.resumeAgent(
+                    new HumanResponseCommand(
+                            request.getSessionId(),
+                            request.getAgentKey(),
+                            userId,
+                            request.getHumanResponse()));
         }
-        return runtime.newAgent(new AgentRequest(request.getSessionId(), request.getAgentKey(), userId,
-                request.getQuery()));
+        return runtime.newAgent(
+                new AgentRequest(
+                        request.getSessionId(), request.getAgentKey(), userId, request.getQuery()));
     }
-
 }

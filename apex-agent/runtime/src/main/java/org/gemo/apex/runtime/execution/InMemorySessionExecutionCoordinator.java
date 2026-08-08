@@ -9,7 +9,9 @@ public final class InMemorySessionExecutionCoordinator implements SessionExecuti
 
     public SessionExecutionLease acquire(String id) {
         String owner = UUID.randomUUID().toString();
-        if (owners.putIfAbsent(id, owner) != null) throw new SessionBusyException(id);
+        if (owners.putIfAbsent(id, owner) != null) {
+            throw new SessionBusyException(id);
+        }
         return new SessionExecutionLease() {
             final AtomicBoolean done = new AtomicBoolean();
 
@@ -18,7 +20,9 @@ public final class InMemorySessionExecutionCoordinator implements SessionExecuti
             }
 
             public void release() {
-                if (done.compareAndSet(false, true)) owners.remove(id, owner);
+                if (done.compareAndSet(false, true)) {
+                    owners.remove(id, owner);
+                }
             }
         };
     }

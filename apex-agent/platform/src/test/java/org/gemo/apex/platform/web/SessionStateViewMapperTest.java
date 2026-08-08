@@ -1,15 +1,13 @@
 package org.gemo.apex.platform.web;
 
+import static org.junit.jupiter.api.Assertions.*;
+
 import org.gemo.apex.common.json.JsonUtils;
 import org.gemo.apex.platform.PlatformFixtures;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.*;
-
 class SessionStateViewMapperTest {
-    /**
-     * 挂起问题应映射为既有AskHuman协议且不生成新标识
-     */
+    /** 挂起问题应映射为既有AskHuman协议且不生成新标识 */
     @Test
     void mapsSuspendedQuestionToExistingAskHumanProtocolWithoutNewIdentifier() {
         var view = new SessionStateViewMapper().map(PlatformFixtures.suspendedSnapshot());
@@ -21,9 +19,7 @@ class SessionStateViewMapperTest {
         assertTrue(json.contains("\"invocation_id\":\"invocation-1\""));
     }
 
-    /**
-     * 挂起确认应映射为既有ToolConfirmation协议
-     */
+    /** 挂起确认应映射为既有ToolConfirmation协议 */
     @Test
     void mapsSuspendedConfirmationToExistingToolConfirmationProtocol() {
         var view = new SessionStateViewMapper().map(PlatformFixtures.confirmationSnapshot());

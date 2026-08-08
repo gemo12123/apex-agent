@@ -1,9 +1,8 @@
 package org.gemo.apex.runtime.registry;
 
+import java.util.*;
 import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.extension.hook.*;
-
-import java.util.*;
 
 public final class HookRegistry implements HookResolver {
     private final Map<Key, LifecycleHook<?, ?>> hooks;
@@ -16,6 +15,5 @@ public final class HookRegistry implements HookResolver {
         return hooks.get(new Key(p, n));
     }
 
-    public record Key(HookPoint point, String name) {
-    }
+    public record Key(HookPoint point, String name) {}
 }

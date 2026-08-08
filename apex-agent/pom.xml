@@ -42,8 +42,11 @@
     <dependencyManagement>
         <dependencies>
             <dependency>
-                <groupId>org.springframework.boot</groupId><artifactId>spring-boot-dependencies</artifactId>
-                <version>${spring-boot.version}</version><type>pom</type><scope>import</scope>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring-boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
             </dependency>
             <dependency>
                 <groupId>org.springframework.boot</groupId>
@@ -228,6 +231,45 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <version>3.0.0</version>
+                <configuration>
+                    <java>
+                        <includes>
+                            <include>protocol/src/main/java/**/*.java</include>
+                            <include>protocol/src/test/java/**/*.java</include>
+                            <include>common/src/main/java/**/*.java</include>
+                            <include>common/src/test/java/**/*.java</include>
+                            <include>core-extension/src/main/java/**/*.java</include>
+                            <include>core-extension/src/test/java/**/*.java</include>
+                            <include>core/src/main/java/**/*.java</include>
+                            <include>core/src/test/java/**/*.java</include>
+                            <include>kit/src/main/java/**/*.java</include>
+                            <include>kit/src/test/java/**/*.java</include>
+                            <include>runtime/src/main/java/**/*.java</include>
+                            <include>runtime/src/test/java/**/*.java</include>
+                            <include>platform/src/main/java/**/*.java</include>
+                            <include>platform/src/test/java/**/*.java</include>
+                        </includes>
+                        <lineEndings>UNIX</lineEndings>
+                        <removeUnusedImports/>
+                        <googleJavaFormat>
+                            <style>AOSP</style>
+                        </googleJavaFormat>
+                        <importOrder/>
+                    </java>
+                </configuration>
+                <executions>
+                    <execution>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

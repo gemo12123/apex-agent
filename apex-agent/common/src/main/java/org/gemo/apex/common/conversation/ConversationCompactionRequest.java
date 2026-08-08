@@ -1,19 +1,20 @@
 package org.gemo.apex.common.conversation;
 
-import org.gemo.apex.common.message.AgentMessageEntry;
-import org.gemo.apex.common.support.DomainValues;
+import static org.gemo.apex.common.support.DomainValues.*;
 
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.gemo.apex.common.message.AgentMessageEntry;
+import org.gemo.apex.common.support.DomainValues;
 
-import static org.gemo.apex.common.support.DomainValues.*;
-
-public record ConversationCompactionRequest(String sessionId, String compactionId,
-                                            List<AgentMessageEntry> sourceMessages,
-                                            List<AgentMessageEntry> retainedMessages,
-                                            Map<String, Object> metadata) {
+public record ConversationCompactionRequest(
+        String sessionId,
+        String compactionId,
+        List<AgentMessageEntry> sourceMessages,
+        List<AgentMessageEntry> retainedMessages,
+        Map<String, Object> metadata) {
     public ConversationCompactionRequest {
         sessionId = required(sessionId, "sessionId");
         compactionId = required(compactionId, "compactionId");
@@ -31,8 +32,8 @@ public record ConversationCompactionRequest(String sessionId, String compactionI
         metadata = DomainValues.jsonMap(metadata, "metadata");
     }
 
-    private static void validateOrderedSubset(List<AgentMessageEntry> source,
-                                              List<AgentMessageEntry> retained) {
+    private static void validateOrderedSubset(
+            List<AgentMessageEntry> source, List<AgentMessageEntry> retained) {
         Set<String> sourceIds = new HashSet<>();
         long sourcePreviousSortNo = -1;
         for (AgentMessageEntry message : source) {

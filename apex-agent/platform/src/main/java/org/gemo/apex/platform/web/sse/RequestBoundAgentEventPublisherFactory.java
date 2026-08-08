@@ -1,17 +1,22 @@
 package org.gemo.apex.platform.web.sse;
 
+import java.util.function.Supplier;
 import org.gemo.apex.common.execution.AgentExecutionDescriptor;
 import org.gemo.apex.extension.event.AgentEventPublisher;
 import org.gemo.apex.extension.event.AgentEventPublisherFactory;
 
-import java.util.function.Supplier;
-
 public final class RequestBoundAgentEventPublisherFactory implements AgentEventPublisherFactory {
     private final ThreadLocal<Binding> current = new ThreadLocal<>();
 
-    public <T> T prepare(String sessionId, String agentKey, String userId,
-                         SseEmitterAgentEventPublisher publisher, Supplier<T> action) {
-        if (current.get() != null) throw new IllegalStateException("请求 Publisher 已绑定");
+    public <T> T prepare(
+            String sessionId,
+            String agentKey,
+            String userId,
+            SseEmitterAgentEventPublisher publisher,
+            Supplier<T> action) {
+        if (current.get() != null) {
+            throw new IllegalStateException("请求 Publisher 已绑定");
+        }
         current.set(new Binding(sessionId, agentKey, userId, publisher));
         try {
             return action.get();
@@ -29,10 +34,14 @@ public final class RequestBoundAgentEventPublisherFactory implements AgentEventP
         return binding.publisher();
     }
 
-    private record Binding(String sessionId, String agentKey, String userId,
-                           SseEmitterAgentEventPublisher publisher) {
+    private record Binding(
+            String sessionId,
+            String agentKey,
+            String userId,
+            SseEmitterAgentEventPublisher publisher) {
         boolean matches(AgentExecutionDescriptor value) {
-            return sessionId.equals(value.sessionId()) && agentKey.equals(value.agentKey())
+            return sessionId.equals(value.sessionId())
+                    && agentKey.equals(value.agentKey())
                     && userId.equals(value.userId());
         }
     }

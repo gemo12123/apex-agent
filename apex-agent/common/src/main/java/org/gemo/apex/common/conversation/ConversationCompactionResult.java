@@ -1,19 +1,20 @@
 package org.gemo.apex.common.conversation;
 
-import org.gemo.apex.common.message.AgentMessageEntry;
-import org.gemo.apex.common.support.DomainValues;
-
-import java.util.List;
-import java.util.Map;
-import java.util.HashSet;
-import java.util.Set;
-
 import static org.gemo.apex.common.support.DomainValues.immutableList;
 import static org.gemo.apex.common.support.DomainValues.required;
 
-public record ConversationCompactionResult(String compactionId, String summary,
-                                           List<AgentMessageEntry> retainedMessages,
-                                           Map<String, Object> metadata) {
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import org.gemo.apex.common.message.AgentMessageEntry;
+import org.gemo.apex.common.support.DomainValues;
+
+public record ConversationCompactionResult(
+        String compactionId,
+        String summary,
+        List<AgentMessageEntry> retainedMessages,
+        Map<String, Object> metadata) {
     public ConversationCompactionResult {
         compactionId = required(compactionId, "compactionId");
         summary = required(summary, "summary");

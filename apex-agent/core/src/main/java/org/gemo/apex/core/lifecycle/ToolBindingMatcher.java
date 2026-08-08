@@ -5,7 +5,8 @@ import org.gemo.apex.common.tool.ToolCall;
 
 public final class ToolBindingMatcher {
     public boolean matches(HookBinding binding, ToolCall call) {
-        return binding.tools().isEmpty() || call == null
+        return binding.tools().isEmpty()
+                || call == null
                 || binding.tools().stream().anyMatch(pattern -> matches(pattern, call.name()));
     }
 
@@ -15,7 +16,8 @@ public final class ToolBindingMatcher {
         int wildcardIndex = -1;
         int wildcardToolIndex = -1;
         while (toolIndex < toolName.length()) {
-            if (patternIndex < pattern.length() && pattern.charAt(patternIndex) == toolName.charAt(toolIndex)) {
+            if (patternIndex < pattern.length()
+                    && pattern.charAt(patternIndex) == toolName.charAt(toolIndex)) {
                 patternIndex++;
                 toolIndex++;
             } else if (patternIndex < pattern.length() && pattern.charAt(patternIndex) == '*') {

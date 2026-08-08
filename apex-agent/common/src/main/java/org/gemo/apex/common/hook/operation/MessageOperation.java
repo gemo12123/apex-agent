@@ -1,5 +1,6 @@
 package org.gemo.apex.common.hook.operation;
 
-public sealed interface MessageOperation permits AppendMessage, InsertMessage, ReplaceMessage, RemoveMessage {
+public sealed interface MessageOperation
+        permits AppendMessage, InsertMessage, ReplaceMessage, RemoveMessage {
     String operationId();
 }

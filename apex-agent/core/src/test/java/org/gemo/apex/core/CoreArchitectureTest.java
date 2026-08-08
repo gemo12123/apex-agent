@@ -1,19 +1,17 @@
 package org.gemo.apex.core;
 
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-
-import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.Test;
 
 class CoreArchitectureTest {
-    /**
-     * core源码不依赖SpringServletSse数据库或Mcp客户端
-     */
+    /** core源码不依赖SpringServletSse数据库或Mcp客户端 */
     @Test
-    void coreProductionSourceDoesNotDependOnSpringServletSseDatabaseOrMcpClient() throws IOException {
+    void coreProductionSourceDoesNotDependOnSpringServletSseDatabaseOrMcpClient()
+            throws IOException {
         String source = readJava(Path.of("src/main/java"));
         assertFalse(source.contains("org.springframework"));
         assertFalse(source.contains("SseEmitter"));
@@ -24,11 +22,10 @@ class CoreArchitectureTest {
         assertFalse(source.contains("java.sql"));
     }
 
-    /**
-     * core只有一处业务迭代循环且固定文案只归ToolResultFactory所有
-     */
+    /** core只有一处业务迭代循环且固定文案只归ToolResultFactory所有 */
     @Test
-    void coreHasSingleBusinessIterationLoopAndReservesFixedTextForToolResultFactory() throws IOException {
+    void coreHasSingleBusinessIterationLoopAndReservesFixedTextForToolResultFactory()
+            throws IOException {
         String source = readJava(Path.of("src/main/java"));
         assertEquals(1, occurrences(source, "for (int iterationNo = firstIteration"));
         assertFalse(source.contains("PlanExecutor"));
@@ -50,7 +47,10 @@ class CoreArchitectureTest {
 
     private int occurrences(String source, String target) {
         int count = 0, from = 0;
-        while ((from = source.indexOf(target, from)) >= 0) { count++; from += target.length(); }
+        while ((from = source.indexOf(target, from)) >= 0) {
+            count++;
+            from += target.length();
+        }
         return count;
     }
 }

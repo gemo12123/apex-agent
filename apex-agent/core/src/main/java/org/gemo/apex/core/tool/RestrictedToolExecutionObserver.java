@@ -13,8 +13,8 @@ public final class RestrictedToolExecutionObserver implements ToolExecutionObser
     private final AgentEventEmitter emitter;
     private final CancellationToken token;
 
-    public RestrictedToolExecutionObserver(String invocationId, AgentEventEmitter emitter,
-                                           CancellationToken token) {
+    public RestrictedToolExecutionObserver(
+            String invocationId, AgentEventEmitter emitter, CancellationToken token) {
         this.invocationId = invocationId;
         this.emitter = emitter;
         this.token = token;
@@ -22,7 +22,8 @@ public final class RestrictedToolExecutionObserver implements ToolExecutionObser
 
     @Override
     public void onEvent(AgentMessage event) {
-        if (!(event instanceof InvocationDeclaredMessage) && !(event instanceof InvocationChangeMessage)) {
+        if (!(event instanceof InvocationDeclaredMessage)
+                && !(event instanceof InvocationChangeMessage)) {
             throw new IllegalToolEventException("工具只能发布 INVOCATION_DECLARED/INVOCATION_CHANGE");
         }
         Object actual = event.getContext() == null ? null : event.getContext().get("invocation_id");
@@ -32,5 +33,8 @@ public final class RestrictedToolExecutionObserver implements ToolExecutionObser
         emitter.publish(event);
     }
 
-    @Override public CancellationToken cancellationToken() { return token; }
+    @Override
+    public CancellationToken cancellationToken() {
+        return token;
+    }
 }

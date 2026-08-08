@@ -1,9 +1,8 @@
 package org.gemo.apex.runtime.skill;
 
+import java.util.*;
 import org.gemo.apex.common.tool.*;
 import org.gemo.apex.extension.tool.*;
-
-import java.util.*;
 
 public final class ReadSkillResourceTool implements AgentTool {
     public static final String NAME = "read_skill_resource";
@@ -22,6 +21,7 @@ public final class ReadSkillResourceTool implements AgentTool {
     public ToolResult execute(ToolCall c, ToolExecutionContext x, ToolExecutionObserver o) {
         String skill = Objects.toString(c.arguments().get("skillName"), "");
         String path = Objects.toString(c.arguments().get("path"), "");
-        return new ToolResult(c.toolCallId(), c.name(), skills.read(skill, path, enabled), Map.of());
+        return new ToolResult(
+                c.toolCallId(), c.name(), skills.read(skill, path, enabled), Map.of());
     }
 }

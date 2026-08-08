@@ -1,16 +1,13 @@
 package org.gemo.apex.core.tool;
 
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.util.Map;
 import org.gemo.apex.common.tool.ToolCall;
 import org.junit.jupiter.api.Test;
 
-import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.*;
-
 class ToolResultFactoryTest {
-    /**
-     * 三类固定结果保留原关联并使用空metadata
-     */
+    /** 三类固定结果保留原关联并使用空metadata */
     @Test
     void preservesOriginalAssociationAndEmptyMetadataForThreeFixedResults() {
         ToolCall call = new ToolCall("call-1", "tool", 0, Map.of(), Map.of());

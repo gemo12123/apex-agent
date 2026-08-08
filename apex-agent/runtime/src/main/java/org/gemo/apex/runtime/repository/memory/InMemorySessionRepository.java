@@ -1,11 +1,10 @@
 package org.gemo.apex.runtime.repository.memory;
 
+import java.util.*;
+import java.util.concurrent.*;
 import org.gemo.apex.common.json.JsonUtils;
 import org.gemo.apex.common.snapshot.SessionSnapshot;
 import org.gemo.apex.extension.repository.SessionRepository;
-
-import java.util.*;
-import java.util.concurrent.*;
 
 public final class InMemorySessionRepository implements SessionRepository {
     private final Map<String, SessionSnapshot> map = new ConcurrentHashMap<>();

@@ -1,8 +1,7 @@
 package org.gemo.apex.extension.skill;
 
-import org.gemo.apex.common.skill.SkillDefinition;
-
 import java.util.List;
+import org.gemo.apex.common.skill.SkillDefinition;
 
 public interface SkillProvider {
     List<SkillDefinition> loadSkills();

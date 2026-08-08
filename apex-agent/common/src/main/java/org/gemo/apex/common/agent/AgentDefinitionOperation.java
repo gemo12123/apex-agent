@@ -1,5 +1,8 @@
 package org.gemo.apex.common.agent;
 
 public sealed interface AgentDefinitionOperation
-        permits AddAvailableTool, RemoveAvailableTool, ReplacePrompt, AddHookBinding, RemoveHookBinding {
-}
+        permits AddAvailableTool,
+                RemoveAvailableTool,
+                ReplacePrompt,
+                AddHookBinding,
+                RemoveHookBinding {}

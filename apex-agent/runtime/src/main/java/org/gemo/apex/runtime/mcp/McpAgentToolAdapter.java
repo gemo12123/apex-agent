@@ -1,11 +1,10 @@
 package org.gemo.apex.runtime.mcp;
 
+import java.util.*;
 import org.gemo.apex.common.exception.CancellationRequestedException;
 import org.gemo.apex.common.json.JsonUtils;
 import org.gemo.apex.common.tool.*;
 import org.gemo.apex.extension.tool.*;
-
-import java.util.*;
 
 public final class McpAgentToolAdapter implements AgentTool, AutoCloseable {
     private final ToolDefinition d;
@@ -23,13 +22,16 @@ public final class McpAgentToolAdapter implements AgentTool, AutoCloseable {
     public ToolResult execute(ToolCall c, ToolExecutionContext x, ToolExecutionObserver o) {
         x.cancellationToken().throwIfCancellationRequested();
         var h = t.call(d.name(), c.arguments());
-        try (h; var r = x.cancellationToken().onCancel(h::cancel)) {
+        try (h;
+                var r = x.cancellationToken().onCancel(h::cancel)) {
             try {
                 var out = h.await();
                 x.cancellationToken().throwIfCancellationRequested();
                 return new ToolResult(c.toolCallId(), c.name(), JsonUtils.toJson(out), Map.of());
             } catch (RuntimeException e) {
-                if (x.cancellationToken().isCancellationRequested()) throw new CancellationRequestedException();
+                if (x.cancellationToken().isCancellationRequested()) {
+                    throw new CancellationRequestedException();
+                }
                 throw e;
             }
         }

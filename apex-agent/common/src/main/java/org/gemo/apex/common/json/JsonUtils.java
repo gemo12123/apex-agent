@@ -8,16 +8,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import java.lang.reflect.Modifier;
 import org.gemo.apex.common.exception.JsonDecodingException;
 import org.gemo.apex.common.exception.JsonEncodingException;
-
-import java.lang.reflect.Modifier;
 
 public final class JsonUtils {
     private static final ObjectMapper MAPPER = createMapper();
 
-    private JsonUtils() {
-    }
+    private JsonUtils() {}
 
     private static ObjectMapper createMapper() {
         return new ObjectMapper()
@@ -28,7 +26,9 @@ public final class JsonUtils {
     }
 
     public static String toJson(Object value) {
-        if (value == null) return null;
+        if (value == null) {
+            return null;
+        }
         try {
             return MAPPER.writeValueAsString(value);
         } catch (JsonProcessingException | IllegalArgumentException exception) {
@@ -37,8 +37,12 @@ public final class JsonUtils {
     }
 
     public static <T> T fromJson(String json, Class<T> type) {
-        if (json == null || json.isBlank()) return null;
-        if (type == null) throw new IllegalArgumentException("type 不能为空");
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        if (type == null) {
+            throw new IllegalArgumentException("type 不能为空");
+        }
         try {
             return MAPPER.readValue(json, type);
         } catch (JsonProcessingException | IllegalArgumentException exception) {
@@ -47,7 +51,9 @@ public final class JsonUtils {
     }
 
     public static <T> T fromJson(String json, TypeReference<T> type) {
-        if (json == null || json.isBlank()) return null;
+        if (json == null || json.isBlank()) {
+            return null;
+        }
         try {
             return MAPPER.readValue(json, type);
         } catch (JsonProcessingException | IllegalArgumentException exception) {
@@ -56,7 +62,9 @@ public final class JsonUtils {
     }
 
     public static JsonNode toTree(Object value) {
-        if (value == null) return null;
+        if (value == null) {
+            return null;
+        }
         try {
             return MAPPER.valueToTree(value);
         } catch (IllegalArgumentException exception) {
@@ -65,7 +73,9 @@ public final class JsonUtils {
     }
 
     public static JsonNode parseTree(String json) {
-        if (json == null || json.isBlank()) return null;
+        if (json == null || json.isBlank()) {
+            return null;
+        }
         try {
             return MAPPER.readTree(json);
         } catch (JsonProcessingException exception) {
@@ -74,7 +84,9 @@ public final class JsonUtils {
     }
 
     public static <T> T convert(Object source, Class<T> type) {
-        if (source == null) return null;
+        if (source == null) {
+            return null;
+        }
         requireConcrete(type);
         try {
             return MAPPER.convertValue(source, type);
@@ -84,13 +96,17 @@ public final class JsonUtils {
     }
 
     public static <T> T deepCopy(Object source, Class<T> type) {
-        if (source == null) return null;
+        if (source == null) {
+            return null;
+        }
         requireConcrete(type);
         return fromJson(toJson(source), type);
     }
 
     public static <T> T deepCopy(Object source, TypeReference<T> type) {
-        if (source == null) return null;
+        if (source == null) {
+            return null;
+        }
         return fromJson(toJson(source), type);
     }
 

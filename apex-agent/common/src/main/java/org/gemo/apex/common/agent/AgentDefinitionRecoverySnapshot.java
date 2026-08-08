@@ -1,22 +1,24 @@
 package org.gemo.apex.common.agent;
 
-import org.gemo.apex.common.hook.HookBinding;
-import org.gemo.apex.common.hook.HookPoint;
+import static org.gemo.apex.common.support.DomainValues.*;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.gemo.apex.common.hook.HookBinding;
+import org.gemo.apex.common.hook.HookPoint;
 
-import static org.gemo.apex.common.support.DomainValues.*;
-
-public record AgentDefinitionRecoverySnapshot(String schemaVersion, AgentMetadata metadata,
-                                              PromptDefinition prompt,
-                                              MessageCompressionDefinition messageCompression,
-                                              Set<String> availableTools, Set<String> enabledSkills,
-                                              Map<String, SubAgentDefinition> subAgents,
-                                              Map<HookPoint, List<HookBinding>> hooks) {
+public record AgentDefinitionRecoverySnapshot(
+        String schemaVersion,
+        AgentMetadata metadata,
+        PromptDefinition prompt,
+        MessageCompressionDefinition messageCompression,
+        Set<String> availableTools,
+        Set<String> enabledSkills,
+        Map<String, SubAgentDefinition> subAgents,
+        Map<HookPoint, List<HookBinding>> hooks) {
     public AgentDefinitionRecoverySnapshot {
         schemaVersion = required(schemaVersion, "schemaVersion");
         if (!DefinitionSchemaVersion.V1.equals(schemaVersion)) {
@@ -31,7 +33,9 @@ public record AgentDefinitionRecoverySnapshot(String schemaVersion, AgentMetadat
         subAgents = Collections.unmodifiableMap(new LinkedHashMap<>(subAgents));
         nonNull(hooks, "hooks");
         Map<HookPoint, List<HookBinding>> hookCopy = new LinkedHashMap<>();
-        hooks.forEach((point, bindings) -> hookCopy.put(nonNull(point, "hooks key"), List.copyOf(bindings)));
+        hooks.forEach(
+                (point, bindings) ->
+                        hookCopy.put(nonNull(point, "hooks key"), List.copyOf(bindings)));
         hooks = Collections.unmodifiableMap(hookCopy);
     }
 }

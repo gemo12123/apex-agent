@@ -1,5 +1,6 @@
 package org.gemo.apex.kit.hook;
 
+import java.util.Objects;
 import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.common.hook.HookTypeDescriptor;
 import org.gemo.apex.common.hook.context.PreToolCallContext;
@@ -11,12 +12,12 @@ import org.gemo.apex.common.hook.result.RequestHumanIntervention;
 import org.gemo.apex.extension.hook.LifecycleHook;
 import org.gemo.apex.kit.intervention.ToolConfirmationSpecFactory;
 
-import java.util.Objects;
-
-public final class ToolConfirmHook implements LifecycleHook<PreToolCallContext, PreToolCallHookResult> {
+public final class ToolConfirmHook
+        implements LifecycleHook<PreToolCallContext, PreToolCallHookResult> {
     public static final String REGISTRATION_NAME = "toolConfirmHook";
-    private static final HookTypeDescriptor DESCRIPTOR = new HookTypeDescriptor(HookPoint.PRE_TOOL_CALL,
-            PreToolCallContext.class, PreToolCallHookResult.class);
+    private static final HookTypeDescriptor DESCRIPTOR =
+            new HookTypeDescriptor(
+                    HookPoint.PRE_TOOL_CALL, PreToolCallContext.class, PreToolCallHookResult.class);
     private final ToolConfirmationSpecFactory factory;
 
     public ToolConfirmHook() {
@@ -35,8 +36,8 @@ public final class ToolConfirmHook implements LifecycleHook<PreToolCallContext, 
     @Override
     public PreToolCallHookResult apply(PreToolCallContext context) {
         if (context.humanSubmission() != null) {
-            return new ContinuePreToolCall(HookMutations.none(),
-                    new ToolCallPatch(context.toolCall().arguments()));
+            return new ContinuePreToolCall(
+                    HookMutations.none(), new ToolCallPatch(context.toolCall().arguments()));
         }
         return new RequestHumanIntervention(factory.create(context));
     }

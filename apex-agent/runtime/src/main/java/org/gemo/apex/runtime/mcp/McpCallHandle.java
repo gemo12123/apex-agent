@@ -7,6 +7,5 @@ public interface McpCallHandle extends AutoCloseable {
 
     void cancel();
 
-    default void close() {
-    }
+    default void close() {}
 }

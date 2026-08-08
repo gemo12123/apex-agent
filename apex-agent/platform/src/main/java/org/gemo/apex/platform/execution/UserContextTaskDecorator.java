@@ -8,7 +8,9 @@ public final class UserContextTaskDecorator implements TaskDecorator {
     public Runnable decorate(Runnable runnable) {
         String captured = UserContextHolder.get();
         return () -> {
-            if (captured != null) UserContextHolder.set(captured);
+            if (captured != null) {
+                UserContextHolder.set(captured);
+            }
             try {
                 runnable.run();
             } finally {

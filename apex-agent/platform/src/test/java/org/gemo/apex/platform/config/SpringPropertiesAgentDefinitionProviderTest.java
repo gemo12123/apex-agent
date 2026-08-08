@@ -1,17 +1,14 @@
 package org.gemo.apex.platform.config;
 
-import org.junit.jupiter.api.Test;
-import org.springframework.core.io.DefaultResourceLoader;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.LinkedHashMap;
 import java.util.Set;
-
-import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.Test;
+import org.springframework.core.io.DefaultResourceLoader;
 
 class SpringPropertiesAgentDefinitionProviderTest {
-    /**
-     * 完整配置应转换并由轻量列表直接返回
-     */
+    /** 完整配置应转换并由轻量列表直接返回 */
     @Test
     void convertsCompleteConfigurationAndReturnsLightweightListDirectly() {
         var properties = new ApexAgentPlatformProperties();
@@ -25,26 +22,32 @@ class SpringPropertiesAgentDefinitionProviderTest {
         agents.put("default", agent);
         properties.setAgents(agents);
 
-        var provider = new SpringPropertiesAgentDefinitionProvider(properties, new DefaultResourceLoader());
+        var provider =
+                new SpringPropertiesAgentDefinitionProvider(
+                        properties, new DefaultResourceLoader());
 
         assertEquals("default", provider.listAgents().getFirst().agentKey());
         assertEquals(Set.of("search"), provider.load("default").tools().defaultEnabledTools());
         assertTrue(provider.load("default").prompt().systemPrompt().contains("通用智能体"));
     }
 
-    /**
-     * 多定义源和缺失Prompt应在构造期失败
-     */
+    /** 多定义源和缺失Prompt应在构造期失败 */
     @Test
     void rejectsMultipleDefinitionSourcesAndMissingPromptAtConstruction() {
         var properties = new ApexAgentPlatformProperties();
         properties.setDefinitionResource("classpath:agents.yml");
         properties.getAgents().put("default", new ApexAgentPlatformProperties.Agent());
-        assertThrows(IllegalArgumentException.class, () ->
-                new SpringPropertiesAgentDefinitionProvider(properties, new DefaultResourceLoader()));
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new SpringPropertiesAgentDefinitionProvider(
+                                properties, new DefaultResourceLoader()));
 
         properties.setDefinitionResource(null);
-        assertThrows(IllegalArgumentException.class, () ->
-                new SpringPropertiesAgentDefinitionProvider(properties, new DefaultResourceLoader()));
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new SpringPropertiesAgentDefinitionProvider(
+                                properties, new DefaultResourceLoader()));
     }
 }

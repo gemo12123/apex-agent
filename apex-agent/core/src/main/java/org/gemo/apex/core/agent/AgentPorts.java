@@ -1,5 +1,6 @@
 package org.gemo.apex.core.agent;
 
+import java.util.Objects;
 import org.gemo.apex.common.tool.CancellationToken;
 import org.gemo.apex.extension.conversation.ConversationCompactionPolicy;
 import org.gemo.apex.extension.conversation.ConversationCompactor;
@@ -16,8 +17,6 @@ import org.gemo.apex.extension.skill.SkillProvider;
 import org.gemo.apex.extension.time.TimeProvider;
 import org.gemo.apex.extension.tool.ToolAvailabilityProvider;
 import org.gemo.apex.extension.tool.ToolProvider;
-
-import java.util.Objects;
 
 /** 单次请求所需的全部外部端口；该对象不进入快照。 */
 public record AgentPorts(
@@ -57,8 +56,12 @@ public record AgentPorts(
         Objects.requireNonNull(cancellationToken, "cancellationToken");
         Objects.requireNonNull(idGenerator, "idGenerator");
         Objects.requireNonNull(timeProvider, "timeProvider");
-        if (maxIterations < 1) throw new IllegalArgumentException("maxIterations 必须大于 0");
-        if (modelRequestHardLimit < 1) throw new IllegalArgumentException("modelRequestHardLimit 必须大于 0");
+        if (maxIterations < 1) {
+            throw new IllegalArgumentException("maxIterations 必须大于 0");
+        }
+        if (modelRequestHardLimit < 1) {
+            throw new IllegalArgumentException("modelRequestHardLimit 必须大于 0");
+        }
         if (finalIterationInstruction == null || finalIterationInstruction.isBlank()) {
             throw new IllegalArgumentException("finalIterationInstruction 不能为空");
         }

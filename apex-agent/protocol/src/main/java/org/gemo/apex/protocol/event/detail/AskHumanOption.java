@@ -9,6 +9,9 @@ import lombok.experimental.SuperBuilder;
 @SuperBuilder
 @NoArgsConstructor
 public class AskHumanOption {
-    @JsonProperty("label") private String label;
-    @JsonProperty("description") private String description;
+    @JsonProperty("label")
+    private String label;
+
+    @JsonProperty("description")
+    private String description;
 }

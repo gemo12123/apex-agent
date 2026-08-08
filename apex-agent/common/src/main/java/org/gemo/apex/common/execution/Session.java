@@ -1,11 +1,17 @@
 package org.gemo.apex.common.execution;
 
-import java.util.Set;
-
 import static org.gemo.apex.common.support.DomainValues.*;
 
-public record Session(String sessionId, String userId, String agentKey, SessionStatus status,
-                      long currentTurnNo, Set<String> enabledTools, Set<String> activatedSkills) {
+import java.util.Set;
+
+public record Session(
+        String sessionId,
+        String userId,
+        String agentKey,
+        SessionStatus status,
+        long currentTurnNo,
+        Set<String> enabledTools,
+        Set<String> activatedSkills) {
     public Session {
         sessionId = required(sessionId, "sessionId");
         userId = required(userId, "userId");

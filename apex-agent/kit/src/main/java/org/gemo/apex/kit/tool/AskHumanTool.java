@@ -1,5 +1,10 @@
 package org.gemo.apex.kit.tool;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import org.gemo.apex.common.intervention.QuestionSubmission;
 import org.gemo.apex.common.json.JsonUtils;
 import org.gemo.apex.common.tool.ToolCall;
@@ -9,19 +14,15 @@ import org.gemo.apex.common.tool.ToolResult;
 import org.gemo.apex.extension.tool.AgentTool;
 import org.gemo.apex.extension.tool.ToolExecutionObserver;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-
 public final class AskHumanTool implements AgentTool {
     public static final String NAME = "ask_human";
-    private static final String INPUT_SCHEMA = """
+    private static final String INPUT_SCHEMA =
+            """
             {"type":"object","required":["questions"],"properties":{"questions":{"type":"array","minItems":1,"items":{"type":"object","required":["index","input_type","question"],"properties":{"index":{"type":"integer","minimum":0},"input_type":{"type":"string"},"question":{"type":"string"},"description":{"type":"string"},"options":{"type":"array","items":{"type":"object"}}}}}}}
-            """.strip();
-    private static final ToolDefinition DEFINITION = new ToolDefinition(NAME,
-            "当信息不全或必须由用户确认时，挂起任务并向用户提问。", INPUT_SCHEMA, Map.of());
+            """
+                    .strip();
+    private static final ToolDefinition DEFINITION =
+            new ToolDefinition(NAME, "当信息不全或必须由用户确认时，挂起任务并向用户提问。", INPUT_SCHEMA, Map.of());
 
     @Override
     public ToolDefinition definition() {
@@ -29,7 +30,8 @@ public final class AskHumanTool implements AgentTool {
     }
 
     @Override
-    public ToolResult execute(ToolCall call, ToolExecutionContext context, ToolExecutionObserver observer) {
+    public ToolResult execute(
+            ToolCall call, ToolExecutionContext context, ToolExecutionObserver observer) {
         if (!NAME.equals(call.name())) {
             throw new IllegalArgumentException("AskHumanTool 只能执行 ask_human 调用");
         }
@@ -44,8 +46,11 @@ public final class AskHumanTool implements AgentTool {
         submission.answers().entrySet().stream()
                 .sorted(Map.Entry.comparingByKey(answerKeyComparator()))
                 .forEach(entry -> answers.put(entry.getKey(), normalizeAnswer(entry.getValue())));
-        return new ToolResult(call.toolCallId(), call.name(),
-                JsonUtils.toJson(Map.of("answers", answers)), Map.of());
+        return new ToolResult(
+                call.toolCallId(),
+                call.name(),
+                JsonUtils.toJson(Map.of("answers", answers)),
+                Map.of());
     }
 
     private Comparator<String> answerKeyComparator() {
@@ -61,7 +66,9 @@ public final class AskHumanTool implements AgentTool {
     }
 
     private Object normalizeAnswer(Object answer) {
-        if (answer instanceof String) return answer;
+        if (answer instanceof String) {
+            return answer;
+        }
         if (answer instanceof List<?> values) {
             List<String> normalized = new ArrayList<>(values.size());
             for (Object value : values) {

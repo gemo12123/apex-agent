@@ -1,10 +1,9 @@
 package org.gemo.apex.common.hook.operation;
 
-import org.gemo.apex.common.support.DomainValues;
+import static org.gemo.apex.common.support.DomainValues.required;
 
 import java.util.Map;
-
-import static org.gemo.apex.common.support.DomainValues.required;
+import org.gemo.apex.common.support.DomainValues;
 
 public record ToolResultPatch(String content, Map<String, Object> metadata) {
     public ToolResultPatch {

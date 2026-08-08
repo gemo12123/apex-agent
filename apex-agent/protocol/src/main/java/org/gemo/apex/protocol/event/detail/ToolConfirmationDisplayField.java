@@ -11,8 +11,15 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ToolConfirmationDisplayField {
-    @JsonProperty("key") private String key;
-    @JsonProperty("label") private String label;
-    @JsonProperty("value") private Object value;
-    @JsonProperty("type") private String type;
+    @JsonProperty("key")
+    private String key;
+
+    @JsonProperty("label")
+    private String label;
+
+    @JsonProperty("value")
+    private Object value;
+
+    @JsonProperty("type")
+    private String type;
 }

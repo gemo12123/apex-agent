@@ -1,9 +1,9 @@
 package org.gemo.apex.common.tool;
 
+import static org.gemo.apex.common.support.DomainValues.*;
+
 import java.util.ArrayList;
 import java.util.List;
-
-import static org.gemo.apex.common.support.DomainValues.*;
 
 public record SubAgentCallTrace(String traceId, List<String> agentKeys, int maxDepth) {
     public SubAgentCallTrace {

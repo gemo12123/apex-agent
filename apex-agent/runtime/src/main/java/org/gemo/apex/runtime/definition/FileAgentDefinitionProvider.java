@@ -1,15 +1,14 @@
 package org.gemo.apex.runtime.definition;
 
-import org.gemo.apex.common.agent.*;
-import org.gemo.apex.common.json.JsonUtils;
-import org.gemo.apex.extension.definition.AgentDefinitionProvider;
-import org.yaml.snakeyaml.Yaml;
-
 import java.io.*;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
+import org.gemo.apex.common.agent.*;
+import org.gemo.apex.common.json.JsonUtils;
+import org.gemo.apex.extension.definition.AgentDefinitionProvider;
+import org.yaml.snakeyaml.Yaml;
 
 public final class FileAgentDefinitionProvider implements AgentDefinitionProvider {
     private final Map<String, AgentDefinition> values;
@@ -22,13 +21,18 @@ public final class FileAgentDefinitionProvider implements AgentDefinitionProvide
         try (var r = new InputStreamReader(open(uri, loader), StandardCharsets.UTF_8)) {
             Map<?, ?> root = new Yaml().load(r);
             Map<?, ?> agents = (Map<?, ?>) root.get("agents");
-            if (agents == null || agents.isEmpty()) throw new IllegalArgumentException("agents 不能为空");
+            if (agents == null || agents.isEmpty()) {
+                throw new IllegalArgumentException("agents 不能为空");
+            }
             Map<String, AgentDefinition> out = new LinkedHashMap<>();
             for (var e : agents.entrySet()) {
                 var d = JsonUtils.mapperCopy().convertValue(e.getValue(), AgentDefinition.class);
-                if (!e.getKey().equals(d.metadata().agentKey())) throw new IllegalArgumentException("agentKey 不一致");
-                if (out.putIfAbsent((String) e.getKey(), d) != null)
+                if (!e.getKey().equals(d.metadata().agentKey())) {
+                    throw new IllegalArgumentException("agentKey 不一致");
+                }
+                if (out.putIfAbsent((String) e.getKey(), d) != null) {
                     throw new IllegalArgumentException("agentKey 重复");
+                }
             }
             values = Map.copyOf(out);
         } catch (Exception e) {
@@ -37,17 +41,23 @@ public final class FileAgentDefinitionProvider implements AgentDefinitionProvide
     }
 
     private static InputStream open(URI u, ClassLoader l) throws IOException {
-        if ("file".equals(u.getScheme())) return Files.newInputStream(Path.of(u));
+        if ("file".equals(u.getScheme())) {
+            return Files.newInputStream(Path.of(u));
+        }
         if ("classpath".equals(u.getScheme())) {
             var in = l.getResourceAsStream(u.getSchemeSpecificPart().replaceFirst("^/", ""));
-            if (in != null) return in;
+            if (in != null) {
+                return in;
+            }
         }
         throw new FileNotFoundException(u.toString());
     }
 
     public AgentDefinition load(String k) {
         var v = values.get(k);
-        if (v == null) throw new IllegalArgumentException("Agent 不存在: " + k);
+        if (v == null) {
+            throw new IllegalArgumentException("Agent 不存在: " + k);
+        }
         return v;
     }
 

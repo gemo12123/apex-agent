@@ -1,5 +1,7 @@
 package org.gemo.apex.kit;
 
+import java.util.List;
+import java.util.Map;
 import org.gemo.apex.common.hook.HookBinding;
 import org.gemo.apex.common.hook.context.PostToolCallContext;
 import org.gemo.apex.common.hook.context.PreToolCallContext;
@@ -12,18 +14,29 @@ import org.gemo.apex.common.tool.ToolResult;
 import org.gemo.apex.extension.tool.ToolExecutionObserver;
 import org.gemo.apex.protocol.event.AgentMessage;
 
-import java.util.List;
-import java.util.Map;
-
 final class KitFixtures {
-    private static final CancellationToken TOKEN = new CancellationToken() {
-        @Override public boolean isCancellationRequested() { return false; }
-        @Override public CancellationRegistration onCancel(Runnable command) { return () -> { }; }
-    };
-    static final ToolExecutionObserver OBSERVER = new ToolExecutionObserver() {
-        @Override public void onEvent(AgentMessage event) { }
-        @Override public CancellationToken cancellationToken() { return TOKEN; }
-    };
+    private static final CancellationToken TOKEN =
+            new CancellationToken() {
+                @Override
+                public boolean isCancellationRequested() {
+                    return false;
+                }
+
+                @Override
+                public CancellationRegistration onCancel(Runnable command) {
+                    return () -> {};
+                }
+            };
+    static final ToolExecutionObserver OBSERVER =
+            new ToolExecutionObserver() {
+                @Override
+                public void onEvent(AgentMessage event) {}
+
+                @Override
+                public CancellationToken cancellationToken() {
+                    return TOKEN;
+                }
+            };
 
     private KitFixtures() {}
 
@@ -36,18 +49,18 @@ final class KitFixtures {
     }
 
     static PreToolCallContext pre(ToolCall call, HookBinding binding, HumanSubmission submission) {
-        return new PreToolCallContext("session-1", binding, call,
-                "invocation-1", "intervention-1", submission);
+        return new PreToolCallContext(
+                "session-1", binding, call, "invocation-1", "intervention-1", submission);
     }
 
     static PostToolCallContext post(ToolResult result) {
         ToolCall call = call(result.toolName(), Map.of());
-        return new PostToolCallContext("session-1",
-                binding("truncate", List.of("*"), Map.of()), call, result);
+        return new PostToolCallContext(
+                "session-1", binding("truncate", List.of("*"), Map.of()), call, result);
     }
 
     static ToolExecutionContext execution(HumanSubmission submission) {
-        return new ToolExecutionContext("session-1", 1, 1, "user-1", submission,
-                null, TOKEN, Map.of());
+        return new ToolExecutionContext(
+                "session-1", 1, 1, "user-1", submission, null, TOKEN, Map.of());
     }
 }

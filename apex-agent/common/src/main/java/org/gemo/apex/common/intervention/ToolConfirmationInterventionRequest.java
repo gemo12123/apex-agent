@@ -1,16 +1,18 @@
 package org.gemo.apex.common.intervention;
 
+import static org.gemo.apex.common.support.DomainValues.*;
+
+import java.util.Set;
 import org.gemo.apex.common.json.JsonUtils;
 import org.gemo.apex.protocol.event.detail.ToolConfirmationDetail;
 
-import java.util.Set;
-
-import static org.gemo.apex.common.support.DomainValues.*;
-
-public record ToolConfirmationInterventionRequest(String toolCallId, String confirmationId,
-                                                  String invocationId, String toolName,
-                                                  ToolConfirmationDetail presentation,
-                                                  Set<String> editableArgumentKeys)
+public record ToolConfirmationInterventionRequest(
+        String toolCallId,
+        String confirmationId,
+        String invocationId,
+        String toolName,
+        ToolConfirmationDetail presentation,
+        Set<String> editableArgumentKeys)
         implements HumanInterventionRequest {
     public ToolConfirmationInterventionRequest {
         toolCallId = required(toolCallId, "toolCallId");

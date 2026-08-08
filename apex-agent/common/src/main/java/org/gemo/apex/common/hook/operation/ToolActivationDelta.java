@@ -1,9 +1,9 @@
 package org.gemo.apex.common.hook.operation;
 
+import static org.gemo.apex.common.support.DomainValues.immutableNames;
+
 import java.util.HashSet;
 import java.util.Set;
-
-import static org.gemo.apex.common.support.DomainValues.immutableNames;
 
 public record ToolActivationDelta(Set<String> enable, Set<String> disable) {
     public ToolActivationDelta {

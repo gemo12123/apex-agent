@@ -1,19 +1,17 @@
 package org.gemo.apex.platform;
 
-import org.junit.jupiter.api.Test;
-
-import java.nio.charset.StandardCharsets;
-
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.nio.charset.StandardCharsets;
+import org.junit.jupiter.api.Test;
+
 class SchemaRulesTest {
-    /**
-     * migration应只包含三张表和Text快照
-     */
+    /** migration应只包含三张表和Text快照 */
     @Test
     void migrationContainsOnlyThreeTablesAndTextSnapshots() throws Exception {
         String sql;
-        try (var input = getClass().getResourceAsStream("/db/migration/V1__create_core_agent_tables.sql")) {
+        try (var input =
+                getClass().getResourceAsStream("/db/migration/V1__create_core_agent_tables.sql")) {
             assertNotNull(input);
             sql = new String(input.readAllBytes(), StandardCharsets.UTF_8).toLowerCase();
         }

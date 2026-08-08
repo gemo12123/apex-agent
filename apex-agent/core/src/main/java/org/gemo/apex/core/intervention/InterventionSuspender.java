@@ -16,7 +16,8 @@ public final class InterventionSuspender {
         this.events = events;
     }
 
-    public void suspend(ApexAgentContext context, SuspendedToolBatch batch, boolean replaceExisting) {
+    public void suspend(
+            ApexAgentContext context, SuspendedToolBatch batch, boolean replaceExisting) {
         context.suspend(batch, replaceExisting);
         context.save();
         try {

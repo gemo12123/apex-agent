@@ -1,27 +1,28 @@
 package org.gemo.apex.extension;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import org.gemo.apex.common.agent.AgentDefinition;
 import org.gemo.apex.common.agent.AgentDefinitionRecoverySnapshot;
 import org.gemo.apex.common.agent.AgentMetadata;
-import org.gemo.apex.common.conversation.ConversationCompactionCheck;
 import org.gemo.apex.common.conversation.ConversationCompactionCommit;
-import org.gemo.apex.common.conversation.ConversationCompactionRequest;
-import org.gemo.apex.common.conversation.ConversationCompactionResult;
 import org.gemo.apex.common.conversation.ConversationQuery;
-import org.gemo.apex.common.conversation.ConversationWindow;
-import org.gemo.apex.common.conversation.ConversationWindowRequest;
-import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.common.hook.HookTypeDescriptor;
 import org.gemo.apex.common.hook.context.HookContextView;
 import org.gemo.apex.common.hook.result.LifecycleHookResult;
 import org.gemo.apex.common.message.AgentMessageEntry;
 import org.gemo.apex.common.message.MessageRole;
 import org.gemo.apex.common.message.MessageType;
-import org.gemo.apex.common.model.ModelRequest;
-import org.gemo.apex.common.model.ModelResponse;
 import org.gemo.apex.common.model.ModelStreamChunk;
 import org.gemo.apex.common.skill.SkillActivationResult;
-import org.gemo.apex.common.skill.SkillDefinition;
 import org.gemo.apex.common.snapshot.SessionSnapshot;
 import org.gemo.apex.common.tool.CancellationRegistration;
 import org.gemo.apex.common.tool.CancellationToken;
@@ -53,56 +54,56 @@ import org.gemo.apex.extension.tool.ToolProvider;
 import org.gemo.apex.protocol.event.AgentMessage;
 import org.junit.jupiter.api.Test;
 
-import java.time.Instant;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 class ExtensionApiCompileTest {
 
-    /**
-     * 全部端口可由纯JDKFake实现且无需Spring
-     */
+    /** 全部端口可由纯JDKFake实现且无需Spring */
     @Test
     void allPortsCanBeImplementedByPureJdkFakesWithoutSpring() {
         CancellationToken token = new TestCancellationToken();
-        ModelStreamObserver modelObserver = new ModelStreamObserver() {
-            @Override public void onChunk(ModelStreamChunk chunk) { }
-            @Override public CancellationToken cancellationToken() { return token; }
-        };
-        ToolExecutionObserver toolObserver = new ToolExecutionObserver() {
-            @Override public void onEvent(AgentMessage event) { }
-            @Override public CancellationToken cancellationToken() { return token; }
-        };
+        ModelStreamObserver modelObserver =
+                new ModelStreamObserver() {
+                    @Override
+                    public void onChunk(ModelStreamChunk chunk) {}
+
+                    @Override
+                    public CancellationToken cancellationToken() {
+                        return token;
+                    }
+                };
+        ToolExecutionObserver toolObserver =
+                new ToolExecutionObserver() {
+                    @Override
+                    public void onEvent(AgentMessage event) {}
+
+                    @Override
+                    public CancellationToken cancellationToken() {
+                        return token;
+                    }
+                };
 
         Object[] ports = {
-                new FakeDefinitionProvider(),
-                (ModelGateway) (request, observer) -> null,
-                modelObserver,
-                new FakeAgentTool(),
-                toolObserver,
-                new FakeToolProvider(),
-                (ToolAvailabilityProvider) () -> new ToolAvailabilitySnapshot(Set.of(), List.of()),
-                (AgentEventPublisher) message -> { },
-                (AgentEventPublisherFactory) execution -> message -> { },
-                new FakeSessionRepository(),
-                new FakeConversationRepository(),
-                (SkillProvider) List::of,
-                (SkillActivator) (name, enabled, activated) ->
-                        new SkillActivationResult("instructions", activated),
-                new FakeIdGenerator(),
-                (TimeProvider) () -> Instant.EPOCH,
-                new FakeLifecycleHook(),
-                (HookResolver) (point, name) -> null,
-                (ConversationWindowManager) request -> null,
-                (ConversationCompactionPolicy) check -> false,
-                (ConversationCompactor) request -> null
+            new FakeDefinitionProvider(),
+            (ModelGateway) (request, observer) -> null,
+            modelObserver,
+            new FakeAgentTool(),
+            toolObserver,
+            new FakeToolProvider(),
+            (ToolAvailabilityProvider) () -> new ToolAvailabilitySnapshot(Set.of(), List.of()),
+            (AgentEventPublisher) message -> {},
+            (AgentEventPublisherFactory) execution -> message -> {},
+            new FakeSessionRepository(),
+            new FakeConversationRepository(),
+            (SkillProvider) List::of,
+            (SkillActivator)
+                    (name, enabled, activated) ->
+                            new SkillActivationResult("instructions", activated),
+            new FakeIdGenerator(),
+            (TimeProvider) () -> Instant.EPOCH,
+            new FakeLifecycleHook(),
+            (HookResolver) (point, name) -> null,
+            (ConversationWindowManager) request -> null,
+            (ConversationCompactionPolicy) check -> false,
+            (ConversationCompactor) request -> null
         };
 
         assertEquals(20, ports.length);
@@ -110,43 +111,49 @@ class ExtensionApiCompileTest {
         assertSame(token, toolObserver.cancellationToken());
     }
 
-    /**
-     * Agent列表端口不需要加载完整定义
-     */
+    /** Agent列表端口不需要加载完整定义 */
     @Test
     void agentListPortDoesNotRequireLoadingFullDefinition() {
         FakeDefinitionProvider provider = new FakeDefinitionProvider();
 
-        assertEquals(List.of(new AgentMetadata("agent", "Agent", "测试 Agent")), provider.listAgents());
+        assertEquals(
+                List.of(new AgentMetadata("agent", "Agent", "测试 Agent")), provider.listAgents());
         assertEquals(0, provider.loadCalls);
     }
 
-    /**
-     * 生命周期和压缩端口可独立驱动正常与失败路径
-     */
+    /** 生命周期和压缩端口可独立驱动正常与失败路径 */
     @Test
     void lifecycleAndCompressionPortsIndependentlyDriveSuccessAndFailurePaths() {
         ConversationCompactionPolicy falsePolicy = check -> false;
         ConversationCompactionPolicy truePolicy = check -> true;
-        ConversationCompactor failingCompactor = request -> {
-            throw new IllegalStateException("摘要模型失败");
-        };
+        ConversationCompactor failingCompactor =
+                request -> {
+                    throw new IllegalStateException("摘要模型失败");
+                };
 
         assertTrue(!falsePolicy.shouldCompact(null));
         assertTrue(truePolicy.shouldCompact(null));
         assertThrows(IllegalStateException.class, () -> failingCompactor.compact(null));
     }
 
-    /**
-     * Repository命令携带稳定幂等ID
-     */
+    /** Repository命令携带稳定幂等ID */
     @Test
     void repositoryCommandsCarryStableIdempotencyIds() {
         CapturingConversationRepository repository = new CapturingConversationRepository();
-        AgentMessageEntry entry = new AgentMessageEntry("entry-1", "session", 1, 1,
-                MessageRole.USER, MessageType.TEXT, "你好", Map.of(), Instant.EPOCH);
-        ConversationCompactionCommit commit = new ConversationCompactionCommit(
-                "session", "compaction-1", 1, 1, "摘要", List.of("entry-1"), List.of(entry));
+        AgentMessageEntry entry =
+                new AgentMessageEntry(
+                        "entry-1",
+                        "session",
+                        1,
+                        1,
+                        MessageRole.USER,
+                        MessageType.TEXT,
+                        "你好",
+                        Map.of(),
+                        Instant.EPOCH);
+        ConversationCompactionCommit commit =
+                new ConversationCompactionCommit(
+                        "session", "compaction-1", 1, 1, "摘要", List.of("entry-1"), List.of(entry));
 
         repository.append(List.of(entry));
         repository.compact(commit);
@@ -158,66 +165,140 @@ class ExtensionApiCompileTest {
     private static final class FakeDefinitionProvider implements AgentDefinitionProvider {
         private int loadCalls;
 
-        @Override public AgentDefinition load(String agentKey) {
+        @Override
+        public AgentDefinition load(String agentKey) {
             loadCalls++;
             return null;
         }
 
-        @Override public List<AgentMetadata> listAgents() {
+        @Override
+        public List<AgentMetadata> listAgents() {
             return List.of(new AgentMetadata("agent", "Agent", "测试 Agent"));
         }
     }
 
     private static final class FakeAgentTool implements AgentTool {
-        @Override public ToolDefinition definition() { return null; }
-        @Override public ToolResult execute(ToolCall call, ToolExecutionContext context,
-                                            ToolExecutionObserver observer) { return null; }
+        @Override
+        public ToolDefinition definition() {
+            return null;
+        }
+
+        @Override
+        public ToolResult execute(
+                ToolCall call, ToolExecutionContext context, ToolExecutionObserver observer) {
+            return null;
+        }
     }
 
     private static final class FakeToolProvider implements ToolProvider {
-        @Override public List<AgentTool> loadTools(AgentDefinition definition) { return List.of(); }
-        @Override public List<AgentTool> loadTools(AgentDefinitionRecoverySnapshot definition) {
+        @Override
+        public List<AgentTool> loadTools(AgentDefinition definition) {
+            return List.of();
+        }
+
+        @Override
+        public List<AgentTool> loadTools(AgentDefinitionRecoverySnapshot definition) {
             return List.of();
         }
     }
 
     private static final class FakeSessionRepository implements SessionRepository {
-        @Override public Optional<SessionSnapshot> load(String sessionId) { return Optional.empty(); }
-        @Override public void save(SessionSnapshot snapshot) { }
+        @Override
+        public Optional<SessionSnapshot> load(String sessionId) {
+            return Optional.empty();
+        }
+
+        @Override
+        public void save(SessionSnapshot snapshot) {}
     }
 
     private static final class FakeConversationRepository implements ConversationRepository {
-        @Override public void append(List<AgentMessageEntry> entries) { }
-        @Override public List<AgentMessageEntry> load(ConversationQuery query) { return List.of(); }
-        @Override public void compact(ConversationCompactionCommit commit) { }
+        @Override
+        public void append(List<AgentMessageEntry> entries) {}
+
+        @Override
+        public List<AgentMessageEntry> load(ConversationQuery query) {
+            return List.of();
+        }
+
+        @Override
+        public void compact(ConversationCompactionCommit commit) {}
     }
 
     private static final class CapturingConversationRepository implements ConversationRepository {
         private List<AgentMessageEntry> entries;
         private ConversationCompactionCommit commit;
 
-        @Override public void append(List<AgentMessageEntry> entries) { this.entries = List.copyOf(entries); }
-        @Override public List<AgentMessageEntry> load(ConversationQuery query) { return List.of(); }
-        @Override public void compact(ConversationCompactionCommit commit) { this.commit = commit; }
+        @Override
+        public void append(List<AgentMessageEntry> entries) {
+            this.entries = List.copyOf(entries);
+        }
+
+        @Override
+        public List<AgentMessageEntry> load(ConversationQuery query) {
+            return List.of();
+        }
+
+        @Override
+        public void compact(ConversationCompactionCommit commit) {
+            this.commit = commit;
+        }
     }
 
     private static final class FakeIdGenerator implements IdGenerator {
-        @Override public String newExecutionId() { return "execution"; }
-        @Override public String newEntryId() { return "entry"; }
-        @Override public String newInvocationId() { return "invocation"; }
-        @Override public String newConfirmationId() { return "confirmation"; }
-        @Override public String newSubSessionId() { return "sub-session"; }
-        @Override public String newCompactionId() { return "compaction"; }
+        @Override
+        public String newExecutionId() {
+            return "execution";
+        }
+
+        @Override
+        public String newEntryId() {
+            return "entry";
+        }
+
+        @Override
+        public String newInvocationId() {
+            return "invocation";
+        }
+
+        @Override
+        public String newConfirmationId() {
+            return "confirmation";
+        }
+
+        @Override
+        public String newSubSessionId() {
+            return "sub-session";
+        }
+
+        @Override
+        public String newCompactionId() {
+            return "compaction";
+        }
     }
 
     private static final class FakeLifecycleHook
             implements LifecycleHook<HookContextView, LifecycleHookResult> {
-        @Override public HookTypeDescriptor descriptor() { return null; }
-        @Override public LifecycleHookResult apply(HookContextView context) { return null; }
+        @Override
+        public HookTypeDescriptor descriptor() {
+            return null;
+        }
+
+        @Override
+        public LifecycleHookResult apply(HookContextView context) {
+            return null;
+        }
     }
 
     private static final class TestCancellationToken implements CancellationToken {
-        @Override public boolean isCancellationRequested() { return false; }
-        @Override public CancellationRegistration onCancel(Runnable command) { return () -> { }; }
+        @Override
+        public boolean isCancellationRequested() {
+            return false;
+        }
+
+        @Override
+        public CancellationRegistration onCancel(Runnable command) {
+            return () -> {};
+        }
     }
 }

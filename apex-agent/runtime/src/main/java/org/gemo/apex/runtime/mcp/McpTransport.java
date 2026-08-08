@@ -1,8 +1,7 @@
 package org.gemo.apex.runtime.mcp;
 
-import org.gemo.apex.common.tool.ToolDefinition;
-
 import java.util.*;
+import org.gemo.apex.common.tool.ToolDefinition;
 
 public interface McpTransport extends AutoCloseable {
     void connect();

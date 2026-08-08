@@ -1,15 +1,14 @@
 package org.gemo.apex.common.model;
 
-import org.gemo.apex.common.exception.DomainInvariantException;
-import org.gemo.apex.common.support.DomainValues;
-import org.gemo.apex.common.tool.ToolCall;
+import static org.gemo.apex.common.support.DomainValues.immutableList;
 
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-
-import static org.gemo.apex.common.support.DomainValues.immutableList;
+import org.gemo.apex.common.exception.DomainInvariantException;
+import org.gemo.apex.common.support.DomainValues;
+import org.gemo.apex.common.tool.ToolCall;
 
 public record ModelResponse(String text, List<ToolCall> toolCalls, Map<String, Object> metadata) {
     public ModelResponse {

@@ -1,28 +1,33 @@
 package org.gemo.apex.common.snapshot;
 
+import static org.gemo.apex.common.support.DomainValues.*;
+
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import org.gemo.apex.common.intervention.HumanInterventionRequest;
 import org.gemo.apex.common.intervention.HumanSubmission;
 import org.gemo.apex.common.support.DomainValues;
 import org.gemo.apex.common.tool.ToolResult;
 
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-
-import static org.gemo.apex.common.support.DomainValues.*;
-
-public record PreparedToolCallSnapshot(String toolCallId, String invocationId, String toolName, int ordinal,
-                                       Map<String, Object> resolvedArguments,
-                                       List<String> executedPreToolHookIds,
-                                       PreparedToolCallDisposition disposition,
-                                       ToolResult result,
-                                       HumanInterventionRequest intervention,
-                                       HumanSubmission submission) {
+public record PreparedToolCallSnapshot(
+        String toolCallId,
+        String invocationId,
+        String toolName,
+        int ordinal,
+        Map<String, Object> resolvedArguments,
+        List<String> executedPreToolHookIds,
+        PreparedToolCallDisposition disposition,
+        ToolResult result,
+        HumanInterventionRequest intervention,
+        HumanSubmission submission) {
     public PreparedToolCallSnapshot {
         toolCallId = required(toolCallId, "toolCallId");
         invocationId = required(invocationId, "invocationId");
         toolName = required(toolName, "toolName");
-        if (ordinal < 0) throw new IllegalArgumentException("ordinal 不能小于 0");
+        if (ordinal < 0) {
+            throw new IllegalArgumentException("ordinal 不能小于 0");
+        }
         resolvedArguments = DomainValues.immutableMap(resolvedArguments, "resolvedArguments");
         executedPreToolHookIds = immutableList(executedPreToolHookIds, "executedPreToolHookIds");
         if (new HashSet<>(executedPreToolHookIds).size() != executedPreToolHookIds.size()) {

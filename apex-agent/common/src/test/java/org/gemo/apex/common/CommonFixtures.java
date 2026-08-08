@@ -1,5 +1,9 @@
 package org.gemo.apex.common;
 
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import org.gemo.apex.common.agent.*;
 import org.gemo.apex.common.execution.*;
 import org.gemo.apex.common.hook.HookBinding;
@@ -14,30 +18,37 @@ import org.gemo.apex.common.model.ModelResponse;
 import org.gemo.apex.common.snapshot.*;
 import org.gemo.apex.common.tool.*;
 
-import java.time.Instant;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
 final class CommonFixtures {
     static final Instant NOW = Instant.parse("2026-08-01T08:00:00Z");
 
-    private CommonFixtures() {
-    }
+    private CommonFixtures() {}
 
     static AgentMessageEntry userMessage() {
-        return new AgentMessageEntry("entry-1", "session-1", 1, 0, MessageRole.USER,
-                MessageType.TEXT, "hello", Map.of("nested", List.of("value")), NOW);
+        return new AgentMessageEntry(
+                "entry-1",
+                "session-1",
+                1,
+                0,
+                MessageRole.USER,
+                MessageType.TEXT,
+                "hello",
+                Map.of("nested", List.of("value")),
+                NOW);
     }
 
     static ToolCall toolCall() {
-        return new ToolCall("call-1", "search", 0,
+        return new ToolCall(
+                "call-1",
+                "search",
+                0,
                 Map.of("query", "apex", "nested", List.of(Map.of("key", "value"))),
                 Map.of("vendor", Map.of("requestId", "r-1")));
     }
 
     static ModelRequest modelRequest() {
-        return new ModelRequest("system", List.of(userMessage()),
+        return new ModelRequest(
+                "system",
+                List.of(userMessage()),
                 List.of(new ToolDefinition("search", "Search", "{\"type\":\"object\"}", Map.of())),
                 Map.of("temperature", 0));
     }
@@ -47,28 +58,69 @@ final class CommonFixtures {
     }
 
     static AgentDefinitionRecoverySnapshot definition() {
-        return new AgentDefinitionRecoverySnapshot(SnapshotSchemaVersion.V1,
+        return new AgentDefinitionRecoverySnapshot(
+                SnapshotSchemaVersion.V1,
                 new AgentMetadata("default", "Default", "Default agent"),
-                new PromptDefinition("system", 4), new MessageCompressionDefinition(true, 20),
-                Set.of("search"), Set.of("research"), Map.of(),
-                Map.of(HookPoint.PRE_TOOL_CALL,
-                        List.of(new HookBinding("confirm", "confirm", 10, true,
-                                List.of("search"), Map.of("risk", "medium")))));
+                new PromptDefinition("system", 4),
+                new MessageCompressionDefinition(true, 20),
+                Set.of("search"),
+                Set.of("research"),
+                Map.of(),
+                Map.of(
+                        HookPoint.PRE_TOOL_CALL,
+                        List.of(
+                                new HookBinding(
+                                        "confirm",
+                                        "confirm",
+                                        10,
+                                        true,
+                                        List.of("search"),
+                                        Map.of("risk", "medium")))));
     }
 
     static SessionSnapshot suspendedSnapshot() {
         ToolResult completed = new ToolResult("call-0", "lookup", "done", Map.of());
-        IterationSnapshot iteration = new IterationSnapshot(1, IterationStatus.SUSPENDED,
-                modelRequest(), modelResponse(), List.of(completed), NOW, null);
+        IterationSnapshot iteration =
+                new IterationSnapshot(
+                        1,
+                        IterationStatus.SUSPENDED,
+                        modelRequest(),
+                        modelResponse(),
+                        List.of(completed),
+                        NOW,
+                        null);
         TurnSnapshot turn = new TurnSnapshot(1, TurnStatus.SUSPENDED, iteration, NOW, null);
-        QuestionInterventionRequest intervention = new QuestionInterventionRequest("call-1",
-                List.of(new QuestionSpec("TEXT_INPUT", "Continue?", null, List.of())));
-        PreparedToolCallSnapshot prepared = new PreparedToolCallSnapshot("call-1", "invocation-1",
-                "search", 0, toolCall().arguments(), List.of("audit", "confirm"),
-                PreparedToolCallDisposition.INTERVENTION, null, intervention, null);
+        QuestionInterventionRequest intervention =
+                new QuestionInterventionRequest(
+                        "call-1",
+                        List.of(new QuestionSpec("TEXT_INPUT", "Continue?", null, List.of())));
+        PreparedToolCallSnapshot prepared =
+                new PreparedToolCallSnapshot(
+                        "call-1",
+                        "invocation-1",
+                        "search",
+                        0,
+                        toolCall().arguments(),
+                        List.of("audit", "confirm"),
+                        PreparedToolCallDisposition.INTERVENTION,
+                        null,
+                        intervention,
+                        null);
         SuspendedToolBatch suspended = new SuspendedToolBatch("session-1", 1, 1, List.of(prepared));
-        return new SessionSnapshot(SnapshotSchemaVersion.V1, "session-1", "user-1", "default",
-                SessionStatus.HUMAN_IN_THE_LOOP, 1, Set.of("search"), Set.of("research"), List.of(),
-                definition(), turn, suspended, 3, NOW);
+        return new SessionSnapshot(
+                SnapshotSchemaVersion.V1,
+                "session-1",
+                "user-1",
+                "default",
+                SessionStatus.HUMAN_IN_THE_LOOP,
+                1,
+                Set.of("search"),
+                Set.of("research"),
+                List.of(),
+                definition(),
+                turn,
+                suspended,
+                3,
+                NOW);
     }
 }

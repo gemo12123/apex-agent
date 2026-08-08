@@ -12,15 +12,22 @@ public final class RuntimeResources implements AutoCloseable {
     }
 
     public void close() {
-        if (!closed.compareAndSet(false, true)) return;
+        if (!closed.compareAndSet(false, true)) {
+            return;
+        }
         RuntimeException failure = null;
-        for (int i = owned.size() - 1; i >= 0; i--)
+        for (int i = owned.size() - 1; i >= 0; i--) {
             try {
                 owned.get(i).close();
             } catch (Exception e) {
-                if (failure == null) failure = new IllegalStateException("关闭 runtime 资源失败");
+                if (failure == null) {
+                    failure = new IllegalStateException("关闭 runtime 资源失败");
+                }
                 failure.addSuppressed(e);
             }
-        if (failure != null) throw failure;
+        }
+        if (failure != null) {
+            throw failure;
+        }
     }
 }

@@ -12,12 +12,16 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/api/sse/sessions")
 public class SessionStateController {
     private final SessionStateQueryService service;
-    public SessionStateController(SessionStateQueryService service) { this.service = service; }
+
+    public SessionStateController(SessionStateQueryService service) {
+        this.service = service;
+    }
 
     @GetMapping(value = "/{sessionId}", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ApiResponse<SessionStateView> state(@PathVariable String sessionId,
-                                               @RequestParam String agentKey,
-                                               @RequestHeader(UserContextFilter.HEADER) String userId) {
+    public ApiResponse<SessionStateView> state(
+            @PathVariable String sessionId,
+            @RequestParam String agentKey,
+            @RequestHeader(UserContextFilter.HEADER) String userId) {
         if (!StringUtils.hasText(sessionId) || !StringUtils.hasText(agentKey)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "sessionId/agentKey 不能为空");
         }

@@ -1,10 +1,9 @@
 package org.gemo.apex.common.agent;
 
-import org.gemo.apex.common.exception.DomainInvariantException;
+import static org.gemo.apex.common.support.DomainValues.immutableNames;
 
 import java.util.Set;
-
-import static org.gemo.apex.common.support.DomainValues.immutableNames;
+import org.gemo.apex.common.exception.DomainInvariantException;
 
 public record ToolSetDefinition(Set<String> availableTools, Set<String> defaultEnabledTools) {
     public ToolSetDefinition {
