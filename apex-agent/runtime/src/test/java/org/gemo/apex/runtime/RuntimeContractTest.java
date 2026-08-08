@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class RuntimeContractTest {
     @Test
-//    void 无IoC默认Agent执行且End精确一次() {
+    void executesDefaultAgentWithoutIoCAndPublishesEndExactlyOnce() {
         List<AgentMessage> events = new CopyOnWriteArrayList<>();
         try (var runtime = ApexAgentRuntime.builder().modelGateway((r, o) -> new ModelResponse("完成", List.of(), Map.of())).defaultEventPublisherFactory(d -> events::add).build()) {
             assertInstanceOf(AgentRunOutcome.Completed.class, runtime.newAgent(new AgentRequest("s", "default", "u", "q")).run());
@@ -38,7 +38,7 @@ class RuntimeContractTest {
     }
 
     @Test
-    void provider在build不加载请求时加载() {
+    void loadsProviderOnRequestRatherThanBuild() {
         var count = new AtomicInteger();
         var d = definition();
         var p = new org.gemo.apex.extension.definition.AgentDefinitionProvider() {
@@ -59,7 +59,7 @@ class RuntimeContractTest {
     }
 
     @Test
-    void builder互斥与同sessionLease() {
+    void rejectsInvalidBuilderConfigurationAndEnforcesSameSessionLease() {
         assertThrows(RuntimeConfigurationException.class, () -> ApexAgentRuntime.builder().build());
         try (var r = ApexAgentRuntime.builder().modelGateway((a, b) -> new ModelResponse("x", List.of(), Map.of())).build()) {
             var first = r.newAgent(new AgentRequest("busy", "default", "u", "q"));
@@ -70,7 +70,7 @@ class RuntimeContractTest {
     }
 
     @Test
-    void 内存Conversation幂等与冲突() {
+    void makesInMemoryConversationOperationsIdempotentAndDetectsConflicts() {
         var r = new InMemoryConversationRepository();
         var e = entry("e1", 0);
         r.append(List.of(e));
@@ -83,7 +83,7 @@ class RuntimeContractTest {
     }
 
     @Test
-    void 取消前后注册命令均精确一次() {
+    void invokesCancellationCallbacksExactlyOnceBeforeAndAfterCancellation() {
         var s = new RuntimeCancellationSource();
         var a = new AtomicInteger();
         s.token().onCancel(a::incrementAndGet);
@@ -94,7 +94,7 @@ class RuntimeContractTest {
     }
 
     @Test
-    void SpringAiToolCall往返保留字段顺序() {
+    void preservesSpringAiToolCallFieldsAndOrdinalOnRoundTrip() {
         var m = new SpringAiMessageMapper();
         var c = new ToolCall("id", "tool", 0, Map.of("x", 1), Map.of());
         var out = m.fromSpring(m.toSpring(c), 0);
@@ -105,7 +105,7 @@ class RuntimeContractTest {
     }
 
     @Test
-    void mcp仅发送工具参数() {
+    void sendsOnlyToolArgumentsToMcp() {
         List<Map<String, Object>> sent = new ArrayList<>();
         var t = new McpTransport() {
             public void connect() {
@@ -137,7 +137,7 @@ class RuntimeContractTest {
     }
 
     @Test
-    void sse多行与边界() {
+    void decodesMultilineSseEventsAtEventBoundary() {
         var d = new SseEventDecoder();
         d.accept("data: {");
         d.accept("data: }");
@@ -145,7 +145,7 @@ class RuntimeContractTest {
     }
 
     @Test
-    void fileProvider初始化缓存且列出元数据() throws Exception {
+    void cachesFileProviderAtInitializationAndListsMetadata() throws Exception {
         Path f = Files.createTempFile("agents", ".yml");
         Files.writeString(f, """
                 agents:
@@ -166,7 +166,7 @@ class RuntimeContractTest {
     }
 
     @Test
-    void owned资源反向关闭且borrowed不关闭() {
+    void closesOwnedResourcesInReverseOrderButNotBorrowedResources() {
         List<String> closed = new ArrayList<>();
         AutoCloseable a = () -> closed.add("a"), b = () -> closed.add("b"), borrowed = () -> closed.add("borrowed");
         var r = ApexAgentRuntime.builder().modelGateway((x, o) -> new ModelResponse("ok", List.of(), Map.of())).ownedResource(a).ownedResource(b).borrowedResource(borrowed).build();
@@ -177,7 +177,7 @@ class RuntimeContractTest {
     }
 
     @Test
-    void 普通Skill重复激活幂等且资源限制为enabled() throws Exception {
+    void activatesRegularSkillIdempotentlyAndRestrictsResourcesToEnabledSkills() throws Exception {
         Path root = Files.createTempDirectory("skills"), dir = Files.createDirectory(root.resolve("pdf"));
         Files.writeString(dir.resolve("SKILL.md"), "---\nname: pdf\ndescription: PDF\n---\n使用说明");
         Files.writeString(dir.resolve("guide.txt"), "资源");
