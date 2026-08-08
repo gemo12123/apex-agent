@@ -7,8 +7,7 @@ describe('ChatPane', () => {
       props: {
         hasStarted: false,
         messages: [],
-        pendingPrompts: [],
-        pendingConfirmations: [],
+        pendingInterventions: [],
         status: 'idle',
       },
     })
@@ -36,8 +35,7 @@ describe('ChatPane', () => {
           { id: 'user-1', role: 'user', content: '总结执行流程' },
           { id: 'assistant-1', role: 'assistant', content: '这里是结果', think: '', flows: [] },
         ],
-        pendingPrompts: [],
-        pendingConfirmations: [],
+        pendingInterventions: [],
         status: 'completed',
       },
     })
@@ -51,14 +49,13 @@ describe('ChatPane', () => {
     expect(wrapper.find('.chat-pane__hint').exists()).toBe(false)
   })
 
-  it('disables the shared composer while waiting for confirmation', () => {
+  it('disables the shared composer while waiting for intervention', () => {
     const wrapper = mount(ChatPane, {
       props: {
         hasStarted: true,
         messages: [],
-        pendingPrompts: [],
-        pendingConfirmations: [],
-        status: 'waiting-confirmation',
+        pendingInterventions: [],
+        status: 'waiting-intervention',
       },
     })
 
@@ -66,26 +63,28 @@ describe('ChatPane', () => {
     expect(wrapper.get('[data-testid="send-button"]').attributes('disabled')).toBeDefined()
   })
 
-  it('keeps pending confirmations and prompts inside the transcript column', () => {
+  it('按统一批次顺序渲染问题和工具确认', async () => {
     const wrapper = mount(ChatPane, {
       props: {
         hasStarted: true,
         messages: [],
-        pendingPrompts: [
+        pendingInterventions: [
           {
             id: 'prompt-1',
+            kind: 'question',
             index: 0,
             toolCallId: 'tool-1',
+            invocationId: 'invoke-1',
+            toolName: 'ask_human',
             inputType: 'CONFIRM',
             question: '是否继续？',
             description: '需要人工确认',
             options: [],
-            answered: false,
+            resolution: 'pending',
           },
-        ],
-        pendingConfirmations: [
           {
             id: 'confirm-1',
+            kind: 'confirmation',
             confirmationId: 'confirm-1',
             toolCallId: 'tool-2',
             invocationId: 'invoke-2',
@@ -99,13 +98,23 @@ describe('ChatPane', () => {
             denyLabel: '拒绝',
             displayFields: [],
             editableFields: [],
+            resolution: 'pending',
           },
         ],
-        status: 'waiting-confirmation',
+        status: 'waiting-intervention',
       },
     })
 
-    expect(wrapper.find('.chat-pane__transcript').text()).toContain('是否继续？')
-    expect(wrapper.find('.chat-pane__transcript').text()).toContain('执行命令')
+    const transcript = wrapper.find('.chat-pane__transcript').text()
+    expect(transcript.indexOf('是否继续？')).toBeLessThan(transcript.indexOf('执行命令'))
+    expect(wrapper.get('[data-testid="submit-interventions"]').attributes('disabled')).toBeDefined()
+
+    await wrapper.setProps({
+      pendingInterventions: wrapper.props('pendingInterventions').map((item, index) => ({
+        ...item,
+        resolution: index === 0 ? 'answered' as const : 'skipped' as const,
+      })),
+    })
+    expect(wrapper.get('[data-testid="submit-interventions"]').attributes('disabled')).toBeUndefined()
   })
 })

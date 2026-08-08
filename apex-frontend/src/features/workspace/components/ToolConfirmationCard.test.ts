@@ -7,6 +7,7 @@ describe('ToolConfirmationCard', () => {
       props: {
         confirmation: {
           id: 'call-1:confirm-1',
+          kind: 'confirmation',
           confirmationId: 'confirm-1',
           toolCallId: 'call-1',
           invocationId: 'invocation-1',
@@ -29,6 +30,7 @@ describe('ToolConfirmationCard', () => {
               options: [{ label: 'A1001' }, { label: 'B2001' }],
             },
           ],
+          resolution: 'pending',
         },
       },
     })
@@ -41,7 +43,7 @@ describe('ToolConfirmationCard', () => {
     await wrapper.get('select').setValue('B2001')
     await wrapper.get('[data-testid="approve-button"]').trigger('click')
 
-    expect(wrapper.emitted('submit')?.[0]).toEqual([
+    expect(wrapper.emitted('answer')?.[0]).toEqual([
       { decision: 'APPROVE', updatedArgs: { room: 'B2001' } },
     ])
   })

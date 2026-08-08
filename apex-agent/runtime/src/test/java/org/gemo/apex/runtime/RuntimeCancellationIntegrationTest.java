@@ -171,7 +171,7 @@ class RuntimeCancellationIntegrationTest {
      */
     @Test
     void stopsSubAgentStreamAndDoesNotForwardInteractionEventsForHumanIntervention() {
-        String askHuman = "{\"event_type\":\"ASK_HUMAN\",\"context\":{\"executor\":\"ask_human\",\"invocation_id\":\"i\",\"mode\":\"react\"},\"messages\":[{\"input_type\":\"TEXT_INPUT\",\"question\":\"Need input?\",\"options\":[],\"tool_call_id\":\"c\"}]}";
+        String askHuman = "{\"event_type\":\"HUMAN_INTERVENTION\",\"context\":{\"mode\":\"react\"},\"messages\":[{\"interaction_type\":\"ASK_HUMAN\",\"tool_call_id\":\"c\",\"invocation_id\":\"i\",\"tool_name\":\"ask_human\",\"questions\":[{\"input_type\":\"TEXT_INPUT\",\"question\":\"Need input?\",\"options\":[]}]}]}";
         CompletableFuture<HttpResponse<Stream<String>>> future = CompletableFuture.completedFuture(
                 response(Stream.of("data: " + askHuman, "")));
         RuntimeCancellationSource source = new RuntimeCancellationSource();

@@ -96,15 +96,15 @@ class ProtocolGoldenFileTest {
         Map<String, String> eventTypes = AgentEventInventory.eventTypes();
         assertFalse(eventTypes.containsValue("TOOL_RESULT"));
         assertFalse(eventTypes.containsValue("TOOL_REJECTED"));
-        assertFalse(resourceUnchecked("tool-confirmation.json").contains("\"code\""));
-        assertFalse(resourceUnchecked("tool-confirmation.json").contains("\"payload\""));
+        assertFalse(resourceUnchecked("human-intervention.json").contains("\"code\""));
+        assertFalse(resourceUnchecked("human-intervention.json").contains("\"payload\""));
     }
 
     static Stream<Arguments> eventGoldenFiles() {
         return Stream.of(
                 Arguments.of("stream-content.json", org.gemo.apex.protocol.event.StreamContentMessage.class, true),
-                Arguments.of("ask-human.json", org.gemo.apex.protocol.event.AskHumanMessage.class, true),
-                Arguments.of("tool-confirmation.json", org.gemo.apex.protocol.event.ToolConfirmationMessage.class, true),
+                Arguments.of("human-intervention.json",
+                        org.gemo.apex.protocol.event.HumanInterventionMessage.class, true),
                 Arguments.of("end.json", EndMessage.class, false),
                 Arguments.of("plan-declared.compat.json", org.gemo.apex.protocol.event.PlanDeclaredMessage.class, false),
                 Arguments.of("plan-change.compat.json", org.gemo.apex.protocol.event.PlanChangeMessage.class, false),
@@ -119,10 +119,9 @@ class ProtocolGoldenFileTest {
 
     static Stream<Arguments> sessionGoldenFiles() {
         return Stream.of(
-                Arguments.of("session-state-ask-human.json", org.gemo.apex.protocol.event.AskHumanMessage.class,
-                        "ask-human.json"),
-                Arguments.of("session-state-tool-confirmation.json",
-                        org.gemo.apex.protocol.event.ToolConfirmationMessage.class, "tool-confirmation.json"),
+                Arguments.of("session-state-human-intervention.json",
+                        org.gemo.apex.protocol.event.HumanInterventionMessage.class,
+                        "human-intervention.json"),
                 Arguments.of("session-state-completed.json", null, null));
     }
 

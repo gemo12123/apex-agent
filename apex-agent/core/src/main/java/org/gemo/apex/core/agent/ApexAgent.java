@@ -11,6 +11,7 @@ import org.gemo.apex.core.lifecycle.LifecycleDispatcher;
 import org.gemo.apex.core.model.ModelStepExecutor;
 import org.gemo.apex.core.exception.SuspensionEventPublishException;
 import org.gemo.apex.core.exception.ResumePersistenceException;
+import org.gemo.apex.core.exception.InvalidHumanResponseException;
 import org.gemo.apex.core.tool.ToolCallCoordinator;
 import org.gemo.apex.core.tool.ToolResultFactory;
 
@@ -50,7 +51,7 @@ public final class ApexAgent {
         try {
             int firstIteration = 1;
             // 恢复必须先消费原先挂起的 ToolCall，不能直接开始下一次模型调用。
-            if (context.humanSubmission() != null) {
+            if (context.resumedRequest()) {
                 ToolCallCoordinator.ToolCallsOutcome resumed = tools.resume(context);
                 if (resumed instanceof ToolCallCoordinator.ToolCallsOutcome.Suspended) {
                     return new AgentRunOutcome.Suspended();
@@ -124,6 +125,8 @@ public final class ApexAgent {
                 }
             }
             throw new IllegalStateException("ReAct 循环未在最大轮次内收口");
+        } catch (InvalidHumanResponseException error) {
+            return new AgentRunOutcome.Failed(error);
         } catch (SuspensionEventPublishException | ResumePersistenceException error) {
             return new AgentRunOutcome.Failed(error);
         } catch (CancellationRequestedException cancellation) {

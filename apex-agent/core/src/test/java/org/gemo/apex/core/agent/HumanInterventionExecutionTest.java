@@ -18,8 +18,9 @@ import org.gemo.apex.common.tool.ToolCall;
 import org.gemo.apex.common.tool.ToolResult;
 import org.gemo.apex.common.tool.ToolAvailabilitySnapshot;
 import org.gemo.apex.extension.hook.LifecycleHook;
-import org.gemo.apex.protocol.event.AskHumanMessage;
+import org.gemo.apex.protocol.event.HumanInterventionMessage;
 import org.gemo.apex.protocol.event.EndMessage;
+import org.gemo.apex.protocol.event.detail.AskHumanInterventionDetail;
 import org.gemo.apex.protocol.event.detail.ToolConfirmationDetail;
 import org.junit.jupiter.api.Test;
 
@@ -45,13 +46,15 @@ class HumanInterventionExecutionTest {
         assertEquals(SessionStatus.HUMAN_IN_THE_LOOP, snapshot.status());
         assertEquals(TurnStatus.SUSPENDED, snapshot.activeTurn().status());
         assertEquals(IterationStatus.SUSPENDED, snapshot.activeTurn().currentIteration().status());
-        assertEquals(List.of("pre-1"), snapshot.suspendedToolCall().executedPreToolHookIds());
-        assertEquals("patched", snapshot.suspendedToolCall().resolvedArguments().get("value"));
+        assertEquals(List.of("pre-1"), snapshot.suspendedToolBatch().toolCalls().getFirst()
+                .executedPreToolHookIds());
+        assertEquals("patched", snapshot.suspendedToolBatch().toolCalls().getFirst()
+                .resolvedArguments().get("value"));
         assertEquals(0, scenario.fixture.toolCalls);
         int saved = scenario.fixture.calls.lastIndexOf("session.save");
-        int published = scenario.fixture.calls.indexOf("event.AskHumanMessage");
+        int published = scenario.fixture.calls.indexOf("event.HumanInterventionMessage");
         assertTrue(saved >= 0 && saved < published);
-        assertEquals(1, scenario.fixture.events.stream().filter(AskHumanMessage.class::isInstance).count());
+        assertEquals(1, scenario.fixture.events.stream().filter(HumanInterventionMessage.class::isInstance).count());
         assertEquals(1, scenario.fixture.events.stream().filter(EndMessage.class::isInstance).count());
         assertEquals(0, scenario.postCalls.get());
     }
@@ -67,7 +70,7 @@ class HumanInterventionExecutionTest {
         AgentRunOutcome outcome = scenario.fresh.run();
 
         assertInstanceOf(AgentRunOutcome.Failed.class, outcome);
-        assertEquals(0, scenario.fixture.events.stream().filter(AskHumanMessage.class::isInstance).count());
+        assertEquals(0, scenario.fixture.events.stream().filter(HumanInterventionMessage.class::isInstance).count());
         assertEquals(0, scenario.fixture.toolCalls);
     }
 
@@ -83,9 +86,10 @@ class HumanInterventionExecutionTest {
         AgentRunOutcome outcome = resumed.run();
 
         assertInstanceOf(AgentRunOutcome.Suspended.class, outcome);
-        assertEquals(List.of("pre-1", "pre-2"), resumed.snapshot().suspendedToolCall().executedPreToolHookIds());
+        assertEquals(List.of("pre-1", "pre-2"), resumed.snapshot().suspendedToolBatch().toolCalls()
+                .getFirst().executedPreToolHookIds());
         assertEquals(0, scenario.fixture.toolCalls);
-        assertEquals(2, scenario.fixture.events.stream().filter(AskHumanMessage.class::isInstance).count());
+        assertEquals(2, scenario.fixture.events.stream().filter(HumanInterventionMessage.class::isInstance).count());
     }
 
     /**
@@ -101,7 +105,7 @@ class HumanInterventionExecutionTest {
         assertInstanceOf(AgentRunOutcome.EndedByHook.class, outcome);
         assertEquals(List.of("达到最大轮次，强制结束", "达到最大轮次，强制结束"), toolContents(scenario.fixture));
         assertEquals(0, scenario.fixture.toolCalls);
-        assertNull(scenario.fixture.sessions.get("session-1").suspendedToolCall());
+        assertNull(scenario.fixture.sessions.get("session-1").suspendedToolBatch());
     }
 
     /**
@@ -147,7 +151,7 @@ class HumanInterventionExecutionTest {
         assertEquals(Map.of("0", "A"), submission.answers());
         assertEquals(1, scenario.fixture.toolCalls);
         assertEquals(1, scenario.postCalls.get());
-        assertNull(scenario.fixture.sessions.get("session-1").suspendedToolCall());
+        assertNull(scenario.fixture.sessions.get("session-1").suspendedToolBatch());
     }
 
     /**
@@ -183,18 +187,103 @@ class HumanInterventionExecutionTest {
      * 非法恢复在解析阶段拒绝且不保存不执行扩展
      */
     @Test
-    void rejectsInvalidResumeDuringParsingWithoutSavingOrExecutingExtensions() {
+    void rejectsInvalidResumeWhenCoreProcessesTheInterventionWithoutExecutingTools() {
         Scenario scenario = confirmationScenario(context -> continued(context), new AtomicReference<>());
         assertInstanceOf(AgentRunOutcome.Suspended.class, scenario.fresh.run());
         scenario.fixture.calls.clear();
 
-        assertThrows(org.gemo.apex.core.exception.InvalidHumanResponseException.class,
-                () -> new ApexAgentFactory().createResumed(command(Map.of(
-                        "interaction_type", "TOOL_CONFIRMATION", "confirmation_id", "wrong",
-                        "decision", "APPROVE")), scenario.fixture.ports()));
+        ApexAgent resumed = new ApexAgentFactory().createResumed(command(Map.of(
+                "interaction_type", "TOOL_CONFIRMATION", "confirmation_id", "wrong",
+                "decision", "APPROVE")), scenario.fixture.ports());
+        AgentRunOutcome.Failed failed = assertInstanceOf(AgentRunOutcome.Failed.class, resumed.run());
 
-        assertEquals(List.of("session.load"), scenario.fixture.calls);
+        assertInstanceOf(org.gemo.apex.core.exception.InvalidHumanResponseException.class, failed.cause());
         assertEquals(0, scenario.fixture.toolCalls);
+        assertEquals(SessionStatus.HUMAN_IN_THE_LOOP,
+                scenario.fixture.sessions.get("session-1").status());
+        assertNotNull(scenario.fixture.sessions.get("session-1").suspendedToolBatch());
+    }
+
+    @Test
+    void rejectsResponsesForUnknownToolCallIds() {
+        Scenario scenario = questionScenario(context -> continued(context));
+        assertInstanceOf(AgentRunOutcome.Suspended.class, scenario.fresh.run());
+
+        ApexAgent resumed = new ApexAgentFactory().createResumed(new HumanResponseCommand(
+                "session-1", "demo", "user-1", Map.of("unknown-call", Map.of(
+                "interaction_type", "ASK_HUMAN", "answers", Map.of()))), scenario.fixture.ports());
+        AgentRunOutcome.Failed failed = assertInstanceOf(AgentRunOutcome.Failed.class, resumed.run());
+
+        assertInstanceOf(org.gemo.apex.core.exception.InvalidHumanResponseException.class, failed.cause());
+        assertEquals(0, scenario.fixture.toolCalls);
+        assertEquals(SessionStatus.HUMAN_IN_THE_LOOP,
+                scenario.fixture.sessions.get("session-1").status());
+    }
+
+    @Test
+    void preflightsMixedInterventionsInToolCallOrderAndResumesWithSparseResponses() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        AtomicInteger preCalls = new AtomicInteger();
+        AtomicInteger postCalls = new AtomicInteger();
+        fixture.tool("ask", (call, context, observer) ->
+                new ToolResult(call.toolCallId(), call.name(), call.toolCallId(), Map.of()));
+        fixture.tool("confirm", (call, context, observer) ->
+                new ToolResult(call.toolCallId(), call.name(), call.toolCallId(), Map.of()));
+        fixture.hooks.put("ask-hook", preHook(context -> {
+            preCalls.incrementAndGet();
+            return new RequestHumanIntervention(question(context.toolCall()));
+        }));
+        fixture.hooks.put("confirm-hook", preHook(context -> {
+            preCalls.incrementAndGet();
+            return new RequestHumanIntervention(confirmation(context));
+        }));
+        fixture.hooks.put("post", new LifecycleHook<PostToolCallContext, PostToolCallHookResult>() {
+            @Override public HookTypeDescriptor descriptor() {
+                return new HookTypeDescriptor(HookPoint.POST_TOOL_CALL, PostToolCallContext.class,
+                        PostToolCallHookResult.class);
+            }
+            @Override public PostToolCallHookResult apply(PostToolCallContext context) {
+                postCalls.incrementAndGet();
+                return new ContinuePostToolCall(HookMutations.none(),
+                        new ToolResultPatch(context.toolResult().content(), context.toolResult().metadata()));
+            }
+        });
+        fixture.definition = fixture.definition(Map.of(
+                        HookPoint.PRE_TOOL_CALL, List.of(
+                                new HookBinding("pre-ask", "ask-hook", 0, true, List.of("ask"), Map.of()),
+                                new HookBinding("pre-confirm", "confirm-hook", 1, true,
+                                        List.of("confirm"), Map.of())),
+                        HookPoint.POST_TOOL_CALL, List.of(
+                                new HookBinding("post", "post", 0, true, List.of(), Map.of()))),
+                Set.of("ask", "confirm"), Set.of("ask", "confirm"));
+        fixture.modelResponses.add(new ModelResponse("", List.of(
+                new ToolCall("call-1", "ask", 0, Map.of(), Map.of()),
+                new ToolCall("call-2", "confirm", 1, Map.of("room", "A"), Map.of())), Map.of()));
+
+        ApexAgent fresh = new ApexAgentFactory().createNew(
+                new AgentRequest("session-1", "demo", "user-1", "问题"), fixture.ports());
+        assertInstanceOf(AgentRunOutcome.Suspended.class, fresh.run());
+
+        assertEquals(2, preCalls.get());
+        assertEquals(0, fixture.toolCalls);
+        assertEquals(0, postCalls.get());
+        assertEquals(List.of("call-1", "call-2"), fresh.snapshot().suspendedToolBatch().toolCalls()
+                .stream().map(item -> item.toolCallId()).toList());
+        HumanInterventionMessage event = fixture.events.stream()
+                .filter(HumanInterventionMessage.class::isInstance)
+                .map(HumanInterventionMessage.class::cast)
+                .findFirst().orElseThrow();
+        assertInstanceOf(AskHumanInterventionDetail.class, event.getMessages().getFirst());
+        assertInstanceOf(ToolConfirmationDetail.class, event.getMessages().get(1));
+
+        fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
+        ApexAgent resumed = new ApexAgentFactory().createResumed(new HumanResponseCommand(
+                "session-1", "demo", "user-1", Map.of("call-1", Map.of(
+                "interaction_type", "ASK_HUMAN", "answers", Map.of("0", "A")))), fixture.ports());
+        assertInstanceOf(AgentRunOutcome.Completed.class, resumed.run());
+        assertEquals(List.of("call-1", "call-2"), toolContents(fixture));
+        assertEquals(2, fixture.toolCalls);
+        assertEquals(2, postCalls.get());
     }
 
     /**
@@ -219,7 +308,8 @@ class HumanInterventionExecutionTest {
         ApexAgent fresh = new ApexAgentFactory().createNew(
                 new AgentRequest("session-1", "demo", "user-1", "问题"), fixture.ports());
         assertInstanceOf(AgentRunOutcome.Suspended.class, fresh.run());
-        assertEquals(List.of("call-0"), toolContents(fixture));
+        assertEquals(List.of(), toolContents(fixture));
+        assertEquals(0, fixture.toolCalls);
         fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
 
         ApexAgent resumed = new ApexAgentFactory().createResumed(command(Map.of(
@@ -265,7 +355,7 @@ class HumanInterventionExecutionTest {
 
         assertInstanceOf(AgentRunOutcome.Failed.class, firstResume.run());
         assertEquals(SessionStatus.HUMAN_IN_THE_LOOP, scenario.fixture.sessions.get("session-1").status());
-        assertNotNull(scenario.fixture.sessions.get("session-1").suspendedToolCall());
+        assertNotNull(scenario.fixture.sessions.get("session-1").suspendedToolBatch());
         long firstResultEntries = scenario.fixture.conversation.stream()
                 .filter(entry -> entry.messageType() == MessageType.TOOL_RESULT).count();
 
@@ -274,7 +364,7 @@ class HumanInterventionExecutionTest {
         long retriedResultEntries = scenario.fixture.conversation.stream()
                 .filter(entry -> entry.messageType() == MessageType.TOOL_RESULT).count();
         assertEquals(firstResultEntries, retriedResultEntries);
-        assertNull(retried.snapshot().suspendedToolCall());
+        assertNull(retried.snapshot().suspendedToolBatch());
     }
 
     private Scenario questionScenario(Function<PreToolCallContext, PreToolCallHookResult> second) {
@@ -375,12 +465,12 @@ class HumanInterventionExecutionTest {
     }
 
     private HumanResponseCommand command(Map<String, Object> response) {
-        return new HumanResponseCommand("session-1", "demo", "user-1", response);
+        return new HumanResponseCommand("session-1", "demo", "user-1", Map.of("call-1", response));
     }
 
     private String confirmationId(Scenario scenario) {
         return ((ToolConfirmationInterventionRequest) scenario.fresh.snapshot()
-                .suspendedToolCall().intervention()).confirmationId();
+                .suspendedToolBatch().toolCalls().getFirst().intervention()).confirmationId();
     }
 
     private List<String> toolContents(CoreTestFixture fixture) {

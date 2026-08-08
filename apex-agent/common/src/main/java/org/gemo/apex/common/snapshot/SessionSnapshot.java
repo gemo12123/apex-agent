@@ -15,7 +15,7 @@ public record SessionSnapshot(String schemaVersion, String sessionId, String use
                               SessionStatus status, long currentTurnNo, Set<String> enabledTools,
                               Set<String> activatedSkills, List<HistoricalToolBinding> historicalToolBindings,
                               AgentDefinitionRecoverySnapshot activeDefinition, TurnSnapshot activeTurn,
-                              SuspendedToolCall suspendedToolCall, long nextMessageSortNo,
+                              SuspendedToolBatch suspendedToolBatch, long nextMessageSortNo,
                               Instant lastActiveTime) {
     public SessionSnapshot {
         if (!SnapshotSchemaVersion.V1.equals(schemaVersion)) {
@@ -49,9 +49,9 @@ public record SessionSnapshot(String schemaVersion, String sessionId, String use
         if (!activeDefinition.enabledSkills().containsAll(activatedSkills)) {
             throw new InvalidSnapshotException("activatedSkills 必须是 activeDefinition.enabledSkills 的子集");
         }
-        boolean suspended = suspendedToolCall != null;
+        boolean suspended = suspendedToolBatch != null;
         if (suspended != (status == SessionStatus.HUMAN_IN_THE_LOOP)) {
-            throw new InvalidSnapshotException("suspendedToolCall 与 SessionStatus 不一致");
+            throw new InvalidSnapshotException("suspendedToolBatch 与 SessionStatus 不一致");
         }
         if (suspended && (activeTurn.status() != org.gemo.apex.common.execution.TurnStatus.SUSPENDED
                 || activeTurn.currentIteration() == null
@@ -62,16 +62,30 @@ public record SessionSnapshot(String schemaVersion, String sessionId, String use
         if (!suspended && activeTurn.status() == org.gemo.apex.common.execution.TurnStatus.SUSPENDED) {
             throw new InvalidSnapshotException("非人工介入快照不能保留 SUSPENDED Turn");
         }
-        if (suspended && (!sessionId.equals(suspendedToolCall.sessionId())
-                || currentTurnNo != suspendedToolCall.turnNo()
+        if (suspended && (!sessionId.equals(suspendedToolBatch.sessionId())
+                || currentTurnNo != suspendedToolBatch.turnNo()
                 || activeTurn.currentIteration() == null
-                || activeTurn.currentIteration().iterationNo() != suspendedToolCall.iterationNo()
+                || activeTurn.currentIteration().iterationNo() != suspendedToolBatch.iterationNo()
                 || activeTurn.currentIteration().modelResponse() == null
-                || activeTurn.currentIteration().modelResponse().toolCalls().stream()
-                .noneMatch(call -> call.toolCallId().equals(suspendedToolCall.toolCallId())))) {
-            throw new InvalidSnapshotException("suspendedToolCall 无法在活动 Turn/Iteration 中定位");
+                || !matchesModelCalls(activeTurn.currentIteration().modelResponse().toolCalls(),
+                        suspendedToolBatch.toolCalls()))) {
+            throw new InvalidSnapshotException("suspendedToolBatch 无法在活动 Turn/Iteration 中定位");
         }
         nonNegative(nextMessageSortNo, "nextMessageSortNo");
         lastActiveTime = nonNull(lastActiveTime, "lastActiveTime");
+    }
+
+    private static boolean matchesModelCalls(
+            List<org.gemo.apex.common.tool.ToolCall> modelCalls,
+            List<PreparedToolCallSnapshot> preparedCalls) {
+        if (modelCalls.size() != preparedCalls.size()) return false;
+        for (int i = 0; i < modelCalls.size(); i++) {
+            var model = modelCalls.get(i);
+            var prepared = preparedCalls.get(i);
+            if (!model.toolCallId().equals(prepared.toolCallId())
+                    || !model.name().equals(prepared.toolName())
+                    || model.ordinal() != prepared.ordinal()) return false;
+        }
+        return true;
     }
 }

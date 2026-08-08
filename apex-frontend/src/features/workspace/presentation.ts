@@ -8,8 +8,7 @@ import type {
 const sessionStatusLabels: Record<SessionViewModel['status'], string> = {
   idle: '待开始',
   streaming: '处理中',
-  'waiting-human': '等待人工确认',
-  'waiting-confirmation': '等待工具确认',
+  'waiting-intervention': '等待人工介入',
   completed: '已完成',
   aborted: '已停止',
   error: '异常',

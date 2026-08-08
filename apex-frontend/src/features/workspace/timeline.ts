@@ -3,7 +3,7 @@ import type { SessionViewModel } from '@/types/apex'
 
 export interface TimelineEntry {
   id: string
-  kind: 'stage' | 'invocation' | 'artifact' | 'prompt' | 'confirmation' | 'session'
+  kind: 'stage' | 'invocation' | 'artifact' | 'intervention' | 'session'
   title: string
   subtitle: string
   tone: ReturnType<typeof toneFromStatus>
@@ -66,26 +66,16 @@ export function buildTimelineEntries(session: SessionViewModel): TimelineEntry[]
     })
   })
 
-  if (session.pendingPrompts.length > 0) {
+  if (session.pendingInterventions.length > 0) {
     entries.push({
-      id: 'prompt:pending',
-      kind: 'prompt',
-      title: '等待人工确认',
-      subtitle: `${session.pendingPrompts.length} 个问题待回复`,
+      id: 'intervention:pending',
+      kind: 'intervention',
+      title: '等待人工介入',
+      subtitle: `${session.pendingInterventions.length} 张卡片待处理`,
       tone: 'warning',
-      body: session.pendingPrompts.map((prompt) => prompt.question).join('\n'),
-      defaultExpanded: false,
-    })
-  }
-
-  if (session.pendingConfirmations.length > 0) {
-    entries.push({
-      id: 'confirmation:pending',
-      kind: 'confirmation',
-      title: '等待工具确认',
-      subtitle: `${session.pendingConfirmations.length} 个确认待处理`,
-      tone: 'warning',
-      body: session.pendingConfirmations.map((item) => item.title).join('\n'),
+      body: session.pendingInterventions
+        .map((item) => item.kind === 'question' ? item.question : item.title)
+        .join('\n'),
       defaultExpanded: false,
     })
   }

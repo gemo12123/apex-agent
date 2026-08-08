@@ -20,7 +20,7 @@ class ProtocolDependencyTest {
     @Test
     void protocolBytecodeDoesNotReferenceRuntimeOrInfrastructureTypes() throws IOException {
         for (Class<?> type : List.of(AgentMessage.class, ChatRequest.class, SessionStateView.class,
-                org.gemo.apex.protocol.event.ToolConfirmationMessage.class,
+                org.gemo.apex.protocol.event.HumanInterventionMessage.class,
                 org.gemo.apex.protocol.event.detail.ToolConfirmationDetail.class)) {
             String bytecode = classBytes(type);
             for (String forbidden : FORBIDDEN) {

@@ -18,10 +18,11 @@ class ProtocolJsonUtilsConsumerTest {
      */
     @ParameterizedTest
     @ValueSource(strings = {
-            "artifact-change.compat.json", "artifact-declared.compat.json", "ask-human.json", "end.json",
+            "artifact-change.compat.json", "artifact-declared.compat.json", "end.json",
+            "human-intervention.json",
             "invocation-change.json", "invocation-declared.json", "plan-change.compat.json",
             "plan-declared.compat.json", "stream-content.json", "stream-think.compat.json",
-            "task-think-change.compat.json", "task-think-declared.compat.json", "tool-confirmation.json"
+            "task-think-change.compat.json", "task-think-declared.compat.json"
     })
     void productJsonUtilsConsumesAllEventGoldenFiles(String fileName) throws IOException {
         String golden = resource(fileName);
@@ -34,8 +35,7 @@ class ProtocolJsonUtilsConsumerTest {
      */
     @ParameterizedTest
     @ValueSource(strings = {
-            "session-state-ask-human.json", "session-state-completed.json",
-            "session-state-tool-confirmation.json"
+            "session-state-completed.json", "session-state-human-intervention.json"
     })
     void productJsonUtilsConsumesAllSessionGoldenFiles(String fileName) throws IOException {
         String golden = resource(fileName);

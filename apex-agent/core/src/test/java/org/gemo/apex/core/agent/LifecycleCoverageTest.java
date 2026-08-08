@@ -143,12 +143,11 @@ class LifecycleCoverageTest {
     }
 
     /**
-     * 人工提交应同时传给PreToolHook和真实工具
+     * 新工具批次不应伪造人工提交
      */
     @Test
-    void passesHumanSubmissionToBothPreToolHookAndActualTool() {
+    void doesNotExposeHumanSubmissionDuringFreshToolBatch() {
         CoreTestFixture fixture = new CoreTestFixture();
-        QuestionSubmission submission = new QuestionSubmission("call-1", Map.of("0", "答案"));
         List<Object> observed = new ArrayList<>();
         fixture.hooks.put("ask-hook", preToolHook(context -> {
             observed.add(context.humanSubmission());
@@ -166,17 +165,19 @@ class LifecycleCoverageTest {
         ApexAgent fresh = new ApexAgentFactory().createNew(
                 new AgentRequest("session-1", "demo", "user-1", "你好"), ports);
         ApexAgentContext context = new ApexAgentContext(ports, new AgentDefinitionSnapshot(fixture.definition),
-                new ToolCatalog(List.copyOf(fixture.tools.values())), fresh.snapshot(), submission);
+                new ToolCatalog(List.copyOf(fixture.tools.values())), fresh.snapshot(), null);
         context.startIteration(1);
+        ToolCall call = new ToolCall("call-1", "ask_human", 0, Map.of(), Map.of());
+        context.updateIteration(null, new ModelResponse("", List.of(call), Map.of()),
+                List.of(), org.gemo.apex.common.execution.IterationStatus.IN_PROGRESS, null);
         AgentEventFactory events = new AgentEventFactory();
         ToolCallCoordinator coordinator = new ToolCallCoordinator(new LifecycleDispatcher(),
                 new ToolResultFactory(), new AgentEventEmitter(ports.eventPublisher(), events), events);
 
-        var outcome = coordinator.process(context, List.of(
-                new ToolCall("call-1", "ask_human", 0, Map.of(), Map.of())));
+        var outcome = coordinator.process(context, List.of(call));
 
         assertInstanceOf(ToolCallCoordinator.ToolCallsOutcome.Completed.class, outcome);
-        assertEquals(List.of(submission, submission), observed);
+        assertEquals(Arrays.asList(null, null), observed);
     }
 
     private LifecycleHook<TurnStartContext, LoopHookResult> loopHook(

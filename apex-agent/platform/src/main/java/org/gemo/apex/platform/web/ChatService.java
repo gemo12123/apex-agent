@@ -16,7 +16,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.concurrent.Executor;
-import java.util.Map;
 
 /**
  * HTTP 请求到异步 Agent execution 的编排服务。
@@ -74,20 +73,10 @@ public class ChatService {
     private ApexAgentExecution prepare(ChatRequest request, String userId) {
         if (request.getType() == RequestType.HUMAN_RESPONSE) {
             return runtime.resumeAgent(new HumanResponseCommand(request.getSessionId(), request.getAgentKey(),
-                    userId, normalizedResponse(request.getHumanResponse())));
+                    userId, request.getHumanResponse()));
         }
         return runtime.newAgent(new AgentRequest(request.getSessionId(), request.getAgentKey(), userId,
                 request.getQuery()));
     }
 
-    /** 兼容客户端历史上的一层嵌套人工响应结构。 */
-    private Map<String, Object> normalizedResponse(Map<String, Object> response) {
-        if (response.containsKey("interaction_type")) return response;
-        if (response.size() == 1 && response.values().iterator().next() instanceof Map<?, ?> nested) {
-            java.util.LinkedHashMap<String, Object> result = new java.util.LinkedHashMap<>();
-            nested.forEach((key, value) -> result.put(String.valueOf(key), value));
-            return result;
-        }
-        return response;
-    }
 }

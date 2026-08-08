@@ -5,7 +5,7 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 import lombok.experimental.SuperBuilder;
-import org.gemo.apex.protocol.event.detail.AskHumanDetail;
+import org.gemo.apex.protocol.event.detail.HumanInterventionDetail;
 
 import java.util.List;
 
@@ -13,6 +13,6 @@ import java.util.List;
 @EqualsAndHashCode(callSuper = true)
 @SuperBuilder
 @NoArgsConstructor
-public class AskHumanMessage extends AgentMessage {
-    @JsonProperty("messages") private List<AskHumanDetail> messages;
+public class HumanInterventionMessage extends AgentMessage {
+    @JsonProperty("messages") private List<HumanInterventionDetail> messages;
 }

@@ -63,9 +63,10 @@ final class CommonFixtures {
         TurnSnapshot turn = new TurnSnapshot(1, TurnStatus.SUSPENDED, iteration, NOW, null);
         QuestionInterventionRequest intervention = new QuestionInterventionRequest("call-1",
                 List.of(new QuestionSpec("TEXT_INPUT", "Continue?", null, List.of())));
-        SuspendedToolCall suspended = new SuspendedToolCall("session-1", 1, 1, "call-1",
-                "invocation-1", "search", toolCall().arguments(), intervention,
-                List.of("audit", "confirm"), SuspensionPoint.PRE_TOOL_CALL);
+        PreparedToolCallSnapshot prepared = new PreparedToolCallSnapshot("call-1", "invocation-1",
+                "search", 0, toolCall().arguments(), List.of("audit", "confirm"),
+                PreparedToolCallDisposition.INTERVENTION, null, intervention, null);
+        SuspendedToolBatch suspended = new SuspendedToolBatch("session-1", 1, 1, List.of(prepared));
         return new SessionSnapshot(SnapshotSchemaVersion.V1, "session-1", "user-1", "default",
                 SessionStatus.HUMAN_IN_THE_LOOP, 1, Set.of("search"), Set.of("research"), List.of(),
                 definition(), turn, suspended, 3, NOW);

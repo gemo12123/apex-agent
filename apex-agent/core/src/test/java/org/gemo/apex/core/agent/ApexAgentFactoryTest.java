@@ -78,8 +78,10 @@ class ApexAgentFactoryTest {
                 base.activeTurn().startedTime(), null);
         QuestionInterventionRequest intervention = new QuestionInterventionRequest("call-1",
                 List.of(new QuestionSpec("TEXT_INPUT", "?", null, List.of())));
-        SuspendedToolCall suspended = new SuspendedToolCall("session-1", 1, 1, "call-1", "inv-1",
-                "ask", Map.of(), intervention, List.of("hook-1"), SuspensionPoint.PRE_TOOL_CALL);
+        PreparedToolCallSnapshot prepared = new PreparedToolCallSnapshot("call-1", "inv-1", "ask", 0,
+                Map.of(), List.of("hook-1"), PreparedToolCallDisposition.INTERVENTION,
+                null, intervention, null);
+        SuspendedToolBatch suspended = new SuspendedToolBatch("session-1", 1, 1, List.of(prepared));
         fixture.sessions.put("session-1", new SessionSnapshot(base.schemaVersion(), base.sessionId(),
                 base.userId(), base.agentKey(), SessionStatus.HUMAN_IN_THE_LOOP, 1, base.enabledTools(),
                 base.activatedSkills(), base.historicalToolBindings(), base.activeDefinition(), turn,
@@ -89,7 +91,8 @@ class ApexAgentFactoryTest {
 
         ApexAgent resumed = new ApexAgentFactory().createResumed(
                 new HumanResponseCommand("session-1", "demo", "user-1",
-                        Map.of("interaction_type", "ASK_HUMAN", "answers", Map.of())), ports);
+                        Map.of("call-1", Map.of("interaction_type", "ASK_HUMAN",
+                                "answers", Map.of()))), ports);
 
         assertNotNull(resumed);
         assertEquals(0, fixture.providerLoads);

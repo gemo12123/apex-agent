@@ -15,7 +15,8 @@ class SessionStateViewMapperTest {
         var view = new SessionStateViewMapper().map(PlatformFixtures.suspendedSnapshot());
         String json = JsonUtils.toJson(view.pendingInteraction());
         assertEquals("HUMAN_IN_THE_LOOP", view.executionStatus());
-        assertTrue(json.contains("\"event_type\":\"ASK_HUMAN\""));
+        assertTrue(json.contains("\"event_type\":\"HUMAN_INTERVENTION\""));
+        assertTrue(json.contains("\"interaction_type\":\"ASK_HUMAN\""));
         assertTrue(json.contains("\"tool_call_id\":\"call-1\""));
         assertTrue(json.contains("\"invocation_id\":\"invocation-1\""));
     }
@@ -27,7 +28,8 @@ class SessionStateViewMapperTest {
     void mapsSuspendedConfirmationToExistingToolConfirmationProtocol() {
         var view = new SessionStateViewMapper().map(PlatformFixtures.confirmationSnapshot());
         String json = JsonUtils.toJson(view.pendingInteraction());
-        assertTrue(json.contains("\"event_type\":\"TOOL_CONFIRMATION\""));
+        assertTrue(json.contains("\"event_type\":\"HUMAN_INTERVENTION\""));
+        assertTrue(json.contains("\"interaction_type\":\"TOOL_CONFIRMATION\""));
         assertTrue(json.contains("\"confirmation_id\":\"confirmation-1\""));
         assertTrue(json.contains("\"tool_call_id\":\"call-1\""));
     }

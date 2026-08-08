@@ -8,6 +8,7 @@ import { renderMarkdown } from '@/utils/markdown'
 import type {
   HumanPromptRecord,
   MessageRecord,
+  PendingInterventionRecord,
   SessionViewModel,
   ToolConfirmationRecord,
 } from '@/types/apex'
@@ -16,8 +17,7 @@ const props = withDefaults(
   defineProps<{
     hasStarted?: boolean
     messages: MessageRecord[]
-    pendingPrompts: HumanPromptRecord[]
-    pendingConfirmations: ToolConfirmationRecord[]
+    pendingInterventions: PendingInterventionRecord[]
     status: SessionViewModel['status']
   }>(),
   {
@@ -29,15 +29,17 @@ const emit = defineEmits<{
   (event: 'send', value: string): void
   (event: 'stop'): void
   (event: 'toggle-timeline'): void
-  (event: 'submit-prompt', payload: { prompt: HumanPromptRecord; answer: string | string[] }): void
+  (event: 'answer-prompt', payload: { prompt: HumanPromptRecord; answer: string | string[] }): void
   (
-    event: 'submit-confirmation',
+    event: 'answer-confirmation',
     payload: {
       confirmation: ToolConfirmationRecord
       decision: 'APPROVE' | 'DENY'
       updatedArgs?: Record<string, unknown>
     },
   ): void
+  (event: 'skip-intervention', intervention: PendingInterventionRecord): void
+  (event: 'submit-interventions'): void
 }>()
 
 const draft = ref('')
@@ -45,8 +47,11 @@ const transcriptRef = ref<HTMLElement | null>(null)
 const composerDisabled = computed(
   () =>
     props.status === 'streaming' ||
-    props.status === 'waiting-human' ||
-    props.status === 'waiting-confirmation',
+    props.status === 'waiting-intervention',
+)
+const canSubmitInterventions = computed(
+  () => props.pendingInterventions.length > 0
+    && props.pendingInterventions.every((item) => item.resolution !== 'pending'),
 )
 const composerButtonLabel = computed(() => {
   if (props.status === 'streaming') {
@@ -63,8 +68,7 @@ watch(
   () => [
     props.hasStarted,
     props.messages.length,
-    props.pendingPrompts.length,
-    props.pendingConfirmations.length,
+    props.pendingInterventions.length,
     props.status,
   ],
   async () => {
@@ -101,6 +105,10 @@ function submitComposerAction(): void {
   }
 
   submitMessage()
+}
+
+function isHumanPrompt(intervention: PendingInterventionRecord): intervention is HumanPromptRecord {
+  return intervention.kind === 'question'
 }
 </script>
 
@@ -155,22 +163,30 @@ function submitComposerAction(): void {
           </div>
         </article>
 
-        <div v-if="props.pendingConfirmations.length" class="chat-pane__prompts">
-          <ToolConfirmationCard
-            v-for="confirmation in props.pendingConfirmations"
-            :key="confirmation.id"
-            :confirmation="confirmation"
-            @submit="emit('submit-confirmation', { confirmation, ...$event })"
-          />
-        </div>
-
-        <div v-if="props.pendingPrompts.length" class="chat-pane__prompts">
-          <HumanPromptCard
-            v-for="prompt in props.pendingPrompts"
-            :key="prompt.id"
-            :prompt="prompt"
-            @submit="emit('submit-prompt', { prompt, answer: $event })"
-          />
+        <div v-if="props.pendingInterventions.length" class="chat-pane__prompts">
+          <template
+            v-for="(intervention, index) in props.pendingInterventions"
+            :key="intervention.id"
+          >
+            <HumanPromptCard
+              v-if="isHumanPrompt(intervention)"
+              :prompt="intervention"
+              :show-batch-submit="index === props.pendingInterventions.length - 1"
+              :batch-can-submit="canSubmitInterventions"
+              @answer="emit('answer-prompt', { prompt: intervention, answer: $event })"
+              @skip="emit('skip-intervention', intervention)"
+              @submit-batch="emit('submit-interventions')"
+            />
+            <ToolConfirmationCard
+              v-else
+              :confirmation="intervention"
+              :show-batch-submit="index === props.pendingInterventions.length - 1"
+              :batch-can-submit="canSubmitInterventions"
+              @answer="emit('answer-confirmation', { confirmation: intervention, ...$event })"
+              @skip="emit('skip-intervention', intervention)"
+              @submit-batch="emit('submit-interventions')"
+            />
+          </template>
         </div>
       </div>
 

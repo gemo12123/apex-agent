@@ -12,7 +12,7 @@ import java.util.List;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class ToolConfirmationDetail {
+public final class ToolConfirmationDetail implements HumanInterventionDetail {
     @JsonProperty("confirmation_id") private String confirmationId;
     @JsonProperty("tool_call_id") private String toolCallId;
     @JsonProperty("invocation_id") private String invocationId;

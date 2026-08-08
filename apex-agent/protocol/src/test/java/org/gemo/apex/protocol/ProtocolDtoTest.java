@@ -17,6 +17,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProtocolDtoTest {
     private static final ObjectMapper MAPPER = JsonMapper.builder()
@@ -31,8 +32,9 @@ class ProtocolDtoTest {
         assertEquals("default_agent", request.getAgentKey());
 
         request.setType(RequestType.HUMAN_RESPONSE);
-        request.setHumanResponse(Map.of("interaction_type", "ASK_HUMAN", "answers", Map.of("name", "A")));
-        assertEquals("ASK_HUMAN", request.getHumanResponse().get("interaction_type"));
+        request.setHumanResponse(Map.of("call-1",
+                Map.of("interaction_type", "ASK_HUMAN", "answers", Map.of("name", "A"))));
+        assertTrue(request.getHumanResponse().containsKey("call-1"));
     }
 
     @Test
@@ -42,9 +44,10 @@ class ProtocolDtoTest {
                 .map(JsonSubTypes.Type::name)
                 .collect(Collectors.toSet());
 
-        assertEquals(13, constants.size());
+        assertEquals(12, constants.size());
         assertEquals(constants, subtypeNames);
         assertEquals("STREAM_CONTENT", AgentEventType.STREAM_CONTENT);
+        assertEquals("HUMAN_INTERVENTION", AgentEventType.HUMAN_INTERVENTION);
     }
 
     @Test
@@ -54,11 +57,11 @@ class ProtocolDtoTest {
         request.setSessionId("session-1");
         request.setAgentKey("codex");
         request.setType(RequestType.HUMAN_RESPONSE);
-        request.setHumanResponse(Map.of("interaction_type", "ASK_HUMAN"));
+        request.setHumanResponse(Map.of("call-1", Map.of("interaction_type", "ASK_HUMAN")));
 
         assertEquals(MAPPER.readTree("""
                 {"query":"hello","sessionId":"session-1","type":"HUMAN_RESPONSE","agentKey":"codex",
-                 "humanResponse":{"interaction_type":"ASK_HUMAN"}}
+                 "humanResponse":{"call-1":{"interaction_type":"ASK_HUMAN"}}}
                 """), MAPPER.valueToTree(request));
     }
 }

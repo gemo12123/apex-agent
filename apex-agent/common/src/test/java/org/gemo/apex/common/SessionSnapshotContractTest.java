@@ -28,8 +28,9 @@ class SessionSnapshotContractTest {
         SessionSnapshot copy = adapter.read(adapter.write(snapshot));
 
         assertEquals(snapshot, copy);
-        assertEquals("call-1", copy.suspendedToolCall().toolCallId());
-        assertEquals(List.of("audit", "confirm"), copy.suspendedToolCall().executedPreToolHookIds());
+        assertEquals("call-1", copy.suspendedToolBatch().toolCalls().getFirst().toolCallId());
+        assertEquals(List.of("audit", "confirm"),
+                copy.suspendedToolBatch().toolCalls().getFirst().executedPreToolHookIds());
     }
 
     /**
@@ -64,13 +65,44 @@ class SessionSnapshotContractTest {
         assertThrows(InvalidSnapshotException.class, () -> new SessionSnapshot(
                 source.schemaVersion(), source.sessionId(), source.userId(), source.agentKey(), source.status(),
                 source.currentTurnNo(), source.enabledTools(), source.activatedSkills(), List.of(historical),
-                source.activeDefinition(), source.activeTurn(), source.suspendedToolCall(),
+                source.activeDefinition(), source.activeTurn(), source.suspendedToolBatch(),
                 source.nextMessageSortNo(), source.lastActiveTime()));
-        SuspendedToolCall suspended = source.suspendedToolCall();
-        assertThrows(IllegalArgumentException.class, () -> new SuspendedToolCall(
-                suspended.sessionId(), suspended.turnNo(), suspended.iterationNo(), suspended.toolCallId(),
-                suspended.invocationId(), suspended.toolName(), suspended.resolvedArguments(),
-                suspended.intervention(), List.of("same", "same"), suspended.suspensionPoint()));
+        PreparedToolCallSnapshot suspended = source.suspendedToolBatch().toolCalls().getFirst();
+        assertThrows(IllegalArgumentException.class, () -> new PreparedToolCallSnapshot(
+                suspended.toolCallId(), suspended.invocationId(), suspended.toolName(), suspended.ordinal(),
+                suspended.resolvedArguments(), List.of("same", "same"), suspended.disposition(),
+                suspended.result(), suspended.intervention(), suspended.submission()));
+    }
+
+    @Test
+    void rejectsDuplicateBatchCallsMismatchedModelOrderAndConflictingDispositions() {
+        SessionSnapshot source = CommonFixtures.suspendedSnapshot();
+        PreparedToolCallSnapshot prepared = source.suspendedToolBatch().toolCalls().getFirst();
+
+        assertThrows(IllegalArgumentException.class, () -> new SuspendedToolBatch(
+                source.sessionId(), source.currentTurnNo(), 1, List.of(prepared, prepared)));
+        assertThrows(IllegalArgumentException.class, () -> new PreparedToolCallSnapshot(
+                prepared.toolCallId(), prepared.invocationId(), prepared.toolName(), prepared.ordinal(),
+                prepared.resolvedArguments(), prepared.executedPreToolHookIds(),
+                PreparedToolCallDisposition.EXECUTE,
+                new org.gemo.apex.common.tool.ToolResult("call-1", "search", "result", java.util.Map.of()),
+                null, null));
+        assertThrows(IllegalArgumentException.class, () -> new PreparedToolCallSnapshot(
+                prepared.toolCallId(), prepared.invocationId(), prepared.toolName(), prepared.ordinal(),
+                prepared.resolvedArguments(), prepared.executedPreToolHookIds(),
+                PreparedToolCallDisposition.RETURN_RESULT, null, null, null));
+
+        PreparedToolCallSnapshot wrongOrdinal = new PreparedToolCallSnapshot(
+                prepared.toolCallId(), prepared.invocationId(), prepared.toolName(), 1,
+                prepared.resolvedArguments(), prepared.executedPreToolHookIds(), prepared.disposition(),
+                prepared.result(), prepared.intervention(), prepared.submission());
+        SuspendedToolBatch mismatched = new SuspendedToolBatch(source.sessionId(), source.currentTurnNo(), 1,
+                List.of(wrongOrdinal));
+        assertThrows(InvalidSnapshotException.class, () -> new SessionSnapshot(
+                source.schemaVersion(), source.sessionId(), source.userId(), source.agentKey(), source.status(),
+                source.currentTurnNo(), source.enabledTools(), source.activatedSkills(),
+                source.historicalToolBindings(), source.activeDefinition(), source.activeTurn(), mismatched,
+                source.nextMessageSortNo(), source.lastActiveTime()));
     }
 
     /**

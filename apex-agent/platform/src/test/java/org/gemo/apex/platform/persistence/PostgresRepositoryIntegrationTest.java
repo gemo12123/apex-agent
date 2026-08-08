@@ -67,7 +67,8 @@ class PostgresRepositoryIntegrationTest {
         var eventsB = new CopyOnWriteArrayList<>();
         try (var processB = runtime(sessionsB, conversationsB, eventsB)) {
             processB.resumeAgent(new HumanResponseCommand("session-1", "default", "user-1",
-                    Map.of("interaction_type", "ASK_HUMAN", "answers", Map.of("0", "继续")))).execute();
+                    Map.of("call-1", Map.of("interaction_type", "ASK_HUMAN",
+                            "answers", Map.of("0", "继续"))))).execute();
             assertEquals("COMPLETED", sessionsB.load("session-1").orElseThrow().status().name());
             assertEquals(1, eventsB.stream().filter(event ->
                     event.getClass().getSimpleName().equals("EndMessage")).count());

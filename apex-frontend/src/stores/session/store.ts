@@ -12,6 +12,7 @@ import type {
   AgentSummary,
   ChatRequest,
   HumanPromptRecord,
+  PendingInterventionRecord,
   ToolConfirmationRecord,
 } from '@/types/apex'
 
@@ -49,7 +50,7 @@ function clearActiveSession(): void {
 }
 
 function shouldRetainActiveSession(status: string): boolean {
-  return status === 'waiting-human' || status === 'waiting-confirmation'
+  return status === 'waiting-intervention'
 }
 
 function defaultUserId(): string {
@@ -160,8 +161,7 @@ export const useSessionStore = defineStore('session', () => {
     errorMessage.value = ''
     session.value = appendUserMessage(session.value, query.trim())
     session.value = startAssistantMessage(session.value)
-    session.value.pendingPrompts = []
-    session.value.pendingConfirmations = []
+    session.value.pendingInterventions = []
 
     await runChat({
       sessionId,
@@ -171,23 +171,64 @@ export const useSessionStore = defineStore('session', () => {
     })
   }
 
-  async function answerPrompt(prompt: HumanPromptRecord, answer: string | string[]): Promise<void> {
-    const targetPrompt = session.value.pendingPrompts.find((item) => item.id === prompt.id)
+  function answerPrompt(prompt: HumanPromptRecord, answer: string | string[]): void {
+    const targetPrompt = session.value.pendingInterventions.find(
+      (item): item is HumanPromptRecord => item.id === prompt.id && item.kind === 'question',
+    )
     if (!targetPrompt) {
       return
     }
 
-    targetPrompt.answered = true
+    targetPrompt.resolution = 'answered'
     targetPrompt.answer = answer
+  }
 
-    if (!session.value.pendingPrompts.every((item) => item.answered)) {
+  function answerConfirmation(
+    confirmation: ToolConfirmationRecord,
+    decision: 'APPROVE' | 'DENY',
+    updatedArgs: Record<string, unknown> = {},
+  ): void {
+    const targetConfirmation = session.value.pendingInterventions.find(
+      (item): item is ToolConfirmationRecord =>
+        item.id === confirmation.id && item.kind === 'confirmation',
+    )
+    if (!targetConfirmation) {
       return
     }
 
-    const payload = buildHumanResponsePayload(session.value.pendingPrompts)
+    targetConfirmation.resolution = 'answered'
+    targetConfirmation.decision = decision
+    targetConfirmation.updatedArgs = decision === 'APPROVE' && Object.keys(updatedArgs).length > 0
+      ? { ...updatedArgs }
+      : undefined
+  }
+
+  function skipIntervention(intervention: PendingInterventionRecord): void {
+    const target = session.value.pendingInterventions.find((item) => item.id === intervention.id)
+    if (!target) {
+      return
+    }
+
+    target.resolution = 'skipped'
+    if (target.kind === 'question') {
+      target.answer = undefined
+    } else {
+      target.decision = undefined
+      target.updatedArgs = undefined
+    }
+  }
+
+  async function submitInterventions(): Promise<void> {
+    const interventions = session.value.pendingInterventions
+    if (interventions.length === 0
+      || interventions.some((item) => item.resolution === 'pending')) {
+      return
+    }
+
+    const payload = buildHumanResponsePayload(interventions)
     const sessionId = session.value.sessionId ?? crypto.randomUUID()
     session.value.sessionId = sessionId
-    session.value.pendingPrompts = []
+    session.value.pendingInterventions = []
     errorMessage.value = ''
 
     await runChat({
@@ -196,34 +237,6 @@ export const useSessionStore = defineStore('session', () => {
       type: 'HUMAN_RESPONSE',
       agentKey: selectedAgentKey.value,
       humanResponse: payload,
-    })
-  }
-
-  async function submitConfirmation(
-    confirmation: ToolConfirmationRecord,
-    decision: 'APPROVE' | 'DENY',
-    updatedArgs: Record<string, unknown> = {},
-  ): Promise<void> {
-    const sessionId = session.value.sessionId ?? crypto.randomUUID()
-    session.value.sessionId = sessionId
-    session.value.pendingConfirmations = []
-    errorMessage.value = ''
-
-    await runChat({
-      sessionId,
-      query: '',
-      type: 'HUMAN_RESPONSE',
-      agentKey: selectedAgentKey.value,
-      humanResponse: {
-        [confirmation.toolCallId]: {
-          interaction_type: 'TOOL_CONFIRMATION',
-          confirmation_id: confirmation.confirmationId,
-          decision,
-          ...(decision === 'APPROVE' && Object.keys(updatedArgs).length > 0
-            ? { updated_args: updatedArgs }
-            : {}),
-        },
-      },
     })
   }
 
@@ -272,6 +285,7 @@ export const useSessionStore = defineStore('session', () => {
 
   return {
     agents,
+    answerConfirmation,
     answerPrompt,
     errorMessage,
     hasStarted,
@@ -283,8 +297,9 @@ export const useSessionStore = defineStore('session', () => {
     session,
     setSelectedAgent,
     setUserId,
+    skipIntervention,
     stopStream,
-    submitConfirmation,
+    submitInterventions,
     userId,
   }
 })

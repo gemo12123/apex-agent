@@ -44,9 +44,10 @@ public final class PlatformFixtures {
         TurnSnapshot turn = new TurnSnapshot(1, TurnStatus.SUSPENDED, iteration, NOW, null);
         QuestionInterventionRequest intervention = new QuestionInterventionRequest("call-1",
                 List.of(new QuestionSpec("TEXT_INPUT", "Continue?", null, List.of())));
-        SuspendedToolCall suspended = new SuspendedToolCall("session-1", 1, 1, "call-1",
-                "invocation-1", "search", toolCall().arguments(), intervention,
-                List.of(), SuspensionPoint.PRE_TOOL_CALL);
+        PreparedToolCallSnapshot prepared = new PreparedToolCallSnapshot("call-1", "invocation-1",
+                "search", 0, toolCall().arguments(), List.of(),
+                PreparedToolCallDisposition.INTERVENTION, null, intervention, null);
+        SuspendedToolBatch suspended = new SuspendedToolBatch("session-1", 1, 1, List.of(prepared));
         return new SessionSnapshot(SnapshotSchemaVersion.V1, "session-1", "user-1", "default",
                 SessionStatus.HUMAN_IN_THE_LOOP, 1, Set.of("search"), Set.of(), List.of(),
                 definition, turn, suspended, 1, NOW);
@@ -60,10 +61,13 @@ public final class PlatformFixtures {
                 .confirmLabel("确认").denyLabel("拒绝").displayFields(List.of()).editableFields(List.of()).build();
         var intervention = new ToolConfirmationInterventionRequest("call-1", "confirmation-1",
                 "invocation-1", "search", detail, Set.of());
-        var original = source.suspendedToolCall();
-        var suspended = new SuspendedToolCall(original.sessionId(), original.turnNo(), original.iterationNo(),
-                original.toolCallId(), original.invocationId(), original.toolName(), original.resolvedArguments(),
-                intervention, original.executedPreToolHookIds(), original.suspensionPoint());
+        var original = source.suspendedToolBatch().toolCalls().getFirst();
+        var prepared = new PreparedToolCallSnapshot(original.toolCallId(), original.invocationId(),
+                original.toolName(), original.ordinal(), original.resolvedArguments(),
+                original.executedPreToolHookIds(), PreparedToolCallDisposition.INTERVENTION,
+                null, intervention, original.submission());
+        var suspended = new SuspendedToolBatch(source.sessionId(), source.currentTurnNo(), 1,
+                List.of(prepared));
         return new SessionSnapshot(source.schemaVersion(), source.sessionId(), source.userId(), source.agentKey(),
                 source.status(), source.currentTurnNo(), source.enabledTools(), source.activatedSkills(),
                 source.historicalToolBindings(), source.activeDefinition(), source.activeTurn(), suspended,

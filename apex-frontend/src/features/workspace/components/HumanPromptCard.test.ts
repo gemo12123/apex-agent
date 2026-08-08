@@ -7,6 +7,7 @@ describe('HumanPromptCard', () => {
       props: {
         prompt: {
           id: 'prompt-1',
+          kind: 'question',
           index: 0,
           inputType: 'SINGLE_SELECT',
           question: 'Choose a mode',
@@ -16,7 +17,9 @@ describe('HumanPromptCard', () => {
             { label: 'plan-executor', description: 'Plan first' },
           ],
           toolCallId: 'tool-call-1',
-          answered: false,
+          invocationId: 'invocation-1',
+          toolName: 'ask_human',
+          resolution: 'pending',
         },
       },
     })
@@ -24,7 +27,7 @@ describe('HumanPromptCard', () => {
     await wrapper.get('.option-chip').trigger('click')
     await wrapper.get('.accent-button').trigger('click')
 
-    expect(wrapper.emitted('submit')?.[0]).toEqual(['react'])
+    expect(wrapper.emitted('answer')?.[0]).toEqual(['react'])
   })
 
   it('submits multi-select answers with custom values', async () => {
@@ -32,12 +35,15 @@ describe('HumanPromptCard', () => {
       props: {
         prompt: {
           id: 'prompt-2',
+          kind: 'question',
           index: 1,
           inputType: 'MULTI_SELECT',
           question: 'Pick artifacts',
           options: [{ label: 'plan.md' }, { label: 'notes.md' }],
           toolCallId: 'tool-call-1',
-          answered: false,
+          invocationId: 'invocation-1',
+          toolName: 'ask_human',
+          resolution: 'pending',
         },
       },
     })
@@ -47,6 +53,6 @@ describe('HumanPromptCard', () => {
     await wrapper.get('textarea').setValue('summary.md')
     await wrapper.get('.accent-button').trigger('click')
 
-    expect(wrapper.emitted('submit')?.[0]).toEqual([['plan.md', 'summary.md']])
+    expect(wrapper.emitted('answer')?.[0]).toEqual([['plan.md', 'summary.md']])
   })
 })

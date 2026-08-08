@@ -32,4 +32,19 @@ class SessionSnapshotTextAdapterV1Test {
         assertThrows(org.gemo.apex.common.exception.UnsupportedSnapshotVersionException.class,
                 () -> adapter.decode(invalid));
     }
+
+    @Test
+    void rejectsLegacySingleSuspendedToolCallExplicitly() {
+        var adapter = new SessionSnapshotTextAdapterV1();
+        var entity = adapter.encode(PlatformFixtures.suspendedSnapshot());
+        var legacy = new org.gemo.apex.platform.persistence.session.AgentSessionEntity(entity.sessionId(),
+                entity.userId(), entity.agentKey(), entity.status(), entity.currentTurnNo(),
+                entity.agentDefinitionSnapshot(), entity.enabledToolNames(), entity.activatedSkillNames(),
+                entity.runtimeSnapshot(), "{\"toolCallId\":\"call-1\",\"toolName\":\"ask\"}",
+                entity.lastActiveTime());
+
+        var exception = assertThrows(org.gemo.apex.common.exception.InvalidSnapshotException.class,
+                () -> adapter.decode(legacy));
+        org.junit.jupiter.api.Assertions.assertTrue(exception.getMessage().contains("旧版单条挂起快照"));
+    }
 }

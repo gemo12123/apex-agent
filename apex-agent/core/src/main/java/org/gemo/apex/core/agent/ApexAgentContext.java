@@ -34,16 +34,17 @@ public final class ApexAgentContext {
     private ConversationCompactionRequest compactionRequest;
     private ConversationCompactionResult compactionResult;
     private SkillActivationResult pendingSkillActivation;
-    private final HumanSubmission humanSubmission;
+    private final Map<String, Object> humanResponses;
+    private HumanSubmission humanSubmission;
 
     ApexAgentContext(AgentPorts ports, AgentDefinitionSnapshot definition,
                      ToolCatalog toolCatalog, SessionSnapshot snapshot,
-                     HumanSubmission humanSubmission) {
+                     Map<String, Object> humanResponses) {
         this.ports = ports;
         this.definition = definition;
         this.toolCatalog = toolCatalog;
         this.snapshot = snapshot;
-        this.humanSubmission = humanSubmission;
+        this.humanResponses = humanResponses == null ? null : Map.copyOf(humanResponses);
     }
 
     public AgentPorts ports() { return ports; }
@@ -62,7 +63,12 @@ public final class ApexAgentContext {
     public void compactionRequest(ConversationCompactionRequest value) { compactionRequest = value; }
     public ConversationCompactionResult compactionResult() { return compactionResult; }
     public void compactionResult(ConversationCompactionResult value) { compactionResult = value; }
+    public boolean resumedRequest() { return humanResponses != null; }
+    public Map<String, Object> humanResponses() {
+        return humanResponses == null ? Map.of() : humanResponses;
+    }
     public HumanSubmission humanSubmission() { return humanSubmission; }
+    public void humanSubmission(HumanSubmission value) { humanSubmission = value; }
     public HumanSubmission currentHumanSubmission() {
         return humanSubmission != null && toolCall != null
                 && humanSubmission.toolCallId().equals(toolCall.toolCallId()) ? humanSubmission : null;
@@ -75,7 +81,7 @@ public final class ApexAgentContext {
         }
         next.addAll(enable);
         next.removeAll(disable);
-        replaceSnapshot(snapshot.status(), next, snapshot.activeTurn(), snapshot.suspendedToolCall(),
+        replaceSnapshot(snapshot.status(), next, snapshot.activeTurn(), snapshot.suspendedToolBatch(),
                 snapshot.lastActiveTime());
     }
 
@@ -95,7 +101,7 @@ public final class ApexAgentContext {
                 results, old.startedTime(), endedTime);
         TurnSnapshot turn = new TurnSnapshot(snapshot.currentTurnNo(), snapshot.activeTurn().status(),
                 iteration, snapshot.activeTurn().startedTime(), snapshot.activeTurn().endedTime());
-        replaceSnapshot(snapshot.status(), snapshot.enabledTools(), turn, snapshot.suspendedToolCall(),
+        replaceSnapshot(snapshot.status(), snapshot.enabledTools(), turn, snapshot.suspendedToolBatch(),
                 ports.timeProvider().now());
     }
 
@@ -112,9 +118,9 @@ public final class ApexAgentContext {
         updateIteration(old.modelRequest(), old.modelResponse(), all, old.status(), old.endedTime());
     }
 
-    public void suspend(SuspendedToolCall suspended, boolean replaceExisting) {
-        if (!replaceExisting && snapshot.suspendedToolCall() != null) {
-            throw new IllegalStateException("当前会话已经存在挂起工具调用");
+    public void suspend(SuspendedToolBatch suspended, boolean replaceExisting) {
+        if (!replaceExisting && snapshot.suspendedToolBatch() != null) {
+            throw new IllegalStateException("当前会话已经存在挂起工具批次");
         }
         Instant now = ports.timeProvider().now();
         TurnSnapshot oldTurn = snapshot.activeTurn();
@@ -155,7 +161,7 @@ public final class ApexAgentContext {
         snapshot = new SessionSnapshot(snapshot.schemaVersion(), snapshot.sessionId(), snapshot.userId(),
                 snapshot.agentKey(), snapshot.status(), snapshot.currentTurnNo(), enabled,
                 snapshot.activatedSkills(), history, snapshot.activeDefinition(), snapshot.activeTurn(),
-                snapshot.suspendedToolCall(), snapshot.nextMessageSortNo(), ports.timeProvider().now());
+                snapshot.suspendedToolBatch(), snapshot.nextMessageSortNo(), ports.timeProvider().now());
     }
 
     public void stageSkillActivation(SkillActivationResult activation) {
@@ -170,7 +176,7 @@ public final class ApexAgentContext {
         snapshot = new SessionSnapshot(snapshot.schemaVersion(), snapshot.sessionId(), snapshot.userId(),
                 snapshot.agentKey(), snapshot.status(), snapshot.currentTurnNo(), snapshot.enabledTools(),
                 pendingSkillActivation.activatedSkills(), snapshot.historicalToolBindings(), snapshot.activeDefinition(),
-                snapshot.activeTurn(), snapshot.suspendedToolCall(), snapshot.nextMessageSortNo(),
+                snapshot.activeTurn(), snapshot.suspendedToolBatch(), snapshot.nextMessageSortNo(),
                 ports.timeProvider().now());
         pendingSkillActivation = null;
     }
@@ -212,12 +218,12 @@ public final class ApexAgentContext {
         snapshot = new SessionSnapshot(snapshot.schemaVersion(), snapshot.sessionId(), snapshot.userId(),
                 snapshot.agentKey(), snapshot.status(), snapshot.currentTurnNo(), snapshot.enabledTools(),
                 snapshot.activatedSkills(), snapshot.historicalToolBindings(), snapshot.activeDefinition(),
-                snapshot.activeTurn(), snapshot.suspendedToolCall(), value + 1, snapshot.lastActiveTime());
+                snapshot.activeTurn(), snapshot.suspendedToolBatch(), value + 1, snapshot.lastActiveTime());
         return value;
     }
 
     private void replaceSnapshot(SessionStatus status, Set<String> enabledTools, TurnSnapshot turn,
-                                 SuspendedToolCall suspended, Instant activeTime) {
+                                 SuspendedToolBatch suspended, Instant activeTime) {
         snapshot = new SessionSnapshot(snapshot.schemaVersion(), snapshot.sessionId(), snapshot.userId(),
                 snapshot.agentKey(), status, snapshot.currentTurnNo(), enabledTools,
                 snapshot.activatedSkills(), snapshot.historicalToolBindings(), snapshot.activeDefinition(),

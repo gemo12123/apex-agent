@@ -48,9 +48,8 @@ public class ChatController {
         if (request.getType() == RequestType.NEW && !StringUtils.hasText(request.getQuery())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "NEW query 不能为空");
         }
-        if (request.getType() == RequestType.HUMAN_RESPONSE
-                && (request.getHumanResponse() == null || request.getHumanResponse().isEmpty())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "HUMAN_RESPONSE humanResponse 不能为空");
+        if (request.getType() == RequestType.HUMAN_RESPONSE && request.getHumanResponse() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "HUMAN_RESPONSE humanResponse 不能缺失");
         }
     }
 }

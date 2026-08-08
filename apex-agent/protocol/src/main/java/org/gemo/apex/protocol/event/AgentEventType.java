@@ -12,8 +12,7 @@ public final class AgentEventType {
     public static final String ARTIFACT_DECLARED = "ARTIFACT_DECLARED";
     public static final String ARTIFACT_CHANGE = "ARTIFACT_CHANGE";
     public static final String END = "END";
-    public static final String ASK_HUMAN = "ASK_HUMAN";
-    public static final String TOOL_CONFIRMATION = "TOOL_CONFIRMATION";
+    public static final String HUMAN_INTERVENTION = "HUMAN_INTERVENTION";
 
     private AgentEventType() {
     }

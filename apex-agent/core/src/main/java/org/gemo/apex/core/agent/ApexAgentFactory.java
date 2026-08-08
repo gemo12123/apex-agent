@@ -15,7 +15,6 @@ import org.gemo.apex.core.definition.AgentDefinitionValidator;
 import org.gemo.apex.core.exception.InvalidAgentDefinitionException;
 import org.gemo.apex.core.exception.SessionOwnershipException;
 import org.gemo.apex.core.exception.SessionStateException;
-import org.gemo.apex.core.intervention.HumanResponseParser;
 import org.gemo.apex.core.tool.ToolCatalog;
 
 import java.util.*;
@@ -30,7 +29,6 @@ public final class ApexAgentFactory {
     private static final System.Logger LOG = System.getLogger(ApexAgentFactory.class.getName());
     private final AgentDefinitionAssembler assembler = new AgentDefinitionAssembler();
     private final AgentDefinitionValidator validator = new AgentDefinitionValidator();
-    private final HumanResponseParser responseParser = new HumanResponseParser();
 
     /**
      * 创建新 Turn，并先后追加用户消息和保存 IN_PROGRESS 会话快照。
@@ -78,11 +76,11 @@ public final class ApexAgentFactory {
         if (snapshot.status() != SessionStatus.HUMAN_IN_THE_LOOP) {
             throw new SessionStateException("会话不处于人工介入状态");
         }
-        SuspendedToolCall suspended = Objects.requireNonNull(snapshot.suspendedToolCall(), "suspendedToolCall");
-        long matches = snapshot.activeTurn().currentIteration().modelResponse().toolCalls().stream()
-                .filter(call -> call.toolCallId().equals(suspended.toolCallId())).count();
-        if (matches != 1) throw new SessionStateException("挂起 ToolCall 无法唯一定位");
-        var submission = responseParser.parse(command, suspended);
+        SuspendedToolBatch suspended = Objects.requireNonNull(snapshot.suspendedToolBatch(), "suspendedToolBatch");
+        if (suspended.toolCalls().size()
+                != snapshot.activeTurn().currentIteration().modelResponse().toolCalls().size()) {
+            throw new SessionStateException("挂起 ToolCall 批次无法完整定位");
+        }
         AgentDefinitionRecoverySnapshot recovery = snapshot.activeDefinition();
         AgentDefinition definition = new AgentDefinition(recovery.schemaVersion(), recovery.metadata(),
                 recovery.prompt(), recovery.messageCompression(),
@@ -101,7 +99,7 @@ public final class ApexAgentFactory {
         }
         validator.validateRecoveryBindings(definition, ports);
         return new ApexAgent(new ApexAgentContext(ports, new AgentDefinitionSnapshot(definition), catalog, snapshot,
-                submission));
+                command.response()));
     }
 
     /** 拒绝越权请求及尚未结束或等待人工响应的会话上创建新 Turn。 */

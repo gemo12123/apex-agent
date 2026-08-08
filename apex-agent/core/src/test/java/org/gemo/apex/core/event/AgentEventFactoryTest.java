@@ -3,6 +3,9 @@ package org.gemo.apex.core.event;
 import org.gemo.apex.common.intervention.QuestionInterventionRequest;
 import org.gemo.apex.common.intervention.QuestionSpec;
 import org.gemo.apex.common.json.JsonUtils;
+import org.gemo.apex.common.snapshot.PreparedToolCallDisposition;
+import org.gemo.apex.common.snapshot.PreparedToolCallSnapshot;
+import org.gemo.apex.common.snapshot.SuspendedToolBatch;
 import org.gemo.apex.protocol.event.EndMessage;
 import org.junit.jupiter.api.Test;
 
@@ -27,16 +30,21 @@ class AgentEventFactoryTest {
     }
 
     /**
-     * askHuman从中立请求构造既有协议
+     * 人工介入批次从中立请求构造统一协议
      */
     @Test
-    void askHumanBuildsExistingProtocolFromNeutralRequest() {
+    void humanInterventionBuildsUnifiedProtocolFromNeutralRequest() {
         var request = new QuestionInterventionRequest("call-1", List.of(
                 new QuestionSpec("TEXT_INPUT", "Need input?", null, List.of())));
-        var tree = JsonUtils.toTree(factory.askHuman(request, "invocation-1", "ask_human"));
-        assertEquals("ASK_HUMAN", tree.get("event_type").asText());
+        var prepared = new PreparedToolCallSnapshot("call-1", "invocation-1", "ask_human", 0,
+                Map.of(), List.of(), PreparedToolCallDisposition.INTERVENTION,
+                null, request, null);
+        var tree = JsonUtils.toTree(factory.humanIntervention(
+                new SuspendedToolBatch("session-1", 1, 1, List.of(prepared))));
+        assertEquals("HUMAN_INTERVENTION", tree.get("event_type").asText());
         assertEquals("call-1", tree.at("/messages/0/tool_call_id").asText());
-        assertEquals("invocation-1", tree.at("/context/invocation_id").asText());
+        assertEquals("invocation-1", tree.at("/messages/0/invocation_id").asText());
+        assertEquals("TEXT_INPUT", tree.at("/messages/0/questions/0/input_type").asText());
     }
 
     /**

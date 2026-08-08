@@ -2,9 +2,13 @@ package org.gemo.apex.core.event;
 
 import org.gemo.apex.common.intervention.QuestionInterventionRequest;
 import org.gemo.apex.common.intervention.ToolConfirmationInterventionRequest;
+import org.gemo.apex.common.snapshot.PreparedToolCallDisposition;
+import org.gemo.apex.common.snapshot.SuspendedToolBatch;
 import org.gemo.apex.protocol.event.*;
-import org.gemo.apex.protocol.event.detail.AskHumanDetail;
+import org.gemo.apex.protocol.event.detail.AskHumanInterventionDetail;
 import org.gemo.apex.protocol.event.detail.AskHumanOption;
+import org.gemo.apex.protocol.event.detail.AskHumanQuestionDetail;
+import org.gemo.apex.protocol.event.detail.HumanInterventionDetail;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -18,31 +22,34 @@ public final class AgentEventFactory {
                 .build();
     }
 
-    public AskHumanMessage askHuman(QuestionInterventionRequest request,
-                                    String invocationId, String executor) {
-        List<AskHumanDetail> details = new java.util.ArrayList<>();
-        for (var question : request.questions()) {
-            List<AskHumanOption> options = new java.util.ArrayList<>();
-            for (Map<String, Object> option : question.options()) {
-                options.add(AskHumanOption.builder().label(String.valueOf(option.get("label")))
-                        .description(option.get("description") == null ? null
-                                : String.valueOf(option.get("description"))).build());
+    public HumanInterventionMessage humanIntervention(SuspendedToolBatch batch) {
+        List<HumanInterventionDetail> details = new java.util.ArrayList<>();
+        for (var prepared : batch.toolCalls()) {
+            if (prepared.disposition() != PreparedToolCallDisposition.INTERVENTION) continue;
+            if (prepared.intervention() instanceof QuestionInterventionRequest request) {
+                List<AskHumanQuestionDetail> questions = new java.util.ArrayList<>();
+                for (var question : request.questions()) {
+                    List<AskHumanOption> options = new java.util.ArrayList<>();
+                    for (Map<String, Object> option : question.options()) {
+                        options.add(AskHumanOption.builder().label(String.valueOf(option.get("label")))
+                                .description(option.get("description") == null ? null
+                                        : String.valueOf(option.get("description"))).build());
+                    }
+                    questions.add(AskHumanQuestionDetail.builder().inputType(question.inputType())
+                            .question(question.question()).description(question.description())
+                            .options(options).build());
+                }
+                details.add(AskHumanInterventionDetail.builder().toolCallId(request.toolCallId())
+                        .invocationId(prepared.invocationId()).toolName(prepared.toolName())
+                        .questions(questions).build());
+            } else if (prepared.intervention() instanceof ToolConfirmationInterventionRequest confirmation) {
+                details.add(confirmation.presentation());
+            } else {
+                throw new IllegalArgumentException("不支持的人工介入类型");
             }
-            details.add(AskHumanDetail.builder().inputType(question.inputType()).question(question.question())
-                    .description(question.description()).options(options)
-                    .toolCallId(request.toolCallId()).build());
         }
-        return AskHumanMessage.builder()
-                .context(context(Map.of("executor", required(executor, "executor"),
-                        "invocation_id", required(invocationId, "invocationId"))))
-                .messages(details).build();
-    }
-
-    public ToolConfirmationMessage toolConfirmation(ToolConfirmationInterventionRequest request) {
-        return ToolConfirmationMessage.builder()
-                .context(context(Map.of("executor", request.toolName(),
-                        "invocation_id", request.invocationId())))
-                .messages(List.of(request.presentation())).build();
+        if (details.isEmpty()) throw new IllegalArgumentException("人工介入批次不能为空");
+        return HumanInterventionMessage.builder().context(context(Map.of())).messages(details).build();
     }
 
     public EndMessage end() { return EndMessage.builder().build(); }

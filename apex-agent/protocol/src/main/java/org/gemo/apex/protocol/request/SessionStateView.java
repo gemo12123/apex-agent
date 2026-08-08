@@ -1,10 +1,10 @@
 package org.gemo.apex.protocol.request;
 
-import org.gemo.apex.protocol.event.AgentMessage;
+import org.gemo.apex.protocol.event.HumanInterventionMessage;
 
 public record SessionStateView(
         String sessionId,
         String agentKey,
         String executionStatus,
-        AgentMessage pendingInteraction) {
+        HumanInterventionMessage pendingInteraction) {
 }

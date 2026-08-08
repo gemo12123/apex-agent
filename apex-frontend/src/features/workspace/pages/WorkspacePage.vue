@@ -6,6 +6,7 @@ import TimelineDrawer from '@/features/workspace/components/TimelineDrawer.vue'
 import WorkspaceSidebar from '@/features/workspace/components/WorkspaceSidebar.vue'
 import { buildTimelineEntries } from '@/features/workspace/timeline'
 import { useSessionStore } from '@/stores/session/store'
+import type { HumanPromptRecord, PendingInterventionRecord, ToolConfirmationRecord } from '@/types/apex'
 
 const sessionStore = useSessionStore()
 const {
@@ -31,22 +32,26 @@ function handlePromptSubmit(value: string): void {
 }
 
 function handleHumanPrompt(payload: {
-  prompt: (typeof session.value.pendingPrompts)[number]
+  prompt: HumanPromptRecord
   answer: string | string[]
 }): void {
-  void sessionStore.answerPrompt(payload.prompt, payload.answer)
+  sessionStore.answerPrompt(payload.prompt, payload.answer)
 }
 
 function handleToolConfirmation(payload: {
-  confirmation: (typeof session.value.pendingConfirmations)[number]
+  confirmation: ToolConfirmationRecord
   decision: 'APPROVE' | 'DENY'
   updatedArgs?: Record<string, unknown>
 }): void {
-  void sessionStore.submitConfirmation(
+  sessionStore.answerConfirmation(
     payload.confirmation,
     payload.decision,
     payload.updatedArgs ?? {},
   )
+}
+
+function handleSkipIntervention(intervention: PendingInterventionRecord): void {
+  sessionStore.skipIntervention(intervention)
 }
 
 function handleSaveSettings(payload: { agentKey: string; userId: string }): void {
@@ -126,14 +131,15 @@ function closeOverlays(): void {
           <ChatPane
             :has-started="hasStarted"
             :messages="session.messages"
-            :pending-prompts="session.pendingPrompts"
-            :pending-confirmations="session.pendingConfirmations"
+            :pending-interventions="session.pendingInterventions"
             :status="session.status"
             @send="handlePromptSubmit"
             @stop="sessionStore.stopStream"
             @toggle-timeline="toggleTimeline"
-            @submit-prompt="handleHumanPrompt"
-            @submit-confirmation="handleToolConfirmation"
+            @answer-prompt="handleHumanPrompt"
+            @answer-confirmation="handleToolConfirmation"
+            @skip-intervention="handleSkipIntervention"
+            @submit-interventions="sessionStore.submitInterventions"
           />
         </div>
       </div>

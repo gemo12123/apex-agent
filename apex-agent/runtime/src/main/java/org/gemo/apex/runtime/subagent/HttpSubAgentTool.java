@@ -69,7 +69,7 @@ public final class HttpSubAgentTool implements AgentTool {
 
     private void consume(String j, StringBuilder c, ToolExecutionObserver o, CompletableFuture<?> f) {
         AgentMessage m = JsonUtils.fromJson(j, AgentMessage.class);
-        if (m instanceof AskHumanMessage || m instanceof ToolConfirmationMessage) {
+        if (m instanceof HumanInterventionMessage) {
             f.cancel(true);
             throw new IllegalStateException("子智能体请求人工介入，当前工具调用不支持透传恢复");
         }

@@ -17,7 +17,7 @@ export interface SessionStateView {
   sessionId: string
   agentKey: string
   executionStatus: string
-  pendingInteraction: AskHumanEnvelope | ToolConfirmationEnvelope | null
+  pendingInteraction: HumanInterventionEnvelope | null
 }
 
 export interface EnvelopeContext {
@@ -96,12 +96,19 @@ export interface AskHumanOption {
   description?: string
 }
 
-export interface AskHumanDetail {
+export interface AskHumanQuestionDetail {
   input_type: 'TEXT_INPUT' | 'SINGLE_SELECT' | 'CONFIRM' | 'MULTI_SELECT'
   question: string
   description?: string
   options?: AskHumanOption[]
+}
+
+export interface AskHumanInterventionDetail {
+  interaction_type: 'ASK_HUMAN'
   tool_call_id: string
+  invocation_id: string
+  tool_name: string
+  questions: AskHumanQuestionDetail[]
 }
 
 export interface ToolConfirmationDisplayField {
@@ -121,6 +128,7 @@ export interface ToolConfirmationEditableField {
 }
 
 export interface ToolConfirmationDetail {
+  interaction_type: 'TOOL_CONFIRMATION'
   confirmation_id: string
   tool_call_id: string
   invocation_id: string
@@ -150,8 +158,11 @@ export type InvocationDeclaredEnvelope = SseEnvelopeBase<'INVOCATION_DECLARED', 
 export type InvocationChangeEnvelope = SseEnvelopeBase<'INVOCATION_CHANGE', InvocationChangeDetail>
 export type ArtifactDeclaredEnvelope = SseEnvelopeBase<'ARTIFACT_DECLARED', ArtifactDeclaredDetail>
 export type ArtifactChangeEnvelope = SseEnvelopeBase<'ARTIFACT_CHANGE', ArtifactChangeDetail>
-export type AskHumanEnvelope = SseEnvelopeBase<'ASK_HUMAN', AskHumanDetail>
-export type ToolConfirmationEnvelope = SseEnvelopeBase<'TOOL_CONFIRMATION', ToolConfirmationDetail>
+export type HumanInterventionDetail = AskHumanInterventionDetail | ToolConfirmationDetail
+export type HumanInterventionEnvelope = SseEnvelopeBase<
+  'HUMAN_INTERVENTION',
+  HumanInterventionDetail
+>
 export type EndEnvelope = SseEnvelopeBase<'END', never>
 
 export type SseEnvelope =
@@ -163,8 +174,7 @@ export type SseEnvelope =
   | InvocationChangeEnvelope
   | ArtifactDeclaredEnvelope
   | ArtifactChangeEnvelope
-  | AskHumanEnvelope
-  | ToolConfirmationEnvelope
+  | HumanInterventionEnvelope
   | EndEnvelope
 
 export interface TextFlowRecord {
@@ -198,18 +208,22 @@ export interface ArtifactRecord {
 
 export interface HumanPromptRecord {
   id: string
+  kind: 'question'
   index: number
-  inputType: AskHumanDetail['input_type']
+  inputType: AskHumanQuestionDetail['input_type']
   question: string
   description?: string
   options: AskHumanOption[]
   toolCallId: string
-  answered: boolean
+  invocationId: string
+  toolName: string
+  resolution: 'pending' | 'answered' | 'skipped'
   answer?: string | string[]
 }
 
 export interface ToolConfirmationRecord {
   id: string
+  kind: 'confirmation'
   confirmationId: string
   toolCallId: string
   invocationId: string
@@ -223,7 +237,12 @@ export interface ToolConfirmationRecord {
   denyLabel: string
   displayFields: ToolConfirmationDisplayField[]
   editableFields: ToolConfirmationEditableField[]
+  resolution: 'pending' | 'answered' | 'skipped'
+  decision?: 'APPROVE' | 'DENY'
+  updatedArgs?: Record<string, unknown>
 }
+
+export type PendingInterventionRecord = HumanPromptRecord | ToolConfirmationRecord
 
 export type HumanResponseEntry =
   | {
@@ -268,8 +287,7 @@ export interface SessionViewModel {
   status:
     | 'idle'
     | 'streaming'
-    | 'waiting-human'
-    | 'waiting-confirmation'
+    | 'waiting-intervention'
     | 'completed'
     | 'aborted'
     | 'error'
@@ -277,6 +295,5 @@ export interface SessionViewModel {
   messages: MessageRecord[]
   stages: StageRecord[]
   globalArtifacts: ArtifactRecord[]
-  pendingPrompts: HumanPromptRecord[]
-  pendingConfirmations: ToolConfirmationRecord[]
+  pendingInterventions: PendingInterventionRecord[]
 }

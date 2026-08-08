@@ -5,17 +5,21 @@ import type { HumanPromptRecord } from '@/types/apex'
 
 const props = defineProps<{
   prompt: HumanPromptRecord
+  showBatchSubmit?: boolean
+  batchCanSubmit?: boolean
 }>()
 
 const emit = defineEmits<{
-  (event: 'submit', value: string | string[]): void
+  (event: 'answer', value: string | string[]): void
+  (event: 'skip'): void
+  (event: 'submit-batch'): void
 }>()
 
 const singleValue = ref('')
 const customValue = ref('')
 const multiValues = ref<string[]>([])
 
-const canSubmit = computed(() => {
+const canAnswer = computed(() => {
   if (props.prompt.inputType === 'MULTI_SELECT') {
     return multiValues.value.length > 0 || customValue.value.trim().length > 0
   }
@@ -47,11 +51,11 @@ function submit(): void {
     if (customValue.value.trim()) {
       values.push(customValue.value.trim())
     }
-    emit('submit', values)
+    emit('answer', values)
     return
   }
 
-  emit('submit', customValue.value.trim() || singleValue.value || '确认')
+  emit('answer', customValue.value.trim() || singleValue.value || '确认')
 }
 </script>
 
@@ -66,8 +70,9 @@ function submit(): void {
     <div class="human-prompt-card__body">
       <template v-if="prompt.inputType === 'CONFIRM'">
         <div class="human-prompt-card__actions">
-          <button class="ghost-button" type="button" @click="emit('submit', '取消')">取消</button>
-          <button class="accent-button" type="button" @click="emit('submit', '确认')">确认</button>
+          <button class="ghost-button" type="button" @click="emit('skip')">跳过</button>
+          <button class="ghost-button" type="button" @click="emit('answer', '取消')">取消</button>
+          <button class="accent-button" type="button" @click="emit('answer', '确认')">确认</button>
         </div>
       </template>
 
@@ -109,9 +114,28 @@ function submit(): void {
         />
 
         <div class="human-prompt-card__actions">
-          <button class="accent-button" type="button" :disabled="!canSubmit" @click="submit">提交</button>
+          <button class="ghost-button" type="button" @click="emit('skip')">跳过</button>
+          <button class="accent-button" type="button" :disabled="!canAnswer" @click="submit">
+            保存回答
+          </button>
         </div>
       </template>
+
+      <p v-if="prompt.resolution !== 'pending'" class="human-prompt-card__resolution">
+        {{ prompt.resolution === 'answered' ? '已回答' : '已跳过，将使用默认值' }}
+      </p>
+
+      <div v-if="showBatchSubmit" class="human-prompt-card__batch-submit">
+        <button
+          data-testid="submit-interventions"
+          class="accent-button"
+          type="button"
+          :disabled="!batchCanSubmit"
+          @click="emit('submit-batch')"
+        >
+          提交并继续
+        </button>
+      </div>
     </div>
   </article>
 </template>
@@ -195,5 +219,19 @@ function submit(): void {
   justify-content: flex-end;
   gap: 10px;
   margin-top: 12px;
+}
+
+.human-prompt-card__resolution {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+}
+
+.human-prompt-card__batch-submit {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
 }
 </style>
