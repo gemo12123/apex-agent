@@ -122,6 +122,25 @@ class RuntimeContractTest {
         assertEquals(0, out.ordinal());
     }
 
+    @Test
+    void mapsAssistantToolCallsFromConversationPayload() {
+        var message = new AgentMessageEntry("entry", "session", 1, 0, MessageRole.ASSISTANT,
+                MessageType.TOOL_CALLS, "正在查询", Map.of("toolCalls", List.of(Map.of(
+                "toolCallId", "call-1", "name", "weather", "arguments", Map.of("city", "上海")))),
+                Instant.EPOCH);
+
+        var mapped = assertInstanceOf(org.springframework.ai.chat.messages.AssistantMessage.class,
+                new SpringAiMessageMapper().toSpring(message));
+
+        assertEquals("正在查询", mapped.getText());
+        assertEquals(1, mapped.getToolCalls().size());
+        var call = mapped.getToolCalls().getFirst();
+        assertEquals("call-1", call.id());
+        assertEquals("function", call.type());
+        assertEquals("weather", call.name());
+        assertEquals("{\"city\":\"上海\"}", call.arguments());
+    }
+
     /**
      * mcp仅发送工具参数
      */
