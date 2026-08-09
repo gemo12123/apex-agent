@@ -4,6 +4,5 @@ public enum ToolOrigin {
     KIT,
     LOCAL,
     SKILL,
-    MCP,
     SUB_AGENT
 }

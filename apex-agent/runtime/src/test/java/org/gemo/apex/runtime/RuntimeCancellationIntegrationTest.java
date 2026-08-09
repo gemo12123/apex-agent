@@ -46,9 +46,6 @@ import org.gemo.apex.runtime.execution.RuntimeCancellationSource;
 import org.gemo.apex.runtime.execution.SessionBusyException;
 import org.gemo.apex.runtime.execution.SessionExecutionCoordinator;
 import org.gemo.apex.runtime.execution.SessionExecutionLease;
-import org.gemo.apex.runtime.mcp.McpAgentToolAdapter;
-import org.gemo.apex.runtime.mcp.McpCallHandle;
-import org.gemo.apex.runtime.mcp.McpTransport;
 import org.gemo.apex.runtime.model.springai.SpringAiModelGateway;
 import org.gemo.apex.runtime.subagent.HttpSubAgentTool;
 import org.junit.jupiter.api.Test;
@@ -102,76 +99,6 @@ class RuntimeCancellationIntegrationTest {
         assertAll(
                 () -> assertFalse(worker.isAlive()),
                 () -> assertTrue(disposed.get()),
-                () -> assertInstanceOf(CancellationRequestedException.class, failure.get()));
-    }
-
-    /** Mcp取消应调用底层句柄并转换为统一取消语义 */
-    @Test
-    void cancelsMcpUnderlyingHandleAndConvertsToUnifiedCancellationSemantics() throws Exception {
-        RuntimeCancellationSource source = new RuntimeCancellationSource();
-        CountDownLatch entered = new CountDownLatch(1);
-        CountDownLatch cancelled = new CountDownLatch(1);
-        AtomicInteger cancelCalls = new AtomicInteger();
-        McpCallHandle handle =
-                new McpCallHandle() {
-                    @Override
-                    public Map<String, Object> await() {
-                        entered.countDown();
-                        try {
-                            assertTrue(cancelled.await(2, TimeUnit.SECONDS));
-                        } catch (InterruptedException error) {
-                            Thread.currentThread().interrupt();
-                        }
-                        throw new IllegalStateException("底层调用已取消");
-                    }
-
-                    @Override
-                    public void cancel() {
-                        cancelCalls.incrementAndGet();
-                        cancelled.countDown();
-                    }
-                };
-        McpTransport transport =
-                new McpTransport() {
-                    @Override
-                    public void connect() {}
-
-                    @Override
-                    public List<ToolDefinition> listTools() {
-                        return List.of();
-                    }
-
-                    @Override
-                    public McpCallHandle call(String name, Map<String, Object> arguments) {
-                        return handle;
-                    }
-
-                    @Override
-                    public void close() {}
-                };
-        var adapter = new McpAgentToolAdapter(tool("mcp/search"), transport);
-        AtomicReference<Throwable> failure = new AtomicReference<>();
-        Thread worker =
-                Thread.ofVirtual()
-                        .start(
-                                () -> {
-                                    try {
-                                        adapter.execute(
-                                                call("mcp/search"),
-                                                context(source.token()),
-                                                toolObserver(source.token()));
-                                    } catch (Throwable error) {
-                                        failure.set(error);
-                                    }
-                                });
-
-        assertTrue(entered.await(2, TimeUnit.SECONDS));
-        source.cancel();
-        worker.join(2_000);
-
-        assertAll(
-                () -> assertEquals(1, cancelCalls.get()),
-                () -> assertFalse(worker.isAlive()),
                 () -> assertInstanceOf(CancellationRequestedException.class, failure.get()));
     }
 

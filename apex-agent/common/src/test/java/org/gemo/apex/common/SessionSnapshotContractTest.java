@@ -61,7 +61,11 @@ class SessionSnapshotContractTest {
         SessionSnapshot source = CommonFixtures.suspendedSnapshot();
         HistoricalToolBinding historical =
                 new HistoricalToolBinding(
-                        "search", ToolOrigin.MCP, "github", "DOWN", CommonFixtures.NOW);
+                        "search",
+                        ToolOrigin.SUB_AGENT,
+                        "weather-agent",
+                        "DOWN",
+                        CommonFixtures.NOW);
         assertThrows(
                 InvalidSnapshotException.class,
                 () ->

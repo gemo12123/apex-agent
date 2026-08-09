@@ -13,8 +13,8 @@ public record UnavailableToolSource(
         Instant observedAt) {
     public UnavailableToolSource {
         origin = nonNull(origin, "origin");
-        if (origin != ToolOrigin.MCP && origin != ToolOrigin.SUB_AGENT) {
-            throw new IllegalArgumentException("origin 只允许 MCP 或 SUB_AGENT");
+        if (origin != ToolOrigin.SUB_AGENT) {
+            throw new IllegalArgumentException("origin 只允许 SUB_AGENT");
         }
         sourceId = required(sourceId, "sourceId");
         stableNamePrefix = required(stableNamePrefix, "stableNamePrefix");

@@ -101,19 +101,27 @@ class DomainModelContractTest {
     void availabilityAllowsOnlyExactNameOrStableSameSourcePrefixMatches() {
         UnavailableToolSource source =
                 new UnavailableToolSource(
-                        ToolOrigin.MCP,
-                        "github",
-                        "mcp.github.",
+                        ToolOrigin.SUB_AGENT,
+                        "weather-agent",
+                        "subagent.weather.",
                         "INIT_FAILED",
                         Instant.parse("2026-08-01T00:00:00Z"));
         ToolAvailabilitySnapshot snapshot =
                 new ToolAvailabilitySnapshot(Set.of("local.exact"), List.of(source));
 
         assertTrue(snapshot.isUnavailable("local.exact", ToolOrigin.LOCAL, "local"));
-        assertTrue(snapshot.isUnavailable("mcp.github.search", ToolOrigin.MCP, "github"));
-        assertFalse(snapshot.isUnavailable("prefix-mcp.github.search", ToolOrigin.MCP, "github"));
-        assertFalse(snapshot.isUnavailable("mcp.github.search", ToolOrigin.MCP, "other"));
-        assertFalse(snapshot.isUnavailable("mcp.github.search", ToolOrigin.SUB_AGENT, "github"));
+        assertTrue(
+                snapshot.isUnavailable(
+                        "subagent.weather.search", ToolOrigin.SUB_AGENT, "weather-agent"));
+        assertFalse(
+                snapshot.isUnavailable(
+                        "prefix-subagent.weather.search", ToolOrigin.SUB_AGENT, "weather-agent"));
+        assertFalse(
+                snapshot.isUnavailable(
+                        "subagent.weather.search", ToolOrigin.SUB_AGENT, "other-agent"));
+        assertFalse(
+                snapshot.isUnavailable(
+                        "subagent.weather.search", ToolOrigin.LOCAL, "weather-agent"));
     }
 
     /** 四层状态均包含Cancelled并可序列化 */

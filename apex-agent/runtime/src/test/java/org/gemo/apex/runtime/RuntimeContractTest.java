@@ -26,7 +26,6 @@ import org.gemo.apex.runtime.api.*;
 import org.gemo.apex.runtime.conversation.DefaultConversationServices;
 import org.gemo.apex.runtime.definition.*;
 import org.gemo.apex.runtime.execution.*;
-import org.gemo.apex.runtime.mcp.*;
 import org.gemo.apex.runtime.model.springai.*;
 import org.gemo.apex.runtime.repository.memory.*;
 import org.gemo.apex.runtime.skill.FileSkillProvider;
@@ -252,41 +251,6 @@ class RuntimeContractTest {
         assertEquals("function", call.type());
         assertEquals("weather", call.name());
         assertEquals("{\"city\":\"上海\"}", call.arguments());
-    }
-
-    /** mcp仅发送工具参数 */
-    @Test
-    void sendsOnlyToolArgumentsToMcp() {
-        List<Map<String, Object>> sent = new ArrayList<>();
-        var t =
-                new McpTransport() {
-                    public void connect() {}
-
-                    public List<ToolDefinition> listTools() {
-                        return List.of();
-                    }
-
-                    public McpCallHandle call(String n, Map<String, Object> a) {
-                        sent.add(a);
-                        return new McpCallHandle() {
-                            public Map<String, Object> await() {
-                                return Map.of("ok", true);
-                            }
-
-                            public void cancel() {}
-                        };
-                    }
-
-                    public void close() {}
-                };
-        var a = new McpAgentToolAdapter(new ToolDefinition("mcp/x", "x", "{}", Map.of()), t);
-        var s = new RuntimeCancellationSource();
-        a.execute(
-                new ToolCall("c", "mcp/x", 0, Map.of("value", 7), Map.of()),
-                new ToolExecutionContext(
-                        "s", 1, 1, "u", null, null, s.token(), Map.of("secret", "no")),
-                new Observer(s));
-        assertEquals(List.of(Map.of("value", 7)), sent);
     }
 
     /** sse多行与边界 */

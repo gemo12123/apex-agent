@@ -29,7 +29,7 @@ class ApexApplicationContextTest {
             @Autowired ApexAgentRuntime runtime, @Autowired AgentDefinitionProvider definitions) {
         assertNotNull(runtime);
         assertEquals(
-                List.of("default_agent"),
+                List.of("default_agent", "mcp_agent"),
                 definitions.listAgents().stream().map(value -> value.agentKey()).toList());
     }
 
