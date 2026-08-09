@@ -24,7 +24,6 @@ import org.gemo.apex.core.intervention.InterventionSuspender;
 import org.gemo.apex.core.lifecycle.LifecycleDispatchOutcome;
 import org.gemo.apex.core.lifecycle.LifecycleDispatcher;
 import org.gemo.apex.core.lifecycle.PreToolDispatchOutcome;
-import org.gemo.apex.core.skill.SkillActivationCoordinator;
 import org.gemo.apex.extension.tool.AgentTool;
 
 /** 对同一模型响应先完成整批 PRE_TOOL_CALL，再统一挂起或按原顺序执行。 */
@@ -34,7 +33,6 @@ public final class ToolCallCoordinator {
     private final AgentEventEmitter emitter;
     private final InterventionSuspender suspender;
     private final HumanResponseParser responses = new HumanResponseParser();
-    private final SkillActivationCoordinator skillActivation = new SkillActivationCoordinator();
 
     public ToolCallCoordinator(
             LifecycleDispatcher dispatcher,
@@ -300,6 +298,8 @@ public final class ToolCallCoordinator {
                         context.snapshot().currentTurnNo(),
                         context.snapshot().activeTurn().currentIteration().iterationNo(),
                         context.snapshot().userId(),
+                        context.definition().definition().enabledSkills(),
+                        context.snapshot().activatedSkills(),
                         context.currentHumanSubmission(),
                         null,
                         context.ports().cancellationToken(),
@@ -307,15 +307,11 @@ public final class ToolCallCoordinator {
         try {
             context.ports().cancellationToken().throwIfCancellationRequested();
             ToolResult result =
-                    SkillActivationCoordinator.TOOL_NAME.equals(call.name())
-                            ? skillActivation.activate(context, call)
-                            : tool.execute(
-                                    call,
-                                    executionContext,
-                                    new RestrictedToolExecutionObserver(
-                                            invocationId,
-                                            emitter,
-                                            context.ports().cancellationToken()));
+                    tool.execute(
+                            call,
+                            executionContext,
+                            new RestrictedToolExecutionObserver(
+                                    invocationId, emitter, context.ports().cancellationToken()));
             context.ports().cancellationToken().throwIfCancellationRequested();
             validateAssociation(call, result);
             return result;

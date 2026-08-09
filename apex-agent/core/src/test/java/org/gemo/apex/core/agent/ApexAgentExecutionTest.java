@@ -11,11 +11,16 @@ import org.gemo.apex.common.execution.IterationStatus;
 import org.gemo.apex.common.execution.SessionStatus;
 import org.gemo.apex.common.execution.TurnStatus;
 import org.gemo.apex.common.hook.*;
+import org.gemo.apex.common.hook.context.PostToolCallContext;
 import org.gemo.apex.common.hook.context.PreToolCallContext;
 import org.gemo.apex.common.hook.operation.HookMutations;
+import org.gemo.apex.common.hook.operation.SkillActivationDelta;
 import org.gemo.apex.common.hook.operation.ToolActivationDelta;
 import org.gemo.apex.common.hook.operation.ToolCallPatch;
+import org.gemo.apex.common.hook.operation.ToolResultPatch;
+import org.gemo.apex.common.hook.result.ContinuePostToolCall;
 import org.gemo.apex.common.hook.result.ContinuePreToolCall;
+import org.gemo.apex.common.hook.result.PostToolCallHookResult;
 import org.gemo.apex.common.hook.result.PreToolCallHookResult;
 import org.gemo.apex.common.message.MessageType;
 import org.gemo.apex.common.model.ModelResponse;
@@ -352,18 +357,23 @@ class ApexAgentExecutionTest {
                         .content());
     }
 
-    /** activateSkill由core更新session且重复激活跨Turn幂等保留 */
+    /** activate_skill按普通工具执行且Hook激活状态跨Turn幂等保留 */
     @Test
-    void activateSkillUpdatesSessionInCoreAndRemainsIdempotentAcrossTurns() {
+    void runsActivateSkillAsOrdinaryToolAndPersistsHookStateAcrossTurns() {
         CoreTestFixture fixture = new CoreTestFixture();
+        List<Set<String>> activationInputs = new java.util.ArrayList<>();
         fixture.tool(
                 "activate_skill",
                 (call, context, observer) -> {
-                    throw new AssertionError("activate_skill 不应进入普通 AgentTool.execute");
+                    activationInputs.add(context.activatedSkills());
+                    assertEquals(Set.of("pdf"), context.enabledSkills());
+                    return new ToolResult(
+                            call.toolCallId(), call.name(), "instructions:pdf", Map.of());
                 });
+        fixture.hooks.put("activate-state", activationStateHook());
         fixture.definition =
                 fixture.definition(
-                        Map.of(),
+                        activationBindings("activate_skill"),
                         Set.of("activate_skill"),
                         Set.of("activate_skill"),
                         Set.of("pdf"));
@@ -374,7 +384,7 @@ class ApexAgentExecutionTest {
         assertInstanceOf(AgentRunOutcome.Completed.class, first.run());
 
         assertEquals(Set.of("pdf"), first.snapshot().activatedSkills());
-        assertEquals(List.of(Set.of()), fixture.skillActivationInputs);
+        assertEquals(List.of(Set.of()), activationInputs);
         assertEquals(
                 "instructions:pdf",
                 fixture.conversation.stream()
@@ -382,7 +392,7 @@ class ApexAgentExecutionTest {
                         .findFirst()
                         .orElseThrow()
                         .content());
-        assertEquals(0, fixture.toolCalls);
+        assertEquals(1, fixture.toolCalls);
 
         fixture.modelResponses.add(activationResponse("activate-2"));
         fixture.modelResponses.add(new ModelResponse("第二轮完成", List.of(), Map.of()));
@@ -394,8 +404,8 @@ class ApexAgentExecutionTest {
         assertInstanceOf(AgentRunOutcome.Completed.class, second.run());
 
         assertEquals(Set.of("pdf"), second.snapshot().activatedSkills());
-        assertEquals(List.of(Set.of(), Set.of("pdf")), fixture.skillActivationInputs);
-        assertEquals(2, fixture.skillActivations);
+        assertEquals(List.of(Set.of(), Set.of("pdf")), activationInputs);
+        assertEquals(2, fixture.toolCalls);
     }
 
     /** 新Turn按最新定义清理已移除的激活Skill */
@@ -403,22 +413,23 @@ class ApexAgentExecutionTest {
     void cleansRemovedActivatedSkillsUsingLatestDefinitionForNewTurn() {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.tool(
-                "activate_skill",
-                (call, context, observer) -> {
-                    throw new AssertionError("activate_skill 不应进入普通 AgentTool.execute");
-                });
+                "custom-activate",
+                (call, context, observer) ->
+                        new ToolResult(
+                                call.toolCallId(), call.name(), "instructions:pdf", Map.of()));
+        fixture.hooks.put("activate-state", activationStateHook());
         fixture.definition =
                 fixture.definition(
-                        Map.of(),
-                        Set.of("activate_skill"),
-                        Set.of("activate_skill"),
+                        activationBindings("custom-activate"),
+                        Set.of("custom-activate"),
+                        Set.of("custom-activate"),
                         Set.of("pdf"));
-        fixture.modelResponses.add(activationResponse("activate-1"));
+        fixture.modelResponses.add(activationResponse("activate-1", "custom-activate"));
         fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
         create(fixture).run();
         fixture.definition =
                 fixture.definition(
-                        Map.of(), Set.of("activate_skill"), Set.of("activate_skill"), Set.of());
+                        Map.of(), Set.of("custom-activate"), Set.of("custom-activate"), Set.of());
 
         ApexAgent next =
                 new ApexAgentFactory()
@@ -436,12 +447,13 @@ class ApexAgentExecutionTest {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.tool(
                 "activate_skill",
-                (call, context, observer) -> {
-                    throw new AssertionError("activate_skill 不应进入普通 AgentTool.execute");
-                });
+                (call, context, observer) ->
+                        new ToolResult(
+                                call.toolCallId(), call.name(), "instructions:pdf", Map.of()));
+        fixture.hooks.put("activate-state", activationStateHook());
         fixture.definition =
                 fixture.definition(
-                        Map.of(),
+                        activationBindings("activate_skill"),
                         Set.of("activate_skill"),
                         Set.of("activate_skill"),
                         Set.of("pdf"));
@@ -454,15 +466,52 @@ class ApexAgentExecutionTest {
         assertInstanceOf(AgentRunOutcome.Failed.class, outcome);
         assertTrue(agent.snapshot().activatedSkills().isEmpty());
         assertTrue(fixture.sessions.get("session-1").activatedSkills().isEmpty());
-        assertEquals(1, fixture.skillActivations);
+        assertEquals(1, fixture.toolCalls);
+    }
+
+    private Map<HookPoint, List<HookBinding>> activationBindings(String toolName) {
+        return Map.of(
+                HookPoint.POST_TOOL_CALL,
+                List.of(
+                        new HookBinding(
+                                "activate-state-binding",
+                                "activate-state",
+                                0,
+                                true,
+                                List.of(toolName),
+                                Map.of())));
+    }
+
+    private LifecycleHook<PostToolCallContext, PostToolCallHookResult> activationStateHook() {
+        return new LifecycleHook<>() {
+            @Override
+            public HookTypeDescriptor descriptor() {
+                return new HookTypeDescriptor(
+                        HookPoint.POST_TOOL_CALL,
+                        PostToolCallContext.class,
+                        PostToolCallHookResult.class);
+            }
+
+            @Override
+            public PostToolCallHookResult apply(PostToolCallContext context) {
+                String skillName = (String) context.toolCall().arguments().get("command");
+                return new ContinuePostToolCall(
+                        HookMutations.none(),
+                        new ToolResultPatch(
+                                context.toolResult().content(), context.toolResult().metadata()),
+                        new SkillActivationDelta(Set.of(skillName), Set.of()));
+            }
+        };
     }
 
     private ModelResponse activationResponse(String callId) {
+        return activationResponse(callId, "activate_skill");
+    }
+
+    private ModelResponse activationResponse(String callId, String toolName) {
         return new ModelResponse(
                 "",
-                List.of(
-                        new ToolCall(
-                                callId, "activate_skill", 0, Map.of("command", "pdf"), Map.of())),
+                List.of(new ToolCall(callId, toolName, 0, Map.of("command", "pdf"), Map.of())),
                 Map.of());
     }
 

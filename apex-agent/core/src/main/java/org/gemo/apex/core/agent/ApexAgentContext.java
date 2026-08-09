@@ -9,10 +9,10 @@ import org.gemo.apex.common.conversation.ConversationCompactionResult;
 import org.gemo.apex.common.execution.IterationStatus;
 import org.gemo.apex.common.execution.SessionStatus;
 import org.gemo.apex.common.execution.TurnStatus;
+import org.gemo.apex.common.hook.operation.SkillActivationDelta;
 import org.gemo.apex.common.intervention.HumanSubmission;
 import org.gemo.apex.common.model.ModelRequest;
 import org.gemo.apex.common.model.ModelResponse;
-import org.gemo.apex.common.skill.SkillActivationResult;
 import org.gemo.apex.common.snapshot.*;
 import org.gemo.apex.common.tool.ToolCall;
 import org.gemo.apex.common.tool.ToolOrigin;
@@ -32,7 +32,7 @@ public final class ApexAgentContext {
     private ToolResult toolResult;
     private ConversationCompactionRequest compactionRequest;
     private ConversationCompactionResult compactionResult;
-    private SkillActivationResult pendingSkillActivation;
+    private Set<String> pendingActivatedSkills;
     private final Map<String, Object> humanResponses;
     private HumanSubmission humanSubmission;
 
@@ -303,15 +303,25 @@ public final class ApexAgentContext {
                         ports.timeProvider().now());
     }
 
-    public void stageSkillActivation(SkillActivationResult activation) {
-        if (!definition.definition().enabledSkills().containsAll(activation.activatedSkills())) {
-            throw new IllegalArgumentException("activatedSkills 必须是 enabledSkills 的子集");
+    public void stageSkillActivation(SkillActivationDelta delta) {
+        if (delta.activate().isEmpty() && delta.deactivate().isEmpty()) {
+            return;
         }
-        pendingSkillActivation = activation;
+        if (!definition.definition().enabledSkills().containsAll(delta.activate())) {
+            throw new IllegalArgumentException("待激活 Skill 必须属于 enabledSkills");
+        }
+        Set<String> next =
+                new LinkedHashSet<>(
+                        pendingActivatedSkills == null
+                                ? snapshot.activatedSkills()
+                                : pendingActivatedSkills);
+        next.addAll(delta.activate());
+        next.removeAll(delta.deactivate());
+        pendingActivatedSkills = Set.copyOf(next);
     }
 
     public void applyPendingSkillActivation() {
-        if (pendingSkillActivation == null) {
+        if (pendingActivatedSkills == null) {
             return;
         }
         snapshot =
@@ -323,14 +333,14 @@ public final class ApexAgentContext {
                         snapshot.status(),
                         snapshot.currentTurnNo(),
                         snapshot.enabledTools(),
-                        pendingSkillActivation.activatedSkills(),
+                        pendingActivatedSkills,
                         snapshot.historicalToolBindings(),
                         snapshot.activeDefinition(),
                         snapshot.activeTurn(),
                         snapshot.suspendedToolBatch(),
                         snapshot.nextMessageSortNo(),
                         ports.timeProvider().now());
-        pendingSkillActivation = null;
+        pendingActivatedSkills = null;
     }
 
     public void completeTurn(boolean endedByHook) {

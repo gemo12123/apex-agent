@@ -5,10 +5,18 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.gemo.apex.common.agent.*;
+import org.gemo.apex.common.execution.AgentRequest;
+import org.gemo.apex.common.hook.HookBinding;
+import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.common.model.ModelResponse;
+import org.gemo.apex.common.skill.SkillDefinition;
+import org.gemo.apex.core.agent.AgentRunOutcome;
 import org.gemo.apex.extension.definition.AgentDefinitionProvider;
 import org.gemo.apex.extension.model.ModelGateway;
+import org.gemo.apex.kit.hook.SkillActivationStateHook;
+import org.gemo.apex.kit.tool.ActivateSkillTool;
 import org.gemo.apex.platform.web.sse.RequestBoundAgentEventPublisherFactory;
+import org.gemo.apex.platform.web.sse.SseEmitterAgentEventPublisher;
 import org.gemo.apex.runtime.api.*;
 import org.gemo.apex.runtime.repository.memory.*;
 import org.junit.jupiter.api.Test;
@@ -17,6 +25,7 @@ import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.tool.*;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 class ApexAgentPlatformConfigurationTest {
     @Test
@@ -50,13 +59,56 @@ class ApexAgentPlatformConfigurationTest {
         assertTrue(error.getMessage().contains("唯一 ToolCallingManager"));
     }
 
+    @Test
+    void collectsExplicitKitSkillToolAndHookBeans() {
+        DefaultListableBeanFactory beans = beans();
+        SkillDefinition skill = new SkillDefinition("pdf", "PDF", "使用 PDF 指令", Map.of());
+        beans.registerSingleton("pdfSkill", skill);
+        beans.registerSingleton("activateSkillTool", new ActivateSkillTool(() -> List.of(skill)));
+        beans.registerSingleton(
+                "skillActivationStateHook",
+                new PlatformHookRegistration(
+                        SkillActivationStateHook.REGISTRATION_NAME,
+                        new SkillActivationStateHook()));
+
+        RequestBoundAgentEventPublisherFactory publishers =
+                new RequestBoundAgentEventPublisherFactory();
+        try (var runtime = createRuntime(beans, skillDefinitions(), publishers)) {
+            var publisher = new SseEmitterAgentEventPublisher(new SseEmitter());
+            assertInstanceOf(
+                    AgentRunOutcome.Completed.class,
+                    publishers
+                            .prepare(
+                                    "skill",
+                                    "default",
+                                    "u",
+                                    publisher,
+                                    () ->
+                                            runtime.newAgent(
+                                                    new AgentRequest("skill", "default", "u", "q")))
+                            .run());
+        }
+    }
+
     private static ApexAgentRuntime createRuntime(DefaultListableBeanFactory beans) {
+        return createRuntime(beans, definitions());
+    }
+
+    private static ApexAgentRuntime createRuntime(
+            DefaultListableBeanFactory beans, AgentDefinitionProvider definitions) {
+        return createRuntime(beans, definitions, new RequestBoundAgentEventPublisherFactory());
+    }
+
+    private static ApexAgentRuntime createRuntime(
+            DefaultListableBeanFactory beans,
+            AgentDefinitionProvider definitions,
+            RequestBoundAgentEventPublisherFactory publishers) {
         return new ApexAgentPlatformConfiguration()
                 .apexAgentRuntime(
-                        definitions(),
+                        definitions,
                         new InMemorySessionRepository(),
                         new InMemoryConversationRepository(),
-                        new RequestBoundAgentEventPublisherFactory(),
+                        publishers,
                         beans.getBeanProvider(ModelGateway.class),
                         beans.getBeanProvider(ChatModel.class),
                         beans.getBeanProvider(ToolCallingManager.class),
@@ -86,6 +138,40 @@ class ApexAgentPlatformConfigurationTest {
                         Set.of(),
                         Map.of(),
                         Map.of());
+        return new AgentDefinitionProvider() {
+            @Override
+            public AgentDefinition load(String agentKey) {
+                return definition;
+            }
+
+            @Override
+            public List<AgentMetadata> listAgents() {
+                return List.of(definition.metadata());
+            }
+        };
+    }
+
+    private static AgentDefinitionProvider skillDefinitions() {
+        AgentDefinition definition =
+                new AgentDefinition(
+                        "1.0.0",
+                        new AgentMetadata("default", "默认", "测试"),
+                        new PromptDefinition("系统", 2),
+                        new MessageCompressionDefinition(false, 10),
+                        new ToolSetDefinition(
+                                Set.of(ActivateSkillTool.NAME), Set.of(ActivateSkillTool.NAME)),
+                        Set.of("pdf"),
+                        Map.of(),
+                        Map.of(
+                                HookPoint.POST_TOOL_CALL,
+                                List.of(
+                                        new HookBinding(
+                                                "skill-state",
+                                                SkillActivationStateHook.REGISTRATION_NAME,
+                                                0,
+                                                true,
+                                                List.of(ActivateSkillTool.NAME),
+                                                Map.of()))));
         return new AgentDefinitionProvider() {
             @Override
             public AgentDefinition load(String agentKey) {

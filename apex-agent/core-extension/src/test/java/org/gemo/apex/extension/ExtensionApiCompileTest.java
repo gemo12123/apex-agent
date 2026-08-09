@@ -21,7 +21,6 @@ import org.gemo.apex.common.message.AgentMessageEntry;
 import org.gemo.apex.common.message.MessageRole;
 import org.gemo.apex.common.message.MessageType;
 import org.gemo.apex.common.model.ModelStreamChunk;
-import org.gemo.apex.common.skill.SkillActivationResult;
 import org.gemo.apex.common.snapshot.SessionSnapshot;
 import org.gemo.apex.common.tool.CancellationRegistration;
 import org.gemo.apex.common.tool.CancellationToken;
@@ -43,7 +42,6 @@ import org.gemo.apex.extension.model.ModelGateway;
 import org.gemo.apex.extension.model.ModelStreamObserver;
 import org.gemo.apex.extension.repository.ConversationRepository;
 import org.gemo.apex.extension.repository.SessionRepository;
-import org.gemo.apex.extension.skill.SkillActivator;
 import org.gemo.apex.extension.skill.SkillProvider;
 import org.gemo.apex.extension.time.TimeProvider;
 import org.gemo.apex.extension.tool.AgentTool;
@@ -93,9 +91,6 @@ class ExtensionApiCompileTest {
             new FakeSessionRepository(),
             new FakeConversationRepository(),
             (SkillProvider) List::of,
-            (SkillActivator)
-                    (name, enabled, activated) ->
-                            new SkillActivationResult("instructions", activated),
             new FakeIdGenerator(),
             (TimeProvider) () -> Instant.EPOCH,
             new FakeLifecycleHook(),
@@ -105,7 +100,7 @@ class ExtensionApiCompileTest {
             (ConversationCompactor) request -> null
         };
 
-        assertEquals(20, ports.length);
+        assertEquals(19, ports.length);
         assertSame(token, modelObserver.cancellationToken());
         assertSame(token, toolObserver.cancellationToken());
     }

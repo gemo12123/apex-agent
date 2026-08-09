@@ -14,7 +14,6 @@ import org.gemo.apex.common.message.MessageType;
 import org.gemo.apex.common.model.ModelRequest;
 import org.gemo.apex.common.model.ModelResponse;
 import org.gemo.apex.common.model.ModelStreamChunk;
-import org.gemo.apex.common.skill.SkillActivationResult;
 import org.gemo.apex.common.skill.SkillDefinition;
 import org.gemo.apex.common.snapshot.SessionSnapshot;
 import org.gemo.apex.common.tool.*;
@@ -47,8 +46,6 @@ final class CoreTestFixture {
     int providerLoads;
     int modelCalls;
     int toolCalls;
-    int skillActivations;
-    final List<Set<String>> skillActivationInputs = new ArrayList<>();
     RuntimeException modelFailure;
     boolean failSuspensionSave;
     int remainingSessionSaveFailures;
@@ -242,16 +239,6 @@ final class CoreTestFixture {
                                                         "instructions:" + name,
                                                         Map.of()))
                                 .toList(),
-                (name, enabled, activated) -> {
-                    skillActivations++;
-                    skillActivationInputs.add(Set.copyOf(activated));
-                    if (!enabled.contains(name)) {
-                        throw new IllegalArgumentException("skill 未启用");
-                    }
-                    Set<String> next = new LinkedHashSet<>(activated);
-                    next.add(name);
-                    return new SkillActivationResult("instructions:" + name, next);
-                },
                 message -> {
                     calls.add("event." + message.getClass().getSimpleName());
                     events.add(message);

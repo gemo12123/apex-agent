@@ -159,6 +159,7 @@ public final class LifecycleDispatcher {
             case EndTurnPreToolCall value -> end(value.reason());
             case ContinuePostToolCall value -> {
                 applyMutations(context, value.mutations());
+                context.stageSkillActivation(value.skillActivationDelta());
                 ToolResult old = context.toolResult();
                 context.toolResult(
                         new ToolResult(

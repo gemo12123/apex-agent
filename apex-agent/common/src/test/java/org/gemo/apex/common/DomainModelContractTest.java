@@ -11,9 +11,9 @@ import java.util.Map;
 import java.util.Set;
 import org.gemo.apex.common.agent.ToolSetDefinition;
 import org.gemo.apex.common.execution.*;
+import org.gemo.apex.common.hook.operation.SkillActivationDelta;
 import org.gemo.apex.common.json.JsonUtils;
 import org.gemo.apex.common.model.ModelResponse;
-import org.gemo.apex.common.skill.SkillActivationResult;
 import org.gemo.apex.common.skill.SkillSetDefinition;
 import org.gemo.apex.common.snapshot.ToolExecutionSnapshot;
 import org.gemo.apex.common.tool.*;
@@ -63,18 +63,19 @@ class DomainModelContractTest {
                 () -> new SkillSetDefinition(Set.of("a"), Set.of("b")));
     }
 
-    /** Skill激活结果应保留指令并冻结激活集合 */
+    /** Skill激活变更应冻结集合并拒绝冲突名称 */
     @Test
-    void skillActivationResultPreservesInstructionsAndFreezesActivatedSkills() {
+    void skillActivationDeltaFreezesSetsAndRejectsOverlappingNames() {
         LinkedHashSet<String> activatedSkills = new LinkedHashSet<>(Set.of("writing"));
-        SkillActivationResult result = new SkillActivationResult("使用写作规范", activatedSkills);
+        SkillActivationDelta delta = new SkillActivationDelta(activatedSkills, Set.of());
 
         activatedSkills.add("other");
 
-        assertEquals("使用写作规范", result.instructions());
-        assertEquals(Set.of("writing"), result.activatedSkills());
+        assertEquals(Set.of("writing"), delta.activate());
+        assertThrows(UnsupportedOperationException.class, () -> delta.activate().add("another"));
         assertThrows(
-                UnsupportedOperationException.class, () -> result.activatedSkills().add("another"));
+                IllegalArgumentException.class,
+                () -> new SkillActivationDelta(Set.of("writing"), Set.of("writing")));
     }
 
     /** 输入集合和嵌套Map不能修改领域对象 */

@@ -173,7 +173,6 @@ public final class ApexAgentRuntimeBuilder {
         callbackSnapshot.stream()
                 .map(callback -> new SpringAiToolCallbackAgentTool(callback, toolCallingManager))
                 .forEach(ts::add);
-        ts.add(activationTool());
         var skillsRegistry = new RuntimeSkillRegistry(skills);
         var tr = new ToolRegistry(ts, skillsRegistry);
         var hr = new HookRegistry(hooks);
@@ -224,32 +223,12 @@ public final class ApexAgentRuntimeBuilder {
                                 DefaultConversationServices.policy(),
                                 DefaultConversationServices.compactor(),
                                 skillsRegistry,
-                                skillsRegistry,
                                 p,
                                 c.token(),
                                 ids,
                                 Instant::now,
                                 "请直接给出最终答案，不再调用工具。");
         return new ApexAgentRuntime(ports, co, pf, active, new RuntimeResources(owned));
-    }
-
-    private AgentTool activationTool() {
-        return new AgentTool() {
-            private final ToolDefinition d =
-                    new ToolDefinition(
-                            "activate_skill",
-                            "激活一个 Skill",
-                            "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"}},\"required\":[\"command\"]}",
-                            Map.of());
-
-            public ToolDefinition definition() {
-                return d;
-            }
-
-            public ToolResult execute(ToolCall c, ToolExecutionContext x, ToolExecutionObserver o) {
-                throw new IllegalStateException("由 core SkillActivationCoordinator 执行");
-            }
-        };
     }
 
     private AgentDefinition defaults() {

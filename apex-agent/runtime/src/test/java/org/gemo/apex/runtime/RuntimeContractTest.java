@@ -10,12 +10,17 @@ import java.util.concurrent.atomic.*;
 import org.gemo.apex.common.agent.*;
 import org.gemo.apex.common.conversation.*;
 import org.gemo.apex.common.execution.*;
+import org.gemo.apex.common.hook.HookBinding;
+import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.common.message.*;
 import org.gemo.apex.common.model.*;
+import org.gemo.apex.common.skill.SkillDefinition;
 import org.gemo.apex.common.tool.*;
 import org.gemo.apex.core.agent.AgentRunOutcome;
 import org.gemo.apex.extension.definition.AgentDefinitionProvider;
 import org.gemo.apex.extension.tool.ToolExecutionObserver;
+import org.gemo.apex.kit.hook.SkillActivationStateHook;
+import org.gemo.apex.kit.tool.ActivateSkillTool;
 import org.gemo.apex.protocol.event.*;
 import org.gemo.apex.runtime.api.*;
 import org.gemo.apex.runtime.conversation.DefaultConversationServices;
@@ -339,9 +344,9 @@ class RuntimeContractTest {
                 () -> r.newAgent(new AgentRequest("closed", "default", "u", "q")));
     }
 
-    /** 普通Skill重复激活幂等且资源限制为enabled */
+    /** 普通Skill注册表缓存定义且资源限制为enabled */
     @Test
-    void activatesRegularSkillIdempotentlyAndRestrictsResourcesToEnabledSkills() throws Exception {
+    void cachesRegularSkillsAndRestrictsResourcesToEnabledSkills() throws Exception {
         Path root = Files.createTempDirectory("skills"),
                 dir = Files.createDirectory(root.resolve("pdf"));
         Files.writeString(dir.resolve("SKILL.md"), "---\nname: pdf\ndescription: PDF\n---\n使用说明");
@@ -349,13 +354,82 @@ class RuntimeContractTest {
         var loaded = new FileSkillProvider(root).loadSkills();
         var registry = new RuntimeSkillRegistry(loaded);
         assertEquals(
-                Set.of("pdf"), registry.activate("pdf", Set.of("pdf"), Set.of()).activatedSkills());
-        assertEquals(
-                Set.of("pdf"),
-                registry.activate("pdf", Set.of("pdf"), Set.of("pdf")).activatedSkills());
+                List.of("pdf"), registry.loadSkills().stream().map(SkillDefinition::name).toList());
         assertEquals("资源", registry.read("pdf", "guide.txt", Set.of("pdf")));
         assertThrows(
                 IllegalArgumentException.class, () -> registry.read("pdf", "guide.txt", Set.of()));
+    }
+
+    /** Skill激活工具不再隐式注册，显式组合Kit工具和Hook后才更新会话状态 */
+    @Test
+    void requiresExplicitSkillToolRegistrationAndSupportsKitComposition() {
+        SkillDefinition skill = new SkillDefinition("pdf", "PDF", "使用 PDF 指令", Map.of());
+        AgentDefinition activationDefinition =
+                new AgentDefinition(
+                        "1.0.0",
+                        new AgentMetadata("default", "默认", "测试"),
+                        new PromptDefinition("系统", 2),
+                        new MessageCompressionDefinition(false, 10),
+                        new ToolSetDefinition(
+                                Set.of(ActivateSkillTool.NAME), Set.of(ActivateSkillTool.NAME)),
+                        Set.of("pdf"),
+                        Map.of(),
+                        Map.of(
+                                HookPoint.POST_TOOL_CALL,
+                                List.of(
+                                        new HookBinding(
+                                                "skill-state",
+                                                SkillActivationStateHook.REGISTRATION_NAME,
+                                                0,
+                                                true,
+                                                List.of(ActivateSkillTool.NAME),
+                                                Map.of()))));
+
+        try (var missing =
+                ApexAgentRuntime.builder()
+                        .modelGateway((request, observer) -> null)
+                        .agentDefinition(activationDefinition)
+                        .registerSkill(skill)
+                        .build()) {
+            assertThrows(
+                    AgentPreparationException.class,
+                    () -> missing.newAgent(new AgentRequest("missing", "default", "u", "q")));
+        }
+
+        Deque<ModelResponse> responses =
+                new ArrayDeque<>(
+                        List.of(
+                                new ModelResponse(
+                                        "",
+                                        List.of(
+                                                new ToolCall(
+                                                        "activate-1",
+                                                        ActivateSkillTool.NAME,
+                                                        0,
+                                                        Map.of(
+                                                                ActivateSkillTool.COMMAND_ARGUMENT,
+                                                                "pdf"),
+                                                        Map.of())),
+                                        Map.of()),
+                                new ModelResponse("完成", List.of(), Map.of())));
+        InMemorySessionRepository sessions = new InMemorySessionRepository();
+        try (var runtime =
+                ApexAgentRuntime.builder()
+                        .modelGateway((request, observer) -> responses.removeFirst())
+                        .agentDefinition(activationDefinition)
+                        .sessionRepository(sessions)
+                        .registerSkill(skill)
+                        .registerTool(new ActivateSkillTool(() -> List.of(skill)))
+                        .registerHook(
+                                SkillActivationStateHook.REGISTRATION_NAME,
+                                new SkillActivationStateHook())
+                        .build()) {
+            ApexAgentExecution execution =
+                    runtime.newAgent(new AgentRequest("explicit", "default", "u", "q"));
+
+            assertInstanceOf(AgentRunOutcome.Completed.class, execution.run());
+            assertEquals(Set.of("pdf"), sessions.load("explicit").orElseThrow().activatedSkills());
+        }
     }
 
     private static AgentDefinition definition() {

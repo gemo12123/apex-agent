@@ -12,7 +12,6 @@ import org.gemo.apex.extension.id.IdGenerator;
 import org.gemo.apex.extension.model.ModelGateway;
 import org.gemo.apex.extension.repository.ConversationRepository;
 import org.gemo.apex.extension.repository.SessionRepository;
-import org.gemo.apex.extension.skill.SkillActivator;
 import org.gemo.apex.extension.skill.SkillProvider;
 import org.gemo.apex.extension.time.TimeProvider;
 import org.gemo.apex.extension.tool.ToolAvailabilityProvider;
@@ -31,7 +30,6 @@ public record AgentPorts(
         ConversationCompactionPolicy compactionPolicy,
         ConversationCompactor compactor,
         SkillProvider skillProvider,
-        SkillActivator skillActivator,
         AgentEventPublisher eventPublisher,
         CancellationToken cancellationToken,
         IdGenerator idGenerator,
@@ -49,7 +47,6 @@ public record AgentPorts(
         Objects.requireNonNull(compactionPolicy, "compactionPolicy");
         Objects.requireNonNull(compactor, "compactor");
         Objects.requireNonNull(skillProvider, "skillProvider");
-        Objects.requireNonNull(skillActivator, "skillActivator");
         Objects.requireNonNull(eventPublisher, "eventPublisher");
         Objects.requireNonNull(cancellationToken, "cancellationToken");
         Objects.requireNonNull(idGenerator, "idGenerator");

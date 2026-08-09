@@ -40,7 +40,7 @@ class ExtensionBoundaryArchitectureTest {
             throws Exception {
         List<Class<?>> types = productionTypes();
 
-        assertEquals(20, types.size(), "新增或删除端口时必须显式评审接口清单");
+        assertEquals(19, types.size(), "新增或删除端口时必须显式评审接口清单");
         types.forEach(this::validatePortType);
     }
 

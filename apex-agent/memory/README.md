@@ -7,7 +7,7 @@
 - POM 固定为 `packaging=pom`，没有依赖、编译/测试插件或额外 source/resource root。
 - 历史文件仅位于 `archive/main`；模块不含 `src/main`、`src/test`，不产出 class 或 jar。
 - 归档源码保留旧 package、import、注解和 SQL，未适配当前框架，也未编译、未测试。
-- 其他模块不得依赖、扫描或打包该归档。普通 Skill、资源读取、`activate_skill` 和 `activatedSkills` 继续由 common/runtime 提供。
+- 其他模块不得依赖、扫描或打包该归档。普通 Skill、资源读取和 `activatedSkills` 继续由 common/runtime 提供；可选激活工具与状态 Hook 由 kit 提供。
 
 ## 默认产品能力
 

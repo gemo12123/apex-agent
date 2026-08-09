@@ -8,7 +8,7 @@ import java.util.*;
 import org.gemo.apex.common.skill.*;
 import org.gemo.apex.extension.skill.*;
 
-public final class RuntimeSkillRegistry implements SkillProvider, SkillActivator {
+public final class RuntimeSkillRegistry implements SkillProvider {
     private final Map<String, SkillDefinition> skills;
 
     public RuntimeSkillRegistry(List<SkillDefinition> in) {
@@ -23,16 +23,6 @@ public final class RuntimeSkillRegistry implements SkillProvider, SkillActivator
 
     public List<SkillDefinition> loadSkills() {
         return List.copyOf(skills.values());
-    }
-
-    public SkillActivationResult activate(String n, Set<String> enabled, Set<String> active) {
-        if (!enabled.contains(n)) {
-            throw new IllegalArgumentException("Skill 未启用: " + n);
-        }
-        var s = Optional.ofNullable(skills.get(n)).orElseThrow();
-        var next = new LinkedHashSet<>(active);
-        next.add(n);
-        return new SkillActivationResult(s.instructions(), next);
     }
 
     public String read(String skill, String resource, Set<String> enabled) {

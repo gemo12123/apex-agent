@@ -2,6 +2,7 @@ package org.gemo.apex.kit;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.gemo.apex.common.hook.HookBinding;
 import org.gemo.apex.common.hook.context.PostToolCallContext;
 import org.gemo.apex.common.hook.context.PreToolCallContext;
@@ -62,5 +63,19 @@ final class KitFixtures {
     static ToolExecutionContext execution(HumanSubmission submission) {
         return new ToolExecutionContext(
                 "session-1", 1, 1, "user-1", submission, null, TOKEN, Map.of());
+    }
+
+    static ToolExecutionContext execution(Set<String> enabledSkills, Set<String> activatedSkills) {
+        return new ToolExecutionContext(
+                "session-1",
+                1,
+                1,
+                "user-1",
+                enabledSkills,
+                activatedSkills,
+                null,
+                null,
+                TOKEN,
+                Map.of());
     }
 }
