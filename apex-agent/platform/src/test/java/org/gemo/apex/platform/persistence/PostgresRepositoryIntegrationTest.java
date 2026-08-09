@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.flywaydb.core.Flyway;
-import org.gemo.apex.common.conversation.ConversationQuery;
+import org.gemo.apex.common.conversation.*;
 import org.gemo.apex.common.intervention.HumanResponseCommand;
 import org.gemo.apex.common.message.AgentMessageEntry;
 import org.gemo.apex.common.message.MessageRole;
@@ -81,7 +81,24 @@ class PostgresRepositoryIntegrationTest {
         conversationsA.append(List.of(entry));
         assertEquals(
                 longText,
-                conversationsA.load(new ConversationQuery("session-1")).getFirst().content());
+                conversationsA
+                        .load(new ConversationQuery("session-1"))
+                        .messages()
+                        .getFirst()
+                        .content());
+        ConversationSummary summary =
+                new ConversationSummary("compaction-1", "累计摘要", 0, 0, 1, Instant.now());
+        conversationsA.compact(
+                new ConversationCompactionCommit("session-1", summary, List.of(), List.of()));
+        ConversationHistory history = conversationsA.load(new ConversationQuery("session-1"));
+        assertEquals(summary.content(), history.summary().orElseThrow().content());
+        assertEquals(
+                List.of("long-entry"),
+                history.messages().stream().map(AgentMessageEntry::entryId).toList());
+        assertTrue(
+                jdbc.queryForObject(
+                        "SELECT compacted FROM apex_agent_dialogue_message WHERE id='long-entry'",
+                        Boolean.class));
 
         try (var processA = runtime(sessionsA, conversationsA, new CopyOnWriteArrayList<>())) {
             assertEquals(0, processA.activeExecutionCount());

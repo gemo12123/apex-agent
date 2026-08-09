@@ -14,7 +14,6 @@ import org.gemo.apex.common.tool.ToolCall;
 import org.gemo.apex.core.agent.ApexAgentContext;
 import org.gemo.apex.core.event.AgentEventEmitter;
 import org.gemo.apex.core.event.AgentEventFactory;
-import org.gemo.apex.core.exception.ModelContextLimitException;
 import org.gemo.apex.core.lifecycle.LifecycleDispatchOutcome;
 import org.gemo.apex.core.lifecycle.LifecycleDispatcher;
 import org.gemo.apex.extension.model.ModelStreamObserver;
@@ -48,7 +47,6 @@ public final class ModelStepExecutor {
         if (pre instanceof LifecycleDispatchOutcome.EndTurn end) {
             return new ModelStepOutcome.EndTurn(end.reason());
         }
-        validateHardLimit(context.modelRequest(), context.ports().modelRequestHardLimit());
         String contentId = context.ports().idGenerator().newInvocationId();
         context.ports().cancellationToken().throwIfCancellationRequested();
         // 流式分片只向客户端转发；完整响应仍由 gateway 返回后一次性进入快照。
@@ -89,29 +87,6 @@ public final class ModelStepExecutor {
         return context.modelResponse().toolCalls().isEmpty()
                 ? new ModelStepOutcome.FinalText(context.modelResponse().text())
                 : new ModelStepOutcome.ToolCalls(context.modelResponse().toolCalls());
-    }
-
-    /** 以协议内容的保守字符量预检请求，避免把超大上下文交给模型实现。 */
-    private void validateHardLimit(ModelRequest request, long limit) {
-        long actual =
-                request.systemPrompt().length()
-                        + request.messages().stream()
-                                .mapToLong(
-                                        message ->
-                                                (message.content() == null
-                                                                ? 0
-                                                                : message.content().length())
-                                                        + message.payload().toString().length())
-                                .sum()
-                        + request.tools().stream()
-                                .mapToLong(
-                                        tool ->
-                                                tool.description().length()
-                                                        + tool.inputSchemaJson().length())
-                                .sum();
-        if (actual > limit) {
-            throw new ModelContextLimitException(actual, limit);
-        }
     }
 
     /** 将模型文本和 ToolCall 一并写为一条助手消息，以维持会话顺序。 */

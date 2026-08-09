@@ -16,6 +16,8 @@ class SpringPropertiesAgentDefinitionProviderTest {
         agent.setName("默认");
         agent.setDescription("描述");
         agent.getPrompt().setSystem("classpath:agents/default_agent/REACT_PROMPT.md");
+        agent.getMessageCompression().setTokenThreshold(32000L);
+        agent.getMessageCompression().setCharacterHardLimit(120000L);
         agent.getTools().setAvailable(Set.of("search"));
         agent.getTools().setDefaultEnabled(Set.of("search"));
         var agents = new LinkedHashMap<String, ApexAgentPlatformProperties.Agent>();
@@ -29,6 +31,8 @@ class SpringPropertiesAgentDefinitionProviderTest {
         assertEquals("default", provider.listAgents().getFirst().agentKey());
         assertEquals(Set.of("search"), provider.load("default").tools().defaultEnabledTools());
         assertTrue(provider.load("default").prompt().systemPrompt().contains("通用智能体"));
+        assertEquals(32000L, provider.load("default").messageCompression().tokenThreshold());
+        assertEquals(120000L, provider.load("default").messageCompression().characterHardLimit());
     }
 
     /** 多定义源和缺失Prompt应在构造期失败 */

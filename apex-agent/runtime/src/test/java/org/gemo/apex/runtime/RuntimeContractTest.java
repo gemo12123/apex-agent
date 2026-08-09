@@ -18,6 +18,7 @@ import org.gemo.apex.extension.definition.AgentDefinitionProvider;
 import org.gemo.apex.extension.tool.ToolExecutionObserver;
 import org.gemo.apex.protocol.event.*;
 import org.gemo.apex.runtime.api.*;
+import org.gemo.apex.runtime.conversation.DefaultConversationServices;
 import org.gemo.apex.runtime.definition.*;
 import org.gemo.apex.runtime.execution.*;
 import org.gemo.apex.runtime.mcp.*;
@@ -109,11 +110,83 @@ class RuntimeContractTest {
         var e = entry("e1", 0);
         r.append(List.of(e));
         r.append(List.of(e));
-        assertEquals(1, r.load(new ConversationQuery("s")).size());
+        assertEquals(1, r.load(new ConversationQuery("s")).messages().size());
         assertThrows(IllegalStateException.class, () -> r.append(List.of(entry("e2", 0))));
-        var c = new ConversationCompactionCommit("s", "c", 0, 0, "sum", List.of("e1"), List.of(e));
+        var c =
+                new ConversationCompactionCommit(
+                        "s",
+                        new ConversationSummary("c", "sum", 0, 0, 1, Instant.EPOCH),
+                        List.of(),
+                        List.of());
         r.compact(c);
         r.compact(c);
+        assertEquals("sum", r.load(new ConversationQuery("s")).summary().orElseThrow().content());
+    }
+
+    /** 窗口按摘要范围替换原始消息且不预截断尾部 */
+    @Test
+    void assemblesSummaryMessageAndMessagesOutsideCoveredRange() {
+        var repository = new InMemoryConversationRepository();
+        AgentMessageEntry first = entry("e1", 0);
+        AgentMessageEntry second = entry("e2", 1);
+        AgentMessageEntry retained = entry("e3", 2);
+        repository.append(List.of(first, second, retained));
+        repository.compact(
+                new ConversationCompactionCommit(
+                        "s",
+                        new ConversationSummary("c", "累计摘要", 0, 1, 1, Instant.EPOCH),
+                        List.of("e3"),
+                        List.of(retained)));
+
+        ConversationWindow window =
+                DefaultConversationServices.window(repository)
+                        .prepare(new ConversationWindowRequest(new ConversationQuery("s")));
+
+        assertEquals(
+                List.of(MessageType.SUMMARY, MessageType.TEXT),
+                window.messages().stream().map(AgentMessageEntry::messageType).toList());
+        assertEquals(
+                List.of("累计摘要", retained.content()),
+                window.messages().stream().map(AgentMessageEntry::content).toList());
+        assertEquals(3, repository.load(new ConversationQuery("s")).messages().size());
+    }
+
+    /** 默认策略对消息数及两个可选容量阈值执行OR判断 */
+    @Test
+    void evaluatesConfiguredCompactionThresholdsIndependently() {
+        var policy = DefaultConversationServices.policy();
+        var trigger = new ConversationCompactionTrigger("s", 1, 1, "MODEL_CALL");
+        assertTrue(policy.shouldCompact(check(1, 10, 10L, null, 10, 100, trigger)));
+        assertTrue(policy.shouldCompact(check(1, 10, null, 100L, 10, 100, trigger)));
+        assertFalse(policy.shouldCompact(check(1, 10, null, null, 10, 100, trigger)));
+        assertTrue(policy.shouldCompact(check(2, 1, null, null, 2, 100, trigger)));
+    }
+
+    private ConversationCompactionCheck check(
+            int messageCount,
+            int messageThreshold,
+            Long tokenThreshold,
+            Long characterHardLimit,
+            long totalTokens,
+            long totalCharacters,
+            ConversationCompactionTrigger trigger) {
+        return new ConversationCompactionCheck(
+                java.util.stream.IntStream.range(0, messageCount)
+                        .mapToObj(index -> entry("check-" + index, index))
+                        .toList(),
+                totalTokens,
+                totalCharacters,
+                0,
+                0,
+                0,
+                0,
+                totalTokens,
+                totalCharacters,
+                messageThreshold,
+                tokenThreshold,
+                characterHardLimit,
+                0,
+                trigger);
     }
 
     /** 取消前后注册命令均精确一次 */

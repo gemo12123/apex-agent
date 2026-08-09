@@ -36,8 +36,6 @@ public record AgentPorts(
         CancellationToken cancellationToken,
         IdGenerator idGenerator,
         TimeProvider timeProvider,
-        int maxIterations,
-        long modelRequestHardLimit,
         String finalIterationInstruction) {
     public AgentPorts {
         Objects.requireNonNull(definitionProvider, "definitionProvider");
@@ -56,12 +54,6 @@ public record AgentPorts(
         Objects.requireNonNull(cancellationToken, "cancellationToken");
         Objects.requireNonNull(idGenerator, "idGenerator");
         Objects.requireNonNull(timeProvider, "timeProvider");
-        if (maxIterations < 1) {
-            throw new IllegalArgumentException("maxIterations 必须大于 0");
-        }
-        if (modelRequestHardLimit < 1) {
-            throw new IllegalArgumentException("modelRequestHardLimit 必须大于 0");
-        }
         if (finalIterationInstruction == null || finalIterationInstruction.isBlank()) {
             throw new IllegalArgumentException("finalIterationInstruction 不能为空");
         }

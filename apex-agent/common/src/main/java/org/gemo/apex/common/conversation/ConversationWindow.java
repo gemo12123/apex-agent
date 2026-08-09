@@ -7,7 +7,11 @@ import java.util.List;
 import org.gemo.apex.common.message.AgentMessageEntry;
 
 public record ConversationWindow(
-        String sessionId, List<AgentMessageEntry> messages, Long firstSortNo, Long lastSortNo) {
+        String sessionId,
+        ConversationSummary summary,
+        List<AgentMessageEntry> messages,
+        Long firstSortNo,
+        Long lastSortNo) {
     public ConversationWindow {
         sessionId = required(sessionId, "sessionId");
         messages = immutableList(messages, "messages");
@@ -35,5 +39,10 @@ public record ConversationWindow(
                 }
             }
         }
+    }
+
+    public ConversationWindow(
+            String sessionId, List<AgentMessageEntry> messages, Long firstSortNo, Long lastSortNo) {
+        this(sessionId, null, messages, firstSortNo, lastSortNo);
     }
 }

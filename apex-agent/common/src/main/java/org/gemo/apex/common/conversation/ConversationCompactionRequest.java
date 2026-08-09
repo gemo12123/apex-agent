@@ -14,6 +14,7 @@ public record ConversationCompactionRequest(
         String compactionId,
         List<AgentMessageEntry> sourceMessages,
         List<AgentMessageEntry> retainedMessages,
+        ConversationSummary previousSummary,
         Map<String, Object> metadata) {
     public ConversationCompactionRequest {
         sessionId = required(sessionId, "sessionId");
@@ -46,9 +47,13 @@ public record ConversationCompactionRequest(
             sourcePreviousSortNo = message.sortNo();
         }
         long previousSortNo = -1;
+        int sourceIndex = source.size() - retained.size();
         for (AgentMessageEntry message : retained) {
             if (!sourceIds.contains(message.entryId())) {
                 throw new IllegalArgumentException("retainedMessages 必须是 sourceMessages 的子集");
+            }
+            if (!source.get(sourceIndex++).entryId().equals(message.entryId())) {
+                throw new IllegalArgumentException("retainedMessages 必须是 sourceMessages 的连续尾部");
             }
             if (message.sortNo() <= previousSortNo) {
                 throw new IllegalArgumentException("retainedMessages 必须按 sortNo 严格递增");

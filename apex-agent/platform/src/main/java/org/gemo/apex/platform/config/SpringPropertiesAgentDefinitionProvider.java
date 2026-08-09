@@ -85,7 +85,10 @@ public final class SpringPropertiesAgentDefinitionProvider implements AgentDefin
                 new AgentMetadata(key, source.getName(), source.getDescription()),
                 new PromptDefinition(systemPrompt, source.getPrompt().getMaxIterations()),
                 new MessageCompressionDefinition(
-                        compression.isEnabled(), compression.getMaxMessages()),
+                        compression.isEnabled(),
+                        compression.getMaxMessages(),
+                        compression.getTokenThreshold(),
+                        compression.getCharacterHardLimit()),
                 new ToolSetDefinition(tools.getAvailable(), tools.getDefaultEnabled()),
                 source.getSkills(),
                 subAgents,

@@ -13,8 +13,7 @@ import java.util.Set;
 import org.gemo.apex.common.agent.AgentDefinition;
 import org.gemo.apex.common.agent.AgentDefinitionRecoverySnapshot;
 import org.gemo.apex.common.agent.AgentMetadata;
-import org.gemo.apex.common.conversation.ConversationCompactionCommit;
-import org.gemo.apex.common.conversation.ConversationQuery;
+import org.gemo.apex.common.conversation.*;
 import org.gemo.apex.common.hook.HookTypeDescriptor;
 import org.gemo.apex.common.hook.context.HookContextView;
 import org.gemo.apex.common.hook.result.LifecycleHookResult;
@@ -153,13 +152,16 @@ class ExtensionApiCompileTest {
                         Instant.EPOCH);
         ConversationCompactionCommit commit =
                 new ConversationCompactionCommit(
-                        "session", "compaction-1", 1, 1, "摘要", List.of("entry-1"), List.of(entry));
+                        "session",
+                        new ConversationSummary("compaction-1", "摘要", 0, 0, 1, Instant.EPOCH),
+                        List.of("entry-1"),
+                        List.of(entry));
 
         repository.append(List.of(entry));
         repository.compact(commit);
 
         assertEquals("entry-1", repository.entries.getFirst().entryId());
-        assertEquals("compaction-1", repository.commit.compactionId());
+        assertEquals("compaction-1", repository.commit.summary().compactionId());
     }
 
     private static final class FakeDefinitionProvider implements AgentDefinitionProvider {
@@ -217,8 +219,8 @@ class ExtensionApiCompileTest {
         public void append(List<AgentMessageEntry> entries) {}
 
         @Override
-        public List<AgentMessageEntry> load(ConversationQuery query) {
-            return List.of();
+        public ConversationHistory load(ConversationQuery query) {
+            return new ConversationHistory(query.sessionId(), Optional.empty(), List.of());
         }
 
         @Override
@@ -235,8 +237,8 @@ class ExtensionApiCompileTest {
         }
 
         @Override
-        public List<AgentMessageEntry> load(ConversationQuery query) {
-            return List.of();
+        public ConversationHistory load(ConversationQuery query) {
+            return new ConversationHistory(query.sessionId(), Optional.empty(), List.of());
         }
 
         @Override

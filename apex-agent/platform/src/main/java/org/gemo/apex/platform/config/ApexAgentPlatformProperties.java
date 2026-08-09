@@ -135,6 +135,8 @@ public class ApexAgentPlatformProperties {
     public static class MessageCompression {
         private boolean enabled = true;
         private int maxMessages = 20;
+        private Long tokenThreshold;
+        private Long characterHardLimit;
 
         public boolean isEnabled() {
             return enabled;
@@ -150,6 +152,22 @@ public class ApexAgentPlatformProperties {
 
         public void setMaxMessages(int maxMessages) {
             this.maxMessages = maxMessages;
+        }
+
+        public Long getTokenThreshold() {
+            return tokenThreshold;
+        }
+
+        public void setTokenThreshold(Long tokenThreshold) {
+            this.tokenThreshold = tokenThreshold;
+        }
+
+        public Long getCharacterHardLimit() {
+            return characterHardLimit;
+        }
+
+        public void setCharacterHardLimit(Long characterHardLimit) {
+            this.characterHardLimit = characterHardLimit;
         }
     }
 

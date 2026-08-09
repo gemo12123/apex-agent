@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 
 class ConversationContractTest {
     private interface ConversationRepositorySignature {
-        List<AgentMessageEntry> load(ConversationQuery query);
+        ConversationHistory load(ConversationQuery query);
     }
 
     private interface ConversationWindowManagerSignature {
@@ -25,16 +25,19 @@ class ConversationContractTest {
     /** 下游冻结接口签名应能只使用common类型编译 */
     @Test
     void allowsFrozenDownstreamInterfaceSignaturesToCompileUsingOnlyCommonTypes() {
-        ConversationRepositorySignature repository = query -> messages();
+        ConversationRepositorySignature repository =
+                query ->
+                        new ConversationHistory(
+                                query.sessionId(), java.util.Optional.empty(), messages());
         ConversationWindowManagerSignature manager =
                 request -> {
-                    List<AgentMessageEntry> loaded = repository.load(request.query());
-                    return new ConversationWindow(request.query().sessionId(), loaded, 0L, 1L);
+                    ConversationHistory loaded = repository.load(request.query());
+                    return new ConversationWindow(
+                            request.query().sessionId(), loaded.messages(), 0L, 1L);
                 };
 
         ConversationWindow window =
-                manager.prepare(
-                        new ConversationWindowRequest(new ConversationQuery("session-1"), 100, 10));
+                manager.prepare(new ConversationWindowRequest(new ConversationQuery("session-1")));
 
         assertEquals(2, window.messages().size());
     }
@@ -43,15 +46,13 @@ class ConversationContractTest {
     @Test
     void definesExplicitBoundariesForQueriesAndWindowRequests() {
         ConversationQuery query = new ConversationQuery("session-1");
-        ConversationWindowRequest request = new ConversationWindowRequest(query, 100, 10);
+        ConversationWindowRequest request = new ConversationWindowRequest(query);
         List<AgentMessageEntry> messages = messages();
 
         ConversationWindow window = new ConversationWindow("session-1", messages, 0L, 1L);
 
         assertEquals(query, request.query());
         assertEquals(messages, window.messages());
-        assertThrows(
-                IllegalArgumentException.class, () -> new ConversationWindowRequest(query, 10, 11));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new ConversationWindow("session-1", messages, 1L, 0L));
@@ -66,21 +67,47 @@ class ConversationContractTest {
 
         ConversationCompactionCheck check =
                 new ConversationCompactionCheck(
-                        mutableMessages, 20, 80, 10, 40, 5, 20, 35, 140, 32, 128, 1, trigger);
+                        mutableMessages,
+                        20,
+                        80,
+                        10,
+                        40,
+                        5,
+                        20,
+                        35,
+                        140,
+                        100,
+                        32L,
+                        128L,
+                        1,
+                        trigger);
         mutableMessages.clear();
 
         assertEquals(2, check.messages().size());
         assertEquals(35, check.totalTokenEstimate());
         assertEquals(140, check.totalCharacterEstimate());
         assertEquals(32, check.tokenThreshold());
-        assertEquals(128, check.characterThreshold());
+        assertEquals(128, check.characterHardLimit());
         assertEquals(1, check.retainMessageCount());
         assertEquals(trigger, check.triggerContext());
         assertThrows(
                 IllegalArgumentException.class,
                 () ->
                         new ConversationCompactionCheck(
-                                messages(), 20, 80, 10, 40, 5, 20, 34, 140, 32, 128, 1, trigger));
+                                messages(),
+                                20,
+                                80,
+                                10,
+                                40,
+                                5,
+                                20,
+                                34,
+                                140,
+                                100,
+                                32L,
+                                128L,
+                                1,
+                                trigger));
     }
 
     /** 请求结果和提交应保持保留消息及metadata并可往返 */
@@ -95,6 +122,7 @@ class ConversationContractTest {
                         "compaction-1",
                         source,
                         List.of(source.getLast()),
+                        null,
                         nestedMetadata);
         ConversationCompactionResult result =
                 new ConversationCompactionResult(
@@ -105,12 +133,10 @@ class ConversationContractTest {
         ConversationCompactionCommit commit =
                 new ConversationCompactionCommit(
                         "session-1",
-                        "compaction-1",
-                        0,
-                        1,
-                        result.summary(),
+                        new ConversationSummary(
+                                "compaction-1", "summary", 0, 0, 1, CommonFixtures.NOW),
                         List.of(source.getLast().entryId()),
-                        source);
+                        List.of(source.getLast()));
 
         ConversationCompactionRequest requestCopy =
                 JsonUtils.deepCopy(request, ConversationCompactionRequest.class);
@@ -146,18 +172,21 @@ class ConversationContractTest {
                 IllegalArgumentException.class,
                 () ->
                         new ConversationCompactionRequest(
-                                "session-1", "compaction-1", source, List.of(foreign), Map.of()));
+                                "session-1",
+                                "compaction-1",
+                                source,
+                                List.of(foreign),
+                                null,
+                                Map.of()));
         assertThrows(
                 IllegalArgumentException.class,
                 () ->
                         new ConversationCompactionCommit(
                                 "session-1",
-                                "compaction-1",
-                                0,
-                                1,
-                                "summary",
+                                new ConversationSummary(
+                                        "compaction-1", "summary", 0, 0, 1, CommonFixtures.NOW),
                                 List.of("missing"),
-                                source));
+                                List.of(source.getLast())));
     }
 
     private static List<AgentMessageEntry> messages() {

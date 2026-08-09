@@ -86,10 +86,9 @@ public final class ApexAgent {
                     return finalizeTurn(end.reason(), true, false);
                 }
             }
+            int maxIterations = context.definition().definition().prompt().maxIterations();
             // 一次 Iteration 只对应一次模型调用及其返回的全部工具调用。
-            for (int iterationNo = firstIteration;
-                    iterationNo <= context.ports().maxIterations();
-                    iterationNo++) {
+            for (int iterationNo = firstIteration; iterationNo <= maxIterations; iterationNo++) {
                 context.ports().cancellationToken().throwIfCancellationRequested();
                 context.startIteration(iterationNo);
                 context.save();
@@ -107,7 +106,7 @@ public final class ApexAgent {
                     return finalizeTurn(end.reason(), true, true);
                 }
                 ModelRequestPreparer.PreparationOutcome prepared =
-                        preparer.prepare(context, iterationNo == context.ports().maxIterations());
+                        preparer.prepare(context, iterationNo == maxIterations);
                 if (prepared instanceof ModelRequestPreparer.PreparationOutcome.EndTurn end) {
                     return finalizeTurn(end.reason(), true, true);
                 }
@@ -123,7 +122,7 @@ public final class ApexAgent {
                     return finalizeTurn("normal", false, true);
                 }
                 var calls = ((ModelStepExecutor.ModelStepOutcome.ToolCalls) model).calls();
-                if (iterationNo == context.ports().maxIterations()) {
+                if (iterationNo == maxIterations) {
                     tools.forceEnd(context, calls);
                     return finalizeTurn("max-iterations", true, true);
                 }

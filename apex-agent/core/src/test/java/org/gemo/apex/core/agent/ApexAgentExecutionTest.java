@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.gemo.apex.common.agent.*;
 import org.gemo.apex.common.execution.AgentRequest;
 import org.gemo.apex.common.execution.IterationStatus;
 import org.gemo.apex.common.execution.SessionStatus;
@@ -159,6 +160,67 @@ class ApexAgentExecutionTest {
         assertTrue(compact >= 0 && compact < model);
         assertEquals(1, fixture.calls.stream().filter("compact.check"::equals).count());
         assertEquals(1, fixture.calls.stream().filter("compact.execute"::equals).count());
+        assertEquals(
+                MessageType.SUMMARY,
+                fixture.modelRequests.getFirst().messages().getFirst().messageType());
+        assertEquals("摘要", fixture.modelRequests.getFirst().messages().getFirst().content());
+        assertFalse(fixture.modelRequests.getFirst().systemPrompt().contains("摘要"));
+    }
+
+    /** 关闭压缩时跳过策略Hook执行和持久化 */
+    @Test
+    void skipsAllCompactionBehaviorWhenDisabled() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        AgentDefinition source = fixture.definition;
+        fixture.definition =
+                new AgentDefinition(
+                        source.schemaVersion(),
+                        source.metadata(),
+                        source.prompt(),
+                        new MessageCompressionDefinition(false, 1, 1L, 1L),
+                        source.tools(),
+                        source.enabledSkills(),
+                        source.subAgents(),
+                        source.hooks());
+        fixture.compact = true;
+        fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
+
+        create(fixture).run();
+
+        assertFalse(fixture.calls.contains("compact.check"));
+        assertFalse(fixture.calls.contains("compact.execute"));
+        assertFalse(fixture.calls.contains("conversation.compact"));
+    }
+
+    /** ReAct边界使用Agent定义中的最大轮次 */
+    @Test
+    void usesMaxIterationsFromFinalAgentDefinition() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        fixture.tool(
+                "tool",
+                (call, context, observer) ->
+                        new ToolResult(call.toolCallId(), call.name(), "不应执行", Map.of()));
+        AgentDefinition source = fixture.definition(Map.of(), Set.of("tool"), Set.of("tool"));
+        fixture.definition =
+                new AgentDefinition(
+                        source.schemaVersion(),
+                        source.metadata(),
+                        new PromptDefinition(source.prompt().systemPrompt(), 1),
+                        source.messageCompression(),
+                        source.tools(),
+                        source.enabledSkills(),
+                        source.subAgents(),
+                        source.hooks());
+        fixture.modelResponses.add(
+                new ModelResponse(
+                        "", List.of(new ToolCall("c1", "tool", 0, Map.of(), Map.of())), Map.of()));
+
+        AgentRunOutcome outcome = create(fixture).run();
+
+        assertInstanceOf(AgentRunOutcome.EndedByHook.class, outcome);
+        assertEquals(1, fixture.modelCalls);
+        assertEquals(0, fixture.toolCalls);
+        assertTrue(fixture.modelRequests.getFirst().systemPrompt().contains("直接输出最终结论"));
     }
 
     /** 模型失败后三层失败且不执行结束生命周期 */

@@ -10,19 +10,12 @@ import org.gemo.apex.common.message.AgentMessageEntry;
 
 public record ConversationCompactionCommit(
         String sessionId,
-        String compactionId,
-        long sourceStartSortNo,
-        long sourceEndSortNo,
-        String summary,
+        ConversationSummary summary,
         List<String> retainedEntryIds,
         List<AgentMessageEntry> finalMessages) {
     public ConversationCompactionCommit {
         sessionId = required(sessionId, "sessionId");
-        compactionId = required(compactionId, "compactionId");
-        if (sourceStartSortNo < 0 || sourceEndSortNo < sourceStartSortNo) {
-            throw new IllegalArgumentException("压缩来源边界非法");
-        }
-        summary = required(summary, "summary");
+        summary = org.gemo.apex.common.support.DomainValues.nonNull(summary, "summary");
         retainedEntryIds = immutableList(retainedEntryIds, "retainedEntryIds");
         if (new HashSet<>(retainedEntryIds).size() != retainedEntryIds.size()) {
             throw new IllegalArgumentException("retainedEntryIds 不能重复");
@@ -33,6 +26,9 @@ public record ConversationCompactionCommit(
         for (AgentMessageEntry message : finalMessages) {
             if (!sessionId.equals(message.sessionId())) {
                 throw new IllegalArgumentException("finalMessages 必须属于 sessionId");
+            }
+            if (message.sortNo() <= summary.sourceEndSortNo()) {
+                throw new IllegalArgumentException("finalMessages 必须位于摘要覆盖范围之后");
             }
             if (!finalIds.add(message.entryId())) {
                 throw new IllegalArgumentException("finalMessages.entryId 不能重复");

@@ -7,14 +7,18 @@ import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.common.hook.context.PostMessageCompressionContext;
 import org.gemo.apex.common.hook.context.PreMessageCompressionContext;
 import org.gemo.apex.common.message.AgentMessageEntry;
+import org.gemo.apex.common.message.MessageRole;
+import org.gemo.apex.common.message.MessageType;
 import org.gemo.apex.common.model.ModelRequest;
 import org.gemo.apex.common.tool.ToolDefinition;
 import org.gemo.apex.core.agent.ApexAgentContext;
 import org.gemo.apex.core.lifecycle.LifecycleDispatchOutcome;
 import org.gemo.apex.core.lifecycle.LifecycleDispatcher;
+import org.gemo.apex.core.model.ModelRequestSizeEstimator;
 
 public final class ModelRequestPreparer {
     private final LifecycleDispatcher dispatcher;
+    private final ModelRequestSizeEstimator sizeEstimator = new ModelRequestSizeEstimator();
 
     public ModelRequestPreparer(LifecycleDispatcher dispatcher) {
         this.dispatcher = dispatcher;
@@ -22,16 +26,14 @@ public final class ModelRequestPreparer {
 
     public PreparationOutcome prepare(ApexAgentContext context, boolean finalIteration) {
         context.ports().cancellationToken().throwIfCancellationRequested();
-        int maxMessages = context.definition().definition().messageCompression().maxMessages();
-        int retainCount = Math.min(maxMessages / 2, maxMessages);
+        var compression = context.definition().definition().messageCompression();
+        int maxMessages = compression.maxMessages();
         ConversationWindow window =
                 context.ports()
                         .windowManager()
                         .prepare(
                                 new ConversationWindowRequest(
-                                        new ConversationQuery(context.snapshot().sessionId()),
-                                        maxMessages,
-                                        retainCount));
+                                        new ConversationQuery(context.snapshot().sessionId())));
         List<ToolDefinition> tools =
                 context.toolCatalog().ordered().stream()
                         .filter(
@@ -48,38 +50,32 @@ public final class ModelRequestPreparer {
                                 : "");
         ModelRequest base = new ModelRequest(systemPrompt, window.messages(), tools, Map.of());
         context.modelRequest(base);
-        long messageChars =
+        if (!compression.enabled()) {
+            return new PreparationOutcome.Prepared(base);
+        }
+        List<AgentMessageEntry> activeMessages =
                 window.messages().stream()
-                        .mapToLong(
-                                message ->
-                                        (message.content() == null ? 0 : message.content().length())
-                                                + message.payload().toString().length())
-                        .sum();
-        long systemChars = systemPrompt.length();
-        long toolChars =
-                tools.stream()
-                        .mapToLong(
-                                tool ->
-                                        tool.description().length()
-                                                + tool.inputSchemaJson().length())
-                        .sum();
-        int actualRetainCount = Math.min(retainCount, window.messages().size());
-        long messageTokens = estimateTokens(messageChars);
-        long systemTokens = estimateTokens(systemChars);
-        long toolTokens = estimateTokens(toolChars);
+                        .filter(message -> message.messageType() != MessageType.SUMMARY)
+                        .toList();
+        if (activeMessages.isEmpty()) {
+            return new PreparationOutcome.Prepared(base);
+        }
+        int actualRetainCount = Math.min(maxMessages / 2, Math.max(0, activeMessages.size() - 1));
+        ModelRequestSizeEstimator.Size size = sizeEstimator.estimate(base);
         ConversationCompactionCheck check =
                 new ConversationCompactionCheck(
-                        window.messages(),
-                        messageTokens,
-                        messageChars,
-                        systemTokens,
-                        systemChars,
-                        toolTokens,
-                        toolChars,
-                        messageTokens + systemTokens + toolTokens,
-                        messageChars + systemChars + toolChars,
-                        context.ports().modelRequestHardLimit(),
-                        context.ports().modelRequestHardLimit() * 4,
+                        activeMessages,
+                        size.messageTokens(),
+                        size.messageCharacters(),
+                        size.systemTokens(),
+                        size.systemCharacters(),
+                        size.toolTokens(),
+                        size.toolCharacters(),
+                        size.totalTokens(),
+                        size.totalCharacters(),
+                        maxMessages,
+                        compression.tokenThreshold(),
+                        compression.characterHardLimit(),
                         actualRetainCount,
                         new ConversationCompactionTrigger(
                                 context.snapshot().sessionId(),
@@ -89,21 +85,17 @@ public final class ModelRequestPreparer {
         if (!context.ports().compactionPolicy().shouldCompact(check)) {
             return new PreparationOutcome.Prepared(base);
         }
-        if (window.messages().isEmpty()) {
-            throw new IllegalStateException("压缩策略不能对空窗口返回 true");
-        }
         String compactionId = context.ports().idGenerator().newCompactionId();
         List<AgentMessageEntry> retained =
-                window.messages()
-                        .subList(
-                                Math.max(0, window.messages().size() - actualRetainCount),
-                                window.messages().size());
+                activeMessages.subList(
+                        activeMessages.size() - actualRetainCount, activeMessages.size());
         context.compactionRequest(
                 new ConversationCompactionRequest(
                         context.snapshot().sessionId(),
                         compactionId,
-                        window.messages(),
+                        activeMessages,
                         retained,
+                        window.summary(),
                         Map.of()));
         LifecycleDispatchOutcome pre =
                 dispatcher.dispatch(
@@ -130,27 +122,28 @@ public final class ModelRequestPreparer {
                                 new PostMessageCompressionContext(
                                         current.snapshot().sessionId(),
                                         binding,
-                                        window.messages(),
+                                        current.compactionRequest().sourceMessages(),
                                         current.compactionResult()),
                         Set.of());
-        commit(context, window, context.compactionResult());
+        ConversationSummary summary = buildSummary(context, context.compactionResult());
+        commit(context, context.compactionResult(), summary);
         if (post instanceof LifecycleDispatchOutcome.EndTurn end) {
             return new PreparationOutcome.EndTurn(end.reason());
         }
+        List<AgentMessageEntry> compactedMessages = new ArrayList<>();
+        compactedMessages.add(summaryMessage(context.snapshot().sessionId(), summary));
+        compactedMessages.addAll(context.compactionResult().retainedMessages());
+        compactedMessages.sort(Comparator.comparingLong(AgentMessageEntry::sortNo));
         ModelRequest compacted =
-                new ModelRequest(
-                        systemPrompt,
-                        context.compactionResult().retainedMessages(),
-                        tools,
-                        base.options());
+                new ModelRequest(systemPrompt, compactedMessages, tools, base.options());
         context.modelRequest(compacted);
         return new PreparationOutcome.Prepared(compacted);
     }
 
     private void commit(
             ApexAgentContext context,
-            ConversationWindow window,
-            ConversationCompactionResult result) {
+            ConversationCompactionResult result,
+            ConversationSummary summary) {
         List<String> ids =
                 result.retainedMessages().stream().map(AgentMessageEntry::entryId).toList();
         context.ports()
@@ -158,17 +151,48 @@ public final class ModelRequestPreparer {
                 .compact(
                         new ConversationCompactionCommit(
                                 context.snapshot().sessionId(),
-                                result.compactionId(),
-                                window.firstSortNo(),
-                                window.lastSortNo(),
-                                result.summary(),
+                                summary,
                                 ids,
                                 result.retainedMessages()));
         context.save();
     }
 
-    private long estimateTokens(long characters) {
-        return (characters + 3) / 4;
+    private ConversationSummary buildSummary(
+            ApexAgentContext context, ConversationCompactionResult result) {
+        Set<String> retainedIds =
+                result.retainedMessages().stream()
+                        .map(AgentMessageEntry::entryId)
+                        .collect(java.util.stream.Collectors.toSet());
+        List<AgentMessageEntry> discarded =
+                context.compactionRequest().sourceMessages().stream()
+                        .filter(message -> !retainedIds.contains(message.entryId()))
+                        .toList();
+        if (discarded.isEmpty()) {
+            throw new IllegalStateException("压缩结果必须至少淘汰一条消息");
+        }
+        ConversationSummary previous = context.compactionRequest().previousSummary();
+        return new ConversationSummary(
+                result.compactionId(),
+                result.summary(),
+                previous == null ? discarded.getFirst().sortNo() : previous.sourceStartSortNo(),
+                discarded.getLast().sortNo(),
+                discarded.getLast().turnNo(),
+                context.ports().timeProvider().now());
+    }
+
+    private AgentMessageEntry summaryMessage(String sessionId, ConversationSummary summary) {
+        return new AgentMessageEntry(
+                "summary:" + summary.compactionId(),
+                sessionId,
+                summary.sourceTurnNo(),
+                summary.sourceEndSortNo(),
+                MessageRole.SYSTEM,
+                MessageType.SUMMARY,
+                summary.content(),
+                Map.of(
+                        "sourceStartSortNo", summary.sourceStartSortNo(),
+                        "sourceEndSortNo", summary.sourceEndSortNo()),
+                summary.updatedTime());
     }
 
     public sealed interface PreparationOutcome {

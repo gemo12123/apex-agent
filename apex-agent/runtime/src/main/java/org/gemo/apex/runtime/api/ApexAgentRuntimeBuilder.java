@@ -45,7 +45,6 @@ public final class ApexAgentRuntimeBuilder {
     private final List<SkillDefinition> skills = new ArrayList<>();
     private final List<AutoCloseable> owned = new ArrayList<>();
     private int max = 30;
-    private long hard = 1_000_000;
 
     public ApexAgentRuntimeBuilder modelGateway(ModelGateway v) {
         model = v;
@@ -134,11 +133,6 @@ public final class ApexAgentRuntimeBuilder {
         return this;
     }
 
-    public ApexAgentRuntimeBuilder modelRequestHardLimit(long v) {
-        hard = v;
-        return this;
-    }
-
     public ApexAgentRuntime build() {
         List<ToolCallback> callbackSnapshot = new ArrayList<>(toolCallbacks);
         for (ToolCallbackProvider callbackProvider : toolCallbackProviders) {
@@ -216,8 +210,6 @@ public final class ApexAgentRuntimeBuilder {
                         return n();
                     }
                 };
-        int mi = max;
-        long hl = hard;
         ApexAgentRuntime.Ports ports =
                 (p, c) ->
                         new AgentPorts(
@@ -237,8 +229,6 @@ public final class ApexAgentRuntimeBuilder {
                                 c.token(),
                                 ids,
                                 Instant::now,
-                                mi,
-                                hl,
                                 "请直接给出最终答案，不再调用工具。");
         return new ApexAgentRuntime(ports, co, pf, active, new RuntimeResources(owned));
     }

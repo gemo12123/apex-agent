@@ -40,6 +40,8 @@ final class CoreTestFixture {
     final TestCancellationToken token = new TestCancellationToken();
     final AtomicInteger ids = new AtomicInteger();
     AgentDefinition definition;
+    ConversationSummary summary;
+    ConversationCompactionCommit compactionCommit;
     boolean compact;
     ToolAvailabilitySnapshot availability = new ToolAvailabilitySnapshot(Set.of(), List.of());
     int providerLoads;
@@ -71,7 +73,7 @@ final class CoreTestFixture {
         return new AgentDefinition(
                 DefinitionSchemaVersion.V1,
                 new AgentMetadata("demo", "Demo", "测试 Agent"),
-                new PromptDefinition("你是测试助手", 30),
+                new PromptDefinition("你是测试助手", 3),
                 new MessageCompressionDefinition(true, 20),
                 new ToolSetDefinition(available, defaults),
                 enabledSkills,
@@ -167,32 +169,56 @@ final class CoreTestFixture {
                     }
 
                     @Override
-                    public List<AgentMessageEntry> load(ConversationQuery query) {
-                        return conversation.stream()
-                                .filter(item -> item.sessionId().equals(query.sessionId()))
-                                .sorted(Comparator.comparingLong(AgentMessageEntry::sortNo))
-                                .toList();
+                    public ConversationHistory load(ConversationQuery query) {
+                        return new ConversationHistory(
+                                query.sessionId(),
+                                Optional.ofNullable(summary),
+                                conversation.stream()
+                                        .filter(item -> item.sessionId().equals(query.sessionId()))
+                                        .sorted(Comparator.comparingLong(AgentMessageEntry::sortNo))
+                                        .toList());
                     }
 
                     @Override
                     public void compact(ConversationCompactionCommit commit) {
                         calls.add("conversation.compact");
+                        compactionCommit = commit;
+                        summary = commit.summary();
                     }
                 },
                 request -> {
                     List<AgentMessageEntry> messages =
-                            conversation.stream()
-                                    .filter(
-                                            item ->
-                                                    item.sessionId()
-                                                            .equals(request.query().sessionId()))
-                                    .sorted(Comparator.comparingLong(AgentMessageEntry::sortNo))
-                                    .toList();
+                            new ArrayList<>(
+                                    conversation.stream()
+                                            .filter(
+                                                    item ->
+                                                            item.sessionId()
+                                                                    .equals(
+                                                                            request.query()
+                                                                                    .sessionId()))
+                                            .filter(
+                                                    item ->
+                                                            summary == null
+                                                                    || item.sortNo()
+                                                                            < summary
+                                                                                    .sourceStartSortNo()
+                                                                    || item.sortNo()
+                                                                            > summary
+                                                                                    .sourceEndSortNo())
+                                            .sorted(
+                                                    Comparator.comparingLong(
+                                                            AgentMessageEntry::sortNo))
+                                            .toList());
+                    if (summary != null) {
+                        messages.add(summaryMessage(request.query().sessionId(), summary));
+                        messages.sort(Comparator.comparingLong(AgentMessageEntry::sortNo));
+                    }
                     return messages.isEmpty()
                             ? new ConversationWindow(
                                     request.query().sessionId(), List.of(), null, null)
                             : new ConversationWindow(
                                     request.query().sessionId(),
+                                    summary,
                                     messages,
                                     messages.getFirst().sortNo(),
                                     messages.getLast().sortNo());
@@ -267,9 +293,22 @@ final class CoreTestFixture {
                     }
                 },
                 () -> Instant.parse("2026-08-01T00:00:00Z"),
-                3,
-                100_000,
                 "直接输出最终结论且不再调用工具");
+    }
+
+    private AgentMessageEntry summaryMessage(String sessionId, ConversationSummary value) {
+        return new AgentMessageEntry(
+                "summary:" + value.compactionId(),
+                sessionId,
+                value.sourceTurnNo(),
+                value.sourceEndSortNo(),
+                org.gemo.apex.common.message.MessageRole.SYSTEM,
+                MessageType.SUMMARY,
+                value.content(),
+                Map.of(
+                        "sourceStartSortNo", value.sourceStartSortNo(),
+                        "sourceEndSortNo", value.sourceEndSortNo()),
+                value.updatedTime());
     }
 
     AgentTool tool(String name, ToolBehavior behavior) {

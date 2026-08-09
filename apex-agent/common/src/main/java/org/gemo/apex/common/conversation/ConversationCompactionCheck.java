@@ -18,8 +18,9 @@ public record ConversationCompactionCheck(
         long toolCharacterEstimate,
         long totalTokenEstimate,
         long totalCharacterEstimate,
-        long tokenThreshold,
-        long characterThreshold,
+        int messageThreshold,
+        Long tokenThreshold,
+        Long characterHardLimit,
         int retainMessageCount,
         ConversationCompactionTrigger triggerContext) {
     public ConversationCompactionCheck {
@@ -55,11 +56,14 @@ public record ConversationCompactionCheck(
             throw new IllegalArgumentException(
                     "totalCharacterEstimate 必须等于 message/system/tool 估算之和");
         }
-        if (tokenThreshold < 1) {
+        if (messageThreshold < 1) {
+            throw new IllegalArgumentException("messageThreshold 必须大于 0");
+        }
+        if (tokenThreshold != null && tokenThreshold < 1) {
             throw new IllegalArgumentException("tokenThreshold 必须大于 0");
         }
-        if (characterThreshold < 1) {
-            throw new IllegalArgumentException("characterThreshold 必须大于 0");
+        if (characterHardLimit != null && characterHardLimit < 1) {
+            throw new IllegalArgumentException("characterHardLimit 必须大于 0");
         }
         if (retainMessageCount < 0 || retainMessageCount > messages.size()) {
             throw new IllegalArgumentException("retainMessageCount 必须位于消息窗口范围内");
