@@ -18,11 +18,15 @@ import org.gemo.apex.runtime.definition.*;
 import org.gemo.apex.runtime.event.*;
 import org.gemo.apex.runtime.execution.*;
 import org.gemo.apex.runtime.model.springai.SpringAiModelGateway;
+import org.gemo.apex.runtime.model.springai.SpringAiToolCallbackAgentTool;
 import org.gemo.apex.runtime.registry.*;
 import org.gemo.apex.runtime.repository.memory.*;
 import org.gemo.apex.runtime.resource.*;
 import org.gemo.apex.runtime.skill.*;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.model.tool.ToolCallingManager;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.ToolCallbackProvider;
 
 public final class ApexAgentRuntimeBuilder {
     private ModelGateway model;
@@ -34,6 +38,9 @@ public final class ApexAgentRuntimeBuilder {
     private AgentEventPublisherFactory publishers;
     private SessionExecutionCoordinator coordinator;
     private final List<AgentTool> tools = new ArrayList<>();
+    private final List<ToolCallback> toolCallbacks = new ArrayList<>();
+    private final List<ToolCallbackProvider> toolCallbackProviders = new ArrayList<>();
+    private ToolCallingManager toolCallingManager;
     private final Map<HookRegistry.Key, LifecycleHook<?, ?>> hooks = new LinkedHashMap<>();
     private final List<SkillDefinition> skills = new ArrayList<>();
     private final List<AutoCloseable> owned = new ArrayList<>();
@@ -85,6 +92,21 @@ public final class ApexAgentRuntimeBuilder {
         return this;
     }
 
+    public ApexAgentRuntimeBuilder toolCallingManager(ToolCallingManager v) {
+        toolCallingManager = v;
+        return this;
+    }
+
+    public ApexAgentRuntimeBuilder registerToolCallback(ToolCallback v) {
+        toolCallbacks.add(v);
+        return this;
+    }
+
+    public ApexAgentRuntimeBuilder registerToolCallbackProvider(ToolCallbackProvider v) {
+        toolCallbackProviders.add(v);
+        return this;
+    }
+
     public ApexAgentRuntimeBuilder registerHook(String n, LifecycleHook<?, ?> v) {
         var k = new HookRegistry.Key(v.descriptor().hookPoint(), n);
         if (hooks.putIfAbsent(k, v) != null) {
@@ -118,6 +140,13 @@ public final class ApexAgentRuntimeBuilder {
     }
 
     public ApexAgentRuntime build() {
+        List<ToolCallback> callbackSnapshot = new ArrayList<>(toolCallbacks);
+        for (ToolCallbackProvider callbackProvider : toolCallbackProviders) {
+            ToolCallback[] provided =
+                    Objects.requireNonNull(
+                            callbackProvider.getToolCallbacks(), "ToolCallbackProvider 返回值不能为空");
+            callbackSnapshot.addAll(List.of(provided));
+        }
         List<String> e = new ArrayList<>();
         if ((model == null) == (chat == null)) {
             e.add("modelGateway/chatModel 必须且只能配置一个");
@@ -128,6 +157,13 @@ public final class ApexAgentRuntimeBuilder {
         if (max < 1) {
             e.add("maxIterations 非法");
         }
+        if (!callbackSnapshot.isEmpty() && toolCallingManager == null) {
+            e.add("注册 ToolCallback 时必须配置唯一 ToolCallingManager");
+        }
+        callbackSnapshot.stream()
+                .filter(callback -> callback.getToolMetadata().returnDirect())
+                .map(callback -> callback.getToolDefinition().name())
+                .forEach(name -> e.add("暂不支持 returnDirect=true 的 ToolCallback: " + name));
         if (!e.isEmpty()) {
             throw new RuntimeConfigurationException(String.join("; ", e));
         }
@@ -140,6 +176,9 @@ public final class ApexAgentRuntimeBuilder {
         var sr = sessions != null ? sessions : new InMemorySessionRepository();
         var cr = conversations != null ? conversations : new InMemoryConversationRepository();
         var ts = new ArrayList<>(tools);
+        callbackSnapshot.stream()
+                .map(callback -> new SpringAiToolCallbackAgentTool(callback, toolCallingManager))
+                .forEach(ts::add);
         ts.add(activationTool());
         var skillsRegistry = new RuntimeSkillRegistry(skills);
         var tr = new ToolRegistry(ts, skillsRegistry);

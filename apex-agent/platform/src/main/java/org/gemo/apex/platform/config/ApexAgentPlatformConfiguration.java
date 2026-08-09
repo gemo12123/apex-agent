@@ -11,6 +11,9 @@ import org.gemo.apex.platform.execution.UserContextTaskDecorator;
 import org.gemo.apex.platform.web.sse.RequestBoundAgentEventPublisherFactory;
 import org.gemo.apex.runtime.api.ApexAgentRuntime;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.model.tool.ToolCallingManager;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -42,7 +45,10 @@ public class ApexAgentPlatformConfiguration {
             RequestBoundAgentEventPublisherFactory publishers,
             ObjectProvider<ModelGateway> gateways,
             ObjectProvider<ChatModel> chatModels,
+            ObjectProvider<ToolCallingManager> toolCallingManagers,
             ObjectProvider<AgentTool> tools,
+            ObjectProvider<ToolCallback> toolCallbacks,
+            ObjectProvider<ToolCallbackProvider> toolCallbackProviders,
             ObjectProvider<PlatformHookRegistration> hooks,
             ObjectProvider<SkillDefinition> skills) {
         var builder =
@@ -61,6 +67,12 @@ public class ApexAgentPlatformConfiguration {
             throw new IllegalStateException("platform 启动需要唯一 ModelGateway 或 ChatModel Bean");
         }
         tools.orderedStream().forEach(builder::registerTool);
+        ToolCallingManager toolCallingManager = toolCallingManagers.getIfUnique();
+        if (toolCallingManager != null) {
+            builder.toolCallingManager(toolCallingManager);
+        }
+        toolCallbacks.orderedStream().forEach(builder::registerToolCallback);
+        toolCallbackProviders.orderedStream().forEach(builder::registerToolCallbackProvider);
         hooks.orderedStream()
                 .forEach(value -> builder.registerHook(value.stableName(), value.hook()));
         skills.orderedStream().forEach(builder::registerSkill);
