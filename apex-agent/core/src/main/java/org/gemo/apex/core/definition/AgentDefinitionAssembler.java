@@ -17,6 +17,7 @@ import org.gemo.apex.core.agent.AgentPorts;
 import org.gemo.apex.core.exception.HookContractException;
 import org.gemo.apex.core.exception.InvalidAgentDefinitionException;
 import org.gemo.apex.core.exception.UnavailableToolBindingException;
+import org.gemo.apex.core.lifecycle.ToolBindingMatcher;
 import org.gemo.apex.core.tool.ToolCatalog;
 import org.gemo.apex.extension.hook.LifecycleHook;
 import org.gemo.apex.extension.tool.AgentTool;
@@ -25,6 +26,7 @@ public final class AgentDefinitionAssembler {
     private static final System.Logger LOG =
             System.getLogger(AgentDefinitionAssembler.class.getName());
     private final AgentDefinitionValidator validator = new AgentDefinitionValidator();
+    private final ToolBindingMatcher toolMatcher = new ToolBindingMatcher();
 
     public AgentAssemblyResult assemble(
             String sessionId,
@@ -187,6 +189,8 @@ public final class AgentDefinitionAssembler {
         }
         Set<String> defaults = new LinkedHashSet<>(candidate.tools().defaultEnabledTools());
         defaults.retainAll(effective);
+        Set<String> removed = new LinkedHashSet<>(candidate.tools().availableTools());
+        removed.removeAll(effective);
         AgentDefinition result =
                 new AgentDefinition(
                         candidate.schemaVersion(),
@@ -196,12 +200,69 @@ public final class AgentDefinitionAssembler {
                         new ToolSetDefinition(effective, defaults),
                         candidate.enabledSkills(),
                         candidate.subAgents(),
-                        candidate.hooks());
+                        retainResolvableBindings(candidate.hooks(), effective, removed));
         List<AgentTool> effectiveTools =
                 catalog.ordered().stream()
                         .filter(tool -> effective.contains(tool.definition().name()))
                         .toList();
         return new Classification(result, new ToolCatalog(effectiveTools), history);
+    }
+
+    private Map<HookPoint, List<HookBinding>> retainResolvableBindings(
+            Map<HookPoint, List<HookBinding>> hooks,
+            Set<String> effectiveTools,
+            Set<String> removedTools) {
+        Map<HookPoint, List<HookBinding>> retained = new EnumMap<>(HookPoint.class);
+        hooks.forEach(
+                (point, bindings) -> {
+                    List<HookBinding> next =
+                            bindings.stream()
+                                    .map(
+                                            binding ->
+                                                    retainResolvablePatterns(
+                                                            binding, effectiveTools, removedTools))
+                                    .filter(Objects::nonNull)
+                                    .toList();
+                    if (!next.isEmpty()) {
+                        retained.put(point, next);
+                    }
+                });
+        return Map.copyOf(retained);
+    }
+
+    private HookBinding retainResolvablePatterns(
+            HookBinding binding, Set<String> effectiveTools, Set<String> removedTools) {
+        if (binding.tools().isEmpty()) {
+            return binding;
+        }
+        List<String> retainedPatterns =
+                binding.tools().stream()
+                        .filter(
+                                pattern ->
+                                        effectiveTools.stream()
+                                                        .anyMatch(
+                                                                tool ->
+                                                                        toolMatcher.matches(
+                                                                                pattern, tool))
+                                                || removedTools.stream()
+                                                        .noneMatch(
+                                                                tool ->
+                                                                        toolMatcher.matches(
+                                                                                pattern, tool)))
+                        .toList();
+        if (retainedPatterns.isEmpty()) {
+            return null;
+        }
+        if (retainedPatterns.equals(binding.tools())) {
+            return binding;
+        }
+        return new HookBinding(
+                binding.id(),
+                binding.name(),
+                binding.order(),
+                binding.enabled(),
+                retainedPatterns,
+                binding.options());
     }
 
     private record Classification(

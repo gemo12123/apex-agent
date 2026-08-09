@@ -25,6 +25,7 @@ public final class SessionSnapshotTextAdapterV1 {
                         snapshot.schemaVersion(),
                         snapshot.historicalToolBindings(),
                         encodeTurn(snapshot),
+                        snapshot.suspendedToolBatch(),
                         snapshot.nextMessageSortNo());
         return new AgentSessionEntity(
                 snapshot.sessionId(),
@@ -36,7 +37,7 @@ public final class SessionSnapshotTextAdapterV1 {
                 JsonUtils.toJson(snapshot.enabledTools()),
                 JsonUtils.toJson(snapshot.activatedSkills()),
                 JsonUtils.toJson(state),
-                JsonUtils.toJson(snapshot.suspendedToolBatch()),
+                null,
                 snapshot.lastActiveTime());
     }
 
@@ -53,7 +54,10 @@ public final class SessionSnapshotTextAdapterV1 {
         AgentDefinitionRecoverySnapshot definition =
                 JsonUtils.fromJson(
                         entity.agentDefinitionSnapshot(), AgentDefinitionRecoverySnapshot.class);
-        SuspendedToolBatch suspended = decodeSuspendedBatch(entity.suspendedToolCall());
+        SuspendedToolBatch suspended = state.suspendedToolBatch();
+        if (suspended == null) {
+            suspended = decodeLegacySuspendedBatch(entity.suspendedToolCall());
+        }
         TurnSnapshot activeTurn = decodeTurn(state.activeTurn(), suspended);
         return new SessionSnapshot(
                 state.schemaVersion(),
@@ -131,7 +135,7 @@ public final class SessionSnapshotTextAdapterV1 {
         return new ModelResponse(null, calls, Map.of());
     }
 
-    private SuspendedToolBatch decodeSuspendedBatch(String json) {
+    private SuspendedToolBatch decodeLegacySuspendedBatch(String json) {
         if (json == null || json.isBlank()) {
             return null;
         }
@@ -146,6 +150,7 @@ public final class SessionSnapshotTextAdapterV1 {
             String schemaVersion,
             List<HistoricalToolBinding> historicalToolBindings,
             PersistedTurn activeTurn,
+            SuspendedToolBatch suspendedToolBatch,
             long nextMessageSortNo) {}
 
     public record PersistedTurn(

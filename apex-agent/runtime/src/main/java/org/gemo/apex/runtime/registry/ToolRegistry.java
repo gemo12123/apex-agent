@@ -35,8 +35,4 @@ public final class ToolRegistry implements ToolProvider {
     public List<AgentTool> loadTools(AgentDefinition d) {
         return get(d.tools().availableTools(), d.enabledSkills());
     }
-
-    public List<AgentTool> loadTools(AgentDefinitionRecoverySnapshot d) {
-        return get(d.availableTools(), d.enabledSkills());
-    }
 }

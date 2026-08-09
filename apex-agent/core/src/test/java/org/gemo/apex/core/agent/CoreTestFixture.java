@@ -99,12 +99,6 @@ final class CoreTestFixture {
                         calls.add("tools.load.new");
                         return List.copyOf(tools.values());
                     }
-
-                    @Override
-                    public List<AgentTool> loadTools(AgentDefinitionRecoverySnapshot ignored) {
-                        calls.add("tools.load.resume");
-                        return List.copyOf(tools.values());
-                    }
                 },
                 () -> availability,
                 (point, name) -> hooks.get(name),

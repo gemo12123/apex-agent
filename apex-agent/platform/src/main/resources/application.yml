@@ -1,6 +1,11 @@
 spring:
+  profiles:
+    active: dev
   application:
     name: apex-agent-platform
+  ai:
+    tools:
+      throw-exception-on-error: true
   datasource:
     url: ${APEX_DB_URL:jdbc:postgresql://localhost:5432/apex_agent}
     username: ${APEX_DB_USER:apex_agent}

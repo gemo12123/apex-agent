@@ -1,9 +1,7 @@
 package org.gemo.apex.core.agent;
 
 import java.util.*;
-import java.util.stream.Collectors;
 import org.gemo.apex.common.agent.*;
-import org.gemo.apex.common.agent.ToolSetDefinition;
 import org.gemo.apex.common.execution.AgentRequest;
 import org.gemo.apex.common.execution.SessionStatus;
 import org.gemo.apex.common.execution.TurnStatus;
@@ -13,21 +11,17 @@ import org.gemo.apex.common.message.MessageRole;
 import org.gemo.apex.common.message.MessageType;
 import org.gemo.apex.common.snapshot.*;
 import org.gemo.apex.core.definition.AgentDefinitionAssembler;
-import org.gemo.apex.core.definition.AgentDefinitionValidator;
-import org.gemo.apex.core.exception.InvalidAgentDefinitionException;
 import org.gemo.apex.core.exception.SessionOwnershipException;
 import org.gemo.apex.core.exception.SessionStateException;
-import org.gemo.apex.core.tool.ToolCatalog;
 
 /**
  * 将请求、定义和持久化快照组装为可运行的 {@link ApexAgent}。
  *
- * <p>新请求建立新的 Turn；恢复请求严格复用快照中的定义和挂起 ToolCall，避免运行时配置变化 改写历史执行语义。
+ * <p>新请求建立新的 Turn；恢复请求按当前模板重新装配 Agent，并复用运行时快照中的挂起 ToolCall。
  */
 public final class ApexAgentFactory {
     private static final System.Logger LOG = System.getLogger(ApexAgentFactory.class.getName());
     private final AgentDefinitionAssembler assembler = new AgentDefinitionAssembler();
-    private final AgentDefinitionValidator validator = new AgentDefinitionValidator();
 
     /** 创建新 Turn，并先后追加用户消息和保存 IN_PROGRESS 会话快照。 */
     public ApexAgent createNew(AgentRequest request, AgentPorts ports) {
@@ -107,46 +101,33 @@ public final class ApexAgentFactory {
                 != snapshot.activeTurn().currentIteration().modelResponse().toolCalls().size()) {
             throw new SessionStateException("挂起 ToolCall 批次无法完整定位");
         }
-        AgentDefinitionRecoverySnapshot recovery = snapshot.activeDefinition();
-        AgentDefinition definition =
-                new AgentDefinition(
-                        recovery.schemaVersion(),
-                        recovery.metadata(),
-                        recovery.prompt(),
-                        recovery.messageCompression(),
-                        new ToolSetDefinition(recovery.availableTools(), snapshot.enabledTools()),
-                        recovery.enabledSkills(),
-                        recovery.subAgents(),
-                        recovery.hooks());
-        ToolCatalog catalog = new ToolCatalog(ports.toolProvider().loadTools(recovery));
-        Set<String> resolved =
-                catalog.ordered().stream()
-                        .map(tool -> tool.definition().name())
-                        .collect(Collectors.toSet());
-        Set<String> missing = new LinkedHashSet<>(recovery.availableTools());
-        missing.removeAll(resolved);
-        var availability = ports.toolAvailabilityProvider().current();
-        boolean onlyKnownUnavailable =
-                missing.stream()
-                        .allMatch(
-                                name ->
-                                        availability.unavailableToolNames().contains(name)
-                                                || availability.unavailableSources().stream()
-                                                        .anyMatch(
-                                                                source ->
-                                                                        name.startsWith(
-                                                                                source
-                                                                                        .stableNamePrefix())));
-        if (!onlyKnownUnavailable) {
-            throw new InvalidAgentDefinitionException("恢复快照中的 Hook/Tool 无法解析");
-        }
-        validator.validateRecoveryBindings(definition, ports);
+        AgentAssemblyResult assembly =
+                assembler.assemble(
+                        command.sessionId(), command.agentKey(), Optional.of(snapshot), ports);
+        Set<String> activated = new LinkedHashSet<>(snapshot.activatedSkills());
+        activated.retainAll(assembly.definition().definition().enabledSkills());
+        SessionSnapshot resumedSnapshot =
+                new SessionSnapshot(
+                        snapshot.schemaVersion(),
+                        snapshot.sessionId(),
+                        snapshot.userId(),
+                        snapshot.agentKey(),
+                        snapshot.status(),
+                        snapshot.currentTurnNo(),
+                        assembly.effectiveEnabledTools(),
+                        activated,
+                        assembly.historicalToolBindings(),
+                        ApexAgentContext.recovery(assembly.definition()),
+                        snapshot.activeTurn(),
+                        suspended,
+                        snapshot.nextMessageSortNo(),
+                        snapshot.lastActiveTime());
         return new ApexAgent(
                 new ApexAgentContext(
                         ports,
-                        new AgentDefinitionSnapshot(definition),
-                        catalog,
-                        snapshot,
+                        assembly.definition(),
+                        assembly.toolCatalog(),
+                        resumedSnapshot,
                         command.response()));
     }
 

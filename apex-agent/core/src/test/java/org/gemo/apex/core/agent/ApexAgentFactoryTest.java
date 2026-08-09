@@ -74,9 +74,9 @@ class ApexAgentFactoryTest {
         assertEquals(1, fixture.providerLoads);
     }
 
-    /** resume只使用恢复快照且不加载定义或执行AgentBuild */
+    /** resume按当前模板重新加载定义并执行AgentBuild，同时保留原挂起批次。 */
     @Test
-    void resumeUsesOnlyRecoverySnapshotWithoutLoadingDefinitionOrExecutingAgentBuild() {
+    void resumeRebuildsCurrentTemplateAndRetainsSuspendedBatch() {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.tool(
                 "ask",
@@ -141,6 +141,33 @@ class ApexAgentFactoryTest {
                         base.lastActiveTime()));
         fixture.providerLoads = 0;
         fixture.calls.clear();
+        fixture.hooks.put(
+                "build",
+                new LifecycleHook<AgentBuildContext, AgentBuildHookResult>() {
+                    @Override
+                    public HookTypeDescriptor descriptor() {
+                        return new HookTypeDescriptor(
+                                HookPoint.AGENT_BUILD,
+                                AgentBuildContext.class,
+                                AgentBuildHookResult.class);
+                    }
+
+                    @Override
+                    public AgentBuildHookResult apply(AgentBuildContext context) {
+                        fixture.calls.add("hook.build");
+                        return new ContinueAgentBuild(
+                                List.of(new ReplacePrompt(new PromptDefinition("恢复模板提示", 5))));
+                    }
+                });
+        fixture.definition =
+                fixture.definition(
+                        Map.of(
+                                HookPoint.AGENT_BUILD,
+                                List.of(
+                                        new HookBinding(
+                                                "build-1", "build", 0, true, List.of(), Map.of()))),
+                        Set.of("ask"),
+                        Set.of("ask"));
 
         ApexAgent resumed =
                 new ApexAgentFactory()
@@ -159,8 +186,12 @@ class ApexAgentFactoryTest {
                                 ports);
 
         assertNotNull(resumed);
-        assertEquals(0, fixture.providerLoads);
-        assertEquals(List.of("session.load", "tools.load.resume"), fixture.calls);
+        assertEquals("恢复模板提示", resumed.snapshot().activeDefinition().prompt().systemPrompt());
+        assertEquals(suspended, resumed.snapshot().suspendedToolBatch());
+        assertEquals(1, fixture.providerLoads);
+        assertEquals(
+                List.of("session.load", "definition.load", "hook.build", "tools.load.new"),
+                fixture.calls);
     }
 
     /** 新会话绑定不可用工具时拒绝且不产生部分快照 */

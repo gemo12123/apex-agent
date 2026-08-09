@@ -11,7 +11,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.gemo.apex.common.agent.AgentDefinition;
-import org.gemo.apex.common.agent.AgentDefinitionRecoverySnapshot;
 import org.gemo.apex.common.agent.AgentMetadata;
 import org.gemo.apex.common.conversation.*;
 import org.gemo.apex.common.hook.HookTypeDescriptor;
@@ -190,11 +189,6 @@ class ExtensionApiCompileTest {
     private static final class FakeToolProvider implements ToolProvider {
         @Override
         public List<AgentTool> loadTools(AgentDefinition definition) {
-            return List.of();
-        }
-
-        @Override
-        public List<AgentTool> loadTools(AgentDefinitionRecoverySnapshot definition) {
             return List.of();
         }
     }

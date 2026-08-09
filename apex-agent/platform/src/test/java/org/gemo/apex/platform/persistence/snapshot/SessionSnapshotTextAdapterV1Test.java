@@ -12,6 +12,7 @@ import org.gemo.apex.common.exception.UnsupportedSnapshotVersionException;
 import org.gemo.apex.common.execution.IterationStatus;
 import org.gemo.apex.common.execution.SessionStatus;
 import org.gemo.apex.common.execution.TurnStatus;
+import org.gemo.apex.common.json.JsonUtils;
 import org.gemo.apex.common.snapshot.IterationSnapshot;
 import org.gemo.apex.common.snapshot.SessionSnapshot;
 import org.gemo.apex.common.snapshot.TurnSnapshot;
@@ -33,6 +34,8 @@ class SessionSnapshotTextAdapterV1Test {
         assertFalse(entity.runtimeSnapshot().contains("modelResponse"));
         assertFalse(entity.runtimeSnapshot().contains("hello"));
         assertFalse(entity.runtimeSnapshot().contains("system"));
+        Assertions.assertTrue(entity.runtimeSnapshot().contains("suspendedToolBatch"));
+        assertNull(entity.suspendedToolCall());
 
         var decoded = adapter.decode(entity);
         var iteration = decoded.activeTurn().currentIteration();
@@ -45,6 +48,40 @@ class SessionSnapshotTextAdapterV1Test {
         assertEquals(
                 snapshot.suspendedToolBatch().toolCalls().getFirst().toolCallMetadata(),
                 iteration.modelResponse().toolCalls().getFirst().metadata());
+    }
+
+    /** 旧版批次列仍可读取，但新写入统一进入runtime_snapshot。 */
+    @Test
+    void readsLegacySuspendedBatchColumn() {
+        var adapter = new SessionSnapshotTextAdapterV1();
+        var snapshot = PlatformFixtures.suspendedSnapshot();
+        var current = adapter.encode(snapshot);
+        var state =
+                JsonUtils.fromJson(
+                        current.runtimeSnapshot(), SessionSnapshotTextAdapterV1.RuntimeState.class);
+        var legacyRuntime =
+                JsonUtils.toJson(
+                        new SessionSnapshotTextAdapterV1.RuntimeState(
+                                state.schemaVersion(),
+                                state.historicalToolBindings(),
+                                state.activeTurn(),
+                                null,
+                                state.nextMessageSortNo()));
+        var legacy =
+                new AgentSessionEntity(
+                        current.sessionId(),
+                        current.userId(),
+                        current.agentKey(),
+                        current.status(),
+                        current.currentTurnNo(),
+                        current.agentDefinitionSnapshot(),
+                        current.enabledToolNames(),
+                        current.activatedSkillNames(),
+                        legacyRuntime,
+                        JsonUtils.toJson(snapshot.suspendedToolBatch()),
+                        current.lastActiveTime());
+
+        assertEquals(snapshot.suspendedToolBatch(), adapter.decode(legacy).suspendedToolBatch());
     }
 
     /** 终态只保留Iteration元数据。 */
@@ -120,6 +157,17 @@ class SessionSnapshotTextAdapterV1Test {
     void rejectsLegacySingleSuspendedToolCallExplicitly() {
         var adapter = new SessionSnapshotTextAdapterV1();
         var entity = adapter.encode(PlatformFixtures.suspendedSnapshot());
+        var state =
+                JsonUtils.fromJson(
+                        entity.runtimeSnapshot(), SessionSnapshotTextAdapterV1.RuntimeState.class);
+        var legacyRuntime =
+                JsonUtils.toJson(
+                        new SessionSnapshotTextAdapterV1.RuntimeState(
+                                state.schemaVersion(),
+                                state.historicalToolBindings(),
+                                state.activeTurn(),
+                                null,
+                                state.nextMessageSortNo()));
         var legacy =
                 new AgentSessionEntity(
                         entity.sessionId(),
@@ -130,7 +178,7 @@ class SessionSnapshotTextAdapterV1Test {
                         entity.agentDefinitionSnapshot(),
                         entity.enabledToolNames(),
                         entity.activatedSkillNames(),
-                        entity.runtimeSnapshot(),
+                        legacyRuntime,
                         "{\"toolCallId\":\"call-1\",\"toolName\":\"ask\"}",
                         entity.lastActiveTime());
 
