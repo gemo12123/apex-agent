@@ -166,6 +166,66 @@ class RuntimeContractTest {
         assertTrue(policy.shouldCompact(check(2, 1, null, null, 2, 100, trigger)));
     }
 
+    /** 默认压缩器使用同一模型生成累计摘要，再由业务模型继续执行 */
+    @Test
+    void usesModelGatewayForDefaultConversationCompaction() {
+        List<ModelRequest> requests = new CopyOnWriteArrayList<>();
+        var conversations = new InMemoryConversationRepository();
+        AgentDefinition source = definition();
+        AgentDefinition compressionDefinition =
+                new AgentDefinition(
+                        source.schemaVersion(),
+                        source.metadata(),
+                        source.prompt(),
+                        new MessageCompressionDefinition(true, 1),
+                        source.tools(),
+                        source.enabledSkills(),
+                        source.subAgents(),
+                        source.hooks());
+        try (var runtime =
+                ApexAgentRuntime.builder()
+                        .modelGateway(
+                                (request, observer) -> {
+                                    requests.add(request);
+                                    return request.systemPrompt().contains("压缩为可供后续模型继续工作的累计摘要")
+                                            ? new ModelResponse("  模型累计摘要  ", List.of(), Map.of())
+                                            : new ModelResponse("业务回答", List.of(), Map.of());
+                                })
+                        .agentDefinition(compressionDefinition)
+                        .conversationRepository(conversations)
+                        .build()) {
+            assertInstanceOf(
+                    AgentRunOutcome.Completed.class,
+                    runtime.newAgent(new AgentRequest("model-summary", "default", "u", "问题一"))
+                            .run());
+            assertInstanceOf(
+                    AgentRunOutcome.Completed.class,
+                    runtime.newAgent(new AgentRequest("model-summary", "default", "u", "问题二"))
+                            .run());
+            assertInstanceOf(
+                    AgentRunOutcome.Completed.class,
+                    runtime.newAgent(new AgentRequest("model-summary", "default", "u", "问题三"))
+                            .run());
+        }
+
+        assertEquals(5, requests.size());
+        ModelRequest firstCompaction = requests.get(1);
+        assertTrue(firstCompaction.tools().isEmpty());
+        assertEquals(1, firstCompaction.messages().size());
+        assertTrue(firstCompaction.messages().getFirst().content().contains("问题一"));
+        assertTrue(firstCompaction.messages().getFirst().content().contains("问题二"));
+        ModelRequest secondCompaction = requests.get(3);
+        assertTrue(secondCompaction.messages().getFirst().content().contains("模型累计摘要"));
+        assertTrue(secondCompaction.messages().getFirst().content().contains("问题三"));
+        assertEquals(
+                "模型累计摘要",
+                conversations
+                        .load(new ConversationQuery("model-summary"))
+                        .summary()
+                        .orElseThrow()
+                        .content());
+    }
+
     private ConversationCompactionCheck check(
             int messageCount,
             int messageThreshold,

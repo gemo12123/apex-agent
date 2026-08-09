@@ -221,7 +221,7 @@ public final class ApexAgentRuntimeBuilder {
                                 cr,
                                 DefaultConversationServices.window(cr),
                                 DefaultConversationServices.policy(),
-                                DefaultConversationServices.compactor(),
+                                DefaultConversationServices.compactor(gateway, c.token()),
                                 skillsRegistry,
                                 p,
                                 c.token(),
