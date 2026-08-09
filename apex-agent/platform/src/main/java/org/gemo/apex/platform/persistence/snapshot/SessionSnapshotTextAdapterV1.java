@@ -1,14 +1,21 @@
 package org.gemo.apex.platform.persistence.snapshot;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.gemo.apex.common.agent.AgentDefinitionRecoverySnapshot;
 import org.gemo.apex.common.exception.InvalidSnapshotException;
 import org.gemo.apex.common.exception.UnsupportedSnapshotVersionException;
+import org.gemo.apex.common.execution.IterationStatus;
 import org.gemo.apex.common.execution.SessionStatus;
+import org.gemo.apex.common.execution.TurnStatus;
 import org.gemo.apex.common.json.JsonUtils;
+import org.gemo.apex.common.model.ModelResponse;
 import org.gemo.apex.common.snapshot.*;
+import org.gemo.apex.common.tool.ToolCall;
+import org.gemo.apex.common.tool.ToolResult;
 import org.gemo.apex.platform.persistence.session.AgentSessionEntity;
 
 public final class SessionSnapshotTextAdapterV1 {
@@ -17,7 +24,7 @@ public final class SessionSnapshotTextAdapterV1 {
                 new RuntimeState(
                         snapshot.schemaVersion(),
                         snapshot.historicalToolBindings(),
-                        snapshot.activeTurn(),
+                        encodeTurn(snapshot),
                         snapshot.nextMessageSortNo());
         return new AgentSessionEntity(
                 snapshot.sessionId(),
@@ -47,6 +54,7 @@ public final class SessionSnapshotTextAdapterV1 {
                 JsonUtils.fromJson(
                         entity.agentDefinitionSnapshot(), AgentDefinitionRecoverySnapshot.class);
         SuspendedToolBatch suspended = decodeSuspendedBatch(entity.suspendedToolCall());
+        TurnSnapshot activeTurn = decodeTurn(state.activeTurn(), suspended);
         return new SessionSnapshot(
                 state.schemaVersion(),
                 entity.sessionId(),
@@ -58,10 +66,69 @@ public final class SessionSnapshotTextAdapterV1 {
                 activated,
                 state.historicalToolBindings(),
                 definition,
-                state.activeTurn(),
+                activeTurn,
                 suspended,
                 state.nextMessageSortNo(),
                 entity.lastActiveTime());
+    }
+
+    private PersistedTurn encodeTurn(SessionSnapshot snapshot) {
+        TurnSnapshot turn = snapshot.activeTurn();
+        IterationSnapshot iteration = turn.currentIteration();
+        PersistedIteration persistedIteration = null;
+        if (iteration != null) {
+            List<ToolResult> completedToolResults =
+                    snapshot.status() == SessionStatus.HUMAN_IN_THE_LOOP
+                            ? iteration.completedToolResults()
+                            : List.of();
+            persistedIteration =
+                    new PersistedIteration(
+                            iteration.iterationNo(),
+                            iteration.status(),
+                            completedToolResults,
+                            iteration.startedTime(),
+                            iteration.endedTime());
+        }
+        return new PersistedTurn(
+                turn.turnNo(),
+                turn.status(),
+                persistedIteration,
+                turn.startedTime(),
+                turn.endedTime());
+    }
+
+    private TurnSnapshot decodeTurn(PersistedTurn turn, SuspendedToolBatch suspended) {
+        PersistedIteration persisted = turn.currentIteration();
+        IterationSnapshot iteration = null;
+        if (persisted != null) {
+            ModelResponse response = suspended == null ? null : minimalResponse(suspended);
+            iteration =
+                    new IterationSnapshot(
+                            persisted.iterationNo(),
+                            persisted.status(),
+                            null,
+                            response,
+                            persisted.completedToolResults(),
+                            persisted.startedTime(),
+                            persisted.endedTime());
+        }
+        return new TurnSnapshot(
+                turn.turnNo(), turn.status(), iteration, turn.startedTime(), turn.endedTime());
+    }
+
+    private ModelResponse minimalResponse(SuspendedToolBatch suspended) {
+        List<ToolCall> calls =
+                suspended.toolCalls().stream()
+                        .map(
+                                prepared ->
+                                        new ToolCall(
+                                                prepared.toolCallId(),
+                                                prepared.toolName(),
+                                                prepared.ordinal(),
+                                                prepared.resolvedArguments(),
+                                                prepared.toolCallMetadata()))
+                        .toList();
+        return new ModelResponse(null, calls, Map.of());
     }
 
     private SuspendedToolBatch decodeSuspendedBatch(String json) {
@@ -78,6 +145,20 @@ public final class SessionSnapshotTextAdapterV1 {
     public record RuntimeState(
             String schemaVersion,
             List<HistoricalToolBinding> historicalToolBindings,
-            TurnSnapshot activeTurn,
+            PersistedTurn activeTurn,
             long nextMessageSortNo) {}
+
+    public record PersistedTurn(
+            long turnNo,
+            TurnStatus status,
+            PersistedIteration currentIteration,
+            Instant startedTime,
+            Instant endedTime) {}
+
+    public record PersistedIteration(
+            int iterationNo,
+            IterationStatus status,
+            List<ToolResult> completedToolResults,
+            Instant startedTime,
+            Instant endedTime) {}
 }

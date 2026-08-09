@@ -40,6 +40,7 @@ class AgentEventFactoryTest {
                         "ask_human",
                         0,
                         Map.of(),
+                        Map.of(),
                         List.of(),
                         PreparedToolCallDisposition.INTERVENTION,
                         null,

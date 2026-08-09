@@ -101,6 +101,7 @@ final class CommonFixtures {
                         "search",
                         0,
                         toolCall().arguments(),
+                        toolCall().metadata(),
                         List.of("audit", "confirm"),
                         PreparedToolCallDisposition.INTERVENTION,
                         null,

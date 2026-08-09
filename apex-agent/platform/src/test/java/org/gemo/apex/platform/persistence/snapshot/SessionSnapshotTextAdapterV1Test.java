@@ -1,22 +1,98 @@
 package org.gemo.apex.platform.persistence.snapshot;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.util.List;
+import java.util.Map;
 import org.gemo.apex.common.exception.InvalidSnapshotException;
 import org.gemo.apex.common.exception.UnsupportedSnapshotVersionException;
+import org.gemo.apex.common.execution.IterationStatus;
+import org.gemo.apex.common.execution.SessionStatus;
+import org.gemo.apex.common.execution.TurnStatus;
+import org.gemo.apex.common.snapshot.IterationSnapshot;
+import org.gemo.apex.common.snapshot.SessionSnapshot;
+import org.gemo.apex.common.snapshot.TurnSnapshot;
+import org.gemo.apex.common.tool.ToolResult;
 import org.gemo.apex.platform.PlatformFixtures;
 import org.gemo.apex.platform.persistence.session.AgentSessionEntity;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 class SessionSnapshotTextAdapterV1Test {
-    /** v1快照及挂起交互应完整往返 */
+    /** 挂起快照只保留恢复投影，不复制完整模型请求和响应。 */
     @Test
-    void v1SnapshotsAndSuspendedInteractionsRoundTripCompletely() {
+    void suspendedSnapshotPersistsOnlyRecoveryProjection() {
         var adapter = new SessionSnapshotTextAdapterV1();
         var snapshot = PlatformFixtures.suspendedSnapshot();
-        assertEquals(snapshot, adapter.decode(adapter.encode(snapshot)));
+        var entity = adapter.encode(snapshot);
+
+        assertFalse(entity.runtimeSnapshot().contains("modelRequest"));
+        assertFalse(entity.runtimeSnapshot().contains("modelResponse"));
+        assertFalse(entity.runtimeSnapshot().contains("hello"));
+        assertFalse(entity.runtimeSnapshot().contains("system"));
+
+        var decoded = adapter.decode(entity);
+        var iteration = decoded.activeTurn().currentIteration();
+        assertNull(iteration.modelRequest());
+        assertNull(iteration.modelResponse().text());
+        assertEquals(Map.of(), iteration.modelResponse().metadata());
+        assertEquals(
+                snapshot.suspendedToolBatch().toolCalls().getFirst().resolvedArguments(),
+                iteration.modelResponse().toolCalls().getFirst().arguments());
+        assertEquals(
+                snapshot.suspendedToolBatch().toolCalls().getFirst().toolCallMetadata(),
+                iteration.modelResponse().toolCalls().getFirst().metadata());
+    }
+
+    /** 终态只保留Iteration元数据。 */
+    @Test
+    void terminalSnapshotDropsIterationPayload() {
+        var adapter = new SessionSnapshotTextAdapterV1();
+        var source = PlatformFixtures.suspendedSnapshot();
+        var old = source.activeTurn().currentIteration();
+        var iteration =
+                new IterationSnapshot(
+                        old.iterationNo(),
+                        IterationStatus.COMPLETED,
+                        old.modelRequest(),
+                        old.modelResponse(),
+                        List.of(new ToolResult("call-1", "search", "large-result", Map.of())),
+                        old.startedTime(),
+                        PlatformFixtures.NOW);
+        var turn =
+                new TurnSnapshot(
+                        source.currentTurnNo(),
+                        TurnStatus.COMPLETED,
+                        iteration,
+                        source.activeTurn().startedTime(),
+                        PlatformFixtures.NOW);
+        var terminal =
+                new SessionSnapshot(
+                        source.schemaVersion(),
+                        source.sessionId(),
+                        source.userId(),
+                        source.agentKey(),
+                        SessionStatus.COMPLETED,
+                        source.currentTurnNo(),
+                        source.enabledTools(),
+                        source.activatedSkills(),
+                        source.historicalToolBindings(),
+                        source.activeDefinition(),
+                        turn,
+                        null,
+                        source.nextMessageSortNo(),
+                        source.lastActiveTime());
+
+        var decoded = adapter.decode(adapter.encode(terminal));
+        var persisted = decoded.activeTurn().currentIteration();
+        assertEquals(iteration.iterationNo(), persisted.iterationNo());
+        assertEquals(iteration.status(), persisted.status());
+        assertNull(persisted.modelRequest());
+        assertNull(persisted.modelResponse());
+        assertEquals(List.of(), persisted.completedToolResults());
     }
 
     /** 未知版本应显式拒绝 */

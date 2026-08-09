@@ -65,6 +65,13 @@ class PostgresRepositoryIntegrationTest {
         var sessionsA = new PostgresSessionRepository(jdbc);
         var conversationsA = new PostgresConversationRepository(jdbc);
         sessionsA.save(PlatformFixtures.suspendedSnapshot());
+        String runtimeSnapshot =
+                jdbc.queryForObject(
+                        "SELECT runtime_snapshot FROM apex_agent_session WHERE session_id='session-1'",
+                        String.class);
+        assertFalse(runtimeSnapshot.contains("modelRequest"));
+        assertFalse(runtimeSnapshot.contains("modelResponse"));
+        assertFalse(runtimeSnapshot.contains("hello"));
         String longText = "长内容".repeat(40_000);
         AgentMessageEntry entry =
                 new AgentMessageEntry(
@@ -146,6 +153,8 @@ class PostgresRepositoryIntegrationTest {
                             ToolCall call,
                             ToolExecutionContext context,
                             ToolExecutionObserver observer) {
+                        assertEquals(Map.of("provider", "fixture"), call.metadata());
+                        assertEquals(Map.of("query", "apex"), call.arguments());
                         return new ToolResult(call.toolCallId(), call.name(), "已恢复", Map.of());
                     }
                 };

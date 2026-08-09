@@ -37,7 +37,8 @@ public final class PlatformFixtures {
     }
 
     public static ToolCall toolCall() {
-        return new ToolCall("call-1", "search", 0, Map.of("query", "apex"), Map.of());
+        return new ToolCall(
+                "call-1", "search", 0, Map.of("query", "apex"), Map.of("provider", "fixture"));
     }
 
     public static SessionSnapshot suspendedSnapshot() {
@@ -69,6 +70,7 @@ public final class PlatformFixtures {
                         "search",
                         0,
                         toolCall().arguments(),
+                        toolCall().metadata(),
                         List.of(),
                         PreparedToolCallDisposition.INTERVENTION,
                         null,
@@ -120,6 +122,7 @@ public final class PlatformFixtures {
                         original.toolName(),
                         original.ordinal(),
                         original.resolvedArguments(),
+                        original.toolCallMetadata(),
                         original.executedPreToolHookIds(),
                         PreparedToolCallDisposition.INTERVENTION,
                         null,

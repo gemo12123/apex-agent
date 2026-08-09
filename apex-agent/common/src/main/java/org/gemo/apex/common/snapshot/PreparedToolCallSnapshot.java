@@ -16,6 +16,7 @@ public record PreparedToolCallSnapshot(
         String toolName,
         int ordinal,
         Map<String, Object> resolvedArguments,
+        Map<String, Object> toolCallMetadata,
         List<String> executedPreToolHookIds,
         PreparedToolCallDisposition disposition,
         ToolResult result,
@@ -29,6 +30,7 @@ public record PreparedToolCallSnapshot(
             throw new IllegalArgumentException("ordinal 不能小于 0");
         }
         resolvedArguments = DomainValues.immutableMap(resolvedArguments, "resolvedArguments");
+        toolCallMetadata = DomainValues.immutableMap(toolCallMetadata, "toolCallMetadata");
         executedPreToolHookIds = immutableList(executedPreToolHookIds, "executedPreToolHookIds");
         if (new HashSet<>(executedPreToolHookIds).size() != executedPreToolHookIds.size()) {
             throw new IllegalArgumentException("executedPreToolHookIds 不能重复");

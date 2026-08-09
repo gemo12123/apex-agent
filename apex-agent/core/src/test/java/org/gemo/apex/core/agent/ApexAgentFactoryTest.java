@@ -115,6 +115,7 @@ class ApexAgentFactoryTest {
                         "ask",
                         0,
                         Map.of(),
+                        Map.of(),
                         List.of("hook-1"),
                         PreparedToolCallDisposition.INTERVENTION,
                         null,

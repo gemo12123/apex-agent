@@ -74,8 +74,7 @@ public final class ToolCallCoordinator {
         SuspendedToolBatch suspended =
                 Objects.requireNonNull(
                         context.snapshot().suspendedToolBatch(), "suspendedToolBatch");
-        List<ToolCall> modelCalls =
-                context.snapshot().activeTurn().currentIteration().modelResponse().toolCalls();
+        List<ToolCall> modelCalls = suspended.toolCalls().stream().map(this::call).toList();
         List<PreparedToolCallSnapshot> prepared = new ArrayList<>(suspended.toolCalls().size());
         try {
             context.ports().cancellationToken().throwIfCancellationRequested();
@@ -86,7 +85,7 @@ public final class ToolCallCoordinator {
                     prepared.add(current);
                     continue;
                 }
-                ToolCall call = call(current, modelCalls.get(index));
+                ToolCall call = modelCalls.get(index);
                 HumanSubmission submission =
                         responses.parse(
                                 context.humanResponses().get(current.toolCallId()),
@@ -228,15 +227,7 @@ public final class ToolCallCoordinator {
             ApexAgentContext context, List<PreparedToolCallSnapshot> prepared, boolean resumed) {
         for (int index = 0; index < prepared.size(); index++) {
             PreparedToolCallSnapshot item = prepared.get(index);
-            ToolCall call =
-                    call(
-                            item,
-                            context.snapshot()
-                                    .activeTurn()
-                                    .currentIteration()
-                                    .modelResponse()
-                                    .toolCalls()
-                                    .get(index));
+            ToolCall call = call(item);
             context.toolCall(call);
             context.humanSubmission(item.submission());
             try {
@@ -253,12 +244,7 @@ public final class ToolCallCoordinator {
                 if (post instanceof LifecycleDispatchOutcome.EndTurn) {
                     List<ToolResult> forced =
                             prepared.subList(index + 1, prepared.size()).stream()
-                                    .map(
-                                            next ->
-                                                    results.forcedEnd(
-                                                            call(
-                                                                    next,
-                                                                    findModelCall(context, next))))
+                                    .map(next -> results.forcedEnd(call(next)))
                                     .toList();
                     commitBatch(context, forced);
                     return new ToolCallsOutcome.EndTurn();
@@ -266,10 +252,7 @@ public final class ToolCallCoordinator {
             } catch (CancellationRequestedException cancellation) {
                 List<ToolResult> cancelled =
                         prepared.subList(index, prepared.size()).stream()
-                                .map(
-                                        next ->
-                                                results.cancelled(
-                                                        call(next, findModelCall(context, next))))
+                                .map(next -> results.cancelled(call(next)))
                                 .toList();
                 commitCancelled(context, cancelled);
                 return new ToolCallsOutcome.Cancelled();
@@ -337,6 +320,7 @@ public final class ToolCallCoordinator {
                 call.name(),
                 call.ordinal(),
                 call.arguments(),
+                call.metadata(),
                 executedHookIds,
                 disposition,
                 result,
@@ -352,6 +336,7 @@ public final class ToolCallCoordinator {
                 source.toolName(),
                 source.ordinal(),
                 source.resolvedArguments(),
+                source.toolCallMetadata(),
                 source.executedPreToolHookIds(),
                 PreparedToolCallDisposition.RETURN_RESULT,
                 result,
@@ -392,31 +377,13 @@ public final class ToolCallCoordinator {
                 call.toolCallId(), call.name(), call.ordinal(), arguments, call.metadata());
     }
 
-    private ToolCall call(PreparedToolCallSnapshot prepared, ToolCall modelCall) {
-        if (!prepared.toolCallId().equals(modelCall.toolCallId())
-                || !prepared.toolName().equals(modelCall.name())
-                || prepared.ordinal() != modelCall.ordinal()) {
-            throw new ToolContractException("预处理 ToolCall 与模型响应不一致");
-        }
+    private ToolCall call(PreparedToolCallSnapshot prepared) {
         return new ToolCall(
-                modelCall.toolCallId(),
-                modelCall.name(),
-                modelCall.ordinal(),
+                prepared.toolCallId(),
+                prepared.toolName(),
+                prepared.ordinal(),
                 prepared.resolvedArguments(),
-                modelCall.metadata());
-    }
-
-    private ToolCall findModelCall(ApexAgentContext context, PreparedToolCallSnapshot prepared) {
-        return context
-                .snapshot()
-                .activeTurn()
-                .currentIteration()
-                .modelResponse()
-                .toolCalls()
-                .stream()
-                .filter(call -> call.toolCallId().equals(prepared.toolCallId()))
-                .findFirst()
-                .orElseThrow(() -> new ToolContractException("预处理 ToolCall 不存在"));
+                prepared.toolCallMetadata());
     }
 
     private boolean hasIntervention(List<PreparedToolCallSnapshot> prepared) {
