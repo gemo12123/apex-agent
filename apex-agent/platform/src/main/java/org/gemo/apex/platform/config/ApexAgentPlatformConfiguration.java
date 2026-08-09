@@ -1,12 +1,12 @@
 package org.gemo.apex.platform.config;
 
-import java.util.concurrent.Executor;
 import org.gemo.apex.common.skill.SkillDefinition;
 import org.gemo.apex.extension.definition.AgentDefinitionProvider;
 import org.gemo.apex.extension.model.ModelGateway;
 import org.gemo.apex.extension.repository.ConversationRepository;
 import org.gemo.apex.extension.repository.SessionRepository;
 import org.gemo.apex.extension.tool.AgentTool;
+import org.gemo.apex.kit.hook.ToolConfirmHook;
 import org.gemo.apex.platform.execution.UserContextTaskDecorator;
 import org.gemo.apex.platform.web.sse.RequestBoundAgentEventPublisherFactory;
 import org.gemo.apex.runtime.api.ApexAgentRuntime;
@@ -21,7 +21,11 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
-/** 将 Spring Bean 装配为独立于 IoC 的 {@link ApexAgentRuntime}，并配置执行线程池。 */
+import java.util.concurrent.Executor;
+
+/**
+ * 将 Spring Bean 装配为独立于 IoC 的 {@link ApexAgentRuntime}，并配置执行线程池。
+ */
 @Configuration
 @EnableConfigurationProperties(ApexAgentPlatformProperties.class)
 public class ApexAgentPlatformConfiguration {
@@ -36,7 +40,9 @@ public class ApexAgentPlatformConfiguration {
         return new RequestBoundAgentEventPublisherFactory();
     }
 
-    /** 收集平台提供的端口、工具、Hook 与 Skill。模型 Bean 必须唯一，避免运行时隐式选择模型。 */
+    /**
+     * 收集平台提供的端口、工具、Hook 与 Skill。模型 Bean 必须唯一，避免运行时隐式选择模型。
+     */
     @Bean(destroyMethod = "close")
     ApexAgentRuntime apexAgentRuntime(
             AgentDefinitionProvider definitions,
@@ -79,7 +85,9 @@ public class ApexAgentPlatformConfiguration {
         return builder.build();
     }
 
-    /** 创建承载 Agent 的线程池，并通过 decorator 传播请求用户上下文。 */
+    /**
+     * 创建承载 Agent 的线程池，并通过 decorator 传播请求用户上下文。
+     */
     @Bean(name = "agentExecutionExecutor")
     Executor agentExecutionExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
@@ -90,5 +98,11 @@ public class ApexAgentPlatformConfiguration {
         executor.setTaskDecorator(new UserContextTaskDecorator());
         executor.initialize();
         return executor;
+    }
+
+    @Bean
+    PlatformHookRegistration toolConfirmHookRegistration() {
+        return new PlatformHookRegistration(
+                ToolConfirmHook.REGISTRATION_NAME, new ToolConfirmHook());
     }
 }
