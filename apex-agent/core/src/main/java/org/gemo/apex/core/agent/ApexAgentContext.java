@@ -178,7 +178,7 @@ public final class ApexAgentContext {
                 new IterationSnapshot(
                         old.iterationNo(),
                         status,
-                        request,
+                        request == null ? null : request.withoutPrefixDeveloperMessages(),
                         response,
                         results,
                         old.startedTime(),

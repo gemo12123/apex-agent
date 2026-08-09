@@ -40,7 +40,9 @@ final class CoreTestFixture {
     final AtomicInteger ids = new AtomicInteger();
     AgentDefinition definition;
     ConversationSummary summary;
+    ConversationCompactionRequest compactionRequest;
     ConversationCompactionCommit compactionCommit;
+    ConversationCompactionCheck compactionCheck;
     boolean compact;
     ToolAvailabilitySnapshot availability = new ToolAvailabilitySnapshot(Set.of(), List.of());
     int providerLoads;
@@ -216,10 +218,12 @@ final class CoreTestFixture {
                 },
                 check -> {
                     calls.add("compact.check");
+                    compactionCheck = check;
                     return compact;
                 },
                 request -> {
                     calls.add("compact.execute");
+                    compactionRequest = request;
                     return new ConversationCompactionResult(
                             request.compactionId(), "摘要", request.retainedMessages(), Map.of());
                 },

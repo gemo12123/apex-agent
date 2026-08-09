@@ -6,12 +6,17 @@ import org.gemo.apex.common.model.ModelRequest;
 public final class ModelRequestSizeEstimator {
     public Size estimate(ModelRequest request) {
         long messageCharacters =
-                request.messages().stream()
-                        .mapToLong(
-                                message ->
-                                        (message.content() == null ? 0 : message.content().length())
-                                                + message.payload().toString().length())
-                        .sum();
+                request.prefixDeveloperMessages().stream()
+                                .mapToLong(message -> message.content().length())
+                                .sum()
+                        + request.messages().stream()
+                                .mapToLong(
+                                        message ->
+                                                (message.content() == null
+                                                                ? 0
+                                                                : message.content().length())
+                                                        + message.payload().toString().length())
+                                .sum();
         long systemCharacters = request.systemPrompt().length();
         long toolCharacters =
                 request.tools().stream()

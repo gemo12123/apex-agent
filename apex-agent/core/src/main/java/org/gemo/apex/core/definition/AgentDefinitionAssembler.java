@@ -73,7 +73,8 @@ public final class AgentDefinitionAssembler {
             throw new InvalidAgentDefinitionException("session enabledTools 出现普通配置漂移");
         }
         return new AgentAssemblyResult(
-                new AgentDefinitionSnapshot(classification.definition()),
+                new AgentDefinitionSnapshot(
+                        classification.definition(), draft.prefixDeveloperMessages()),
                 enabled,
                 classification.history(),
                 classification.catalog());
@@ -101,11 +102,13 @@ public final class AgentDefinitionAssembler {
                                 new AgentBuildContext(
                                         sessionId,
                                         binding,
-                                        new AgentDefinitionSnapshot(materialize(source, draft))));
+                                        new AgentDefinitionSnapshot(
+                                                materialize(source, draft),
+                                                draft.prefixDeveloperMessages())));
                 if (!(raw instanceof ContinueAgentBuild result)) {
                     throw new HookContractException("AGENT_BUILD 返回了非法结果: " + binding.id());
                 }
-                AgentDefinitionDraft temporary = copyDraft(source, draft);
+                AgentDefinitionDraft temporary = draft.copy();
                 result.operations().forEach(temporary::apply);
                 materialize(source, temporary);
                 result.operations().forEach(draft::apply);
@@ -118,10 +121,6 @@ public final class AgentDefinitionAssembler {
                         error);
             }
         }
-    }
-
-    private AgentDefinitionDraft copyDraft(AgentDefinition source, AgentDefinitionDraft draft) {
-        return new AgentDefinitionDraft(materialize(source, draft));
     }
 
     private AgentDefinition materialize(AgentDefinition source, AgentDefinitionDraft draft) {

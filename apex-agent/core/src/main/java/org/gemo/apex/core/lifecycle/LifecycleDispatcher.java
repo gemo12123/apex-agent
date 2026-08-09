@@ -224,7 +224,11 @@ public final class LifecycleDispatcher {
         if (current != null) {
             context.modelRequest(
                     new ModelRequest(
-                            current.systemPrompt(), messages, current.tools(), current.options()));
+                            current.systemPrompt(),
+                            current.prefixDeveloperMessages(),
+                            messages,
+                            current.tools(),
+                            current.options()));
         }
     }
 

@@ -48,7 +48,13 @@ public final class ModelRequestPreparer {
                         + (finalIteration
                                 ? "\n" + context.ports().finalIterationInstruction()
                                 : "");
-        ModelRequest base = new ModelRequest(systemPrompt, window.messages(), tools, Map.of());
+        ModelRequest base =
+                new ModelRequest(
+                        systemPrompt,
+                        context.definition().prefixDeveloperMessages(),
+                        window.messages(),
+                        tools,
+                        Map.of());
         context.modelRequest(base);
         if (!compression.enabled()) {
             return new PreparationOutcome.Prepared(base);
@@ -135,7 +141,12 @@ public final class ModelRequestPreparer {
         compactedMessages.addAll(context.compactionResult().retainedMessages());
         compactedMessages.sort(Comparator.comparingLong(AgentMessageEntry::sortNo));
         ModelRequest compacted =
-                new ModelRequest(systemPrompt, compactedMessages, tools, base.options());
+                new ModelRequest(
+                        systemPrompt,
+                        base.prefixDeveloperMessages(),
+                        compactedMessages,
+                        tools,
+                        base.options());
         context.modelRequest(compacted);
         return new PreparationOutcome.Prepared(compacted);
     }

@@ -3,6 +3,8 @@ package org.gemo.apex.core.agent;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.*;
+import org.gemo.apex.common.agent.AppendPrefixDeveloperMessage;
+import org.gemo.apex.common.agent.PrefixDeveloperMessage;
 import org.gemo.apex.common.agent.PromptDefinition;
 import org.gemo.apex.common.agent.ReplacePrompt;
 import org.gemo.apex.common.execution.AgentRequest;
@@ -156,7 +158,13 @@ class ApexAgentFactoryTest {
                     public AgentBuildHookResult apply(AgentBuildContext context) {
                         fixture.calls.add("hook.build");
                         return new ContinueAgentBuild(
-                                List.of(new ReplacePrompt(new PromptDefinition("恢复模板提示", 5))));
+                                List.of(
+                                        new ReplacePrompt(new PromptDefinition("恢复模板提示", 5)),
+                                        new AppendPrefixDeveloperMessage(
+                                                new PrefixDeveloperMessage(
+                                                        org.gemo.apex.common.message.MessageRole
+                                                                .USER,
+                                                        "恢复请求前置"))));
                     }
                 });
         fixture.definition =
@@ -192,6 +200,21 @@ class ApexAgentFactoryTest {
         assertEquals(
                 List.of("session.load", "definition.load", "hook.build", "tools.load.new"),
                 fixture.calls);
+
+        fixture.modelResponses.add(new ModelResponse("恢复完成", List.of(), Map.of()));
+        assertInstanceOf(AgentRunOutcome.Completed.class, resumed.run());
+        assertEquals(
+                List.of(
+                        new PrefixDeveloperMessage(
+                                org.gemo.apex.common.message.MessageRole.USER, "恢复请求前置")),
+                fixture.modelRequests.getLast().prefixDeveloperMessages());
+        assertTrue(
+                resumed.snapshot()
+                        .activeTurn()
+                        .currentIteration()
+                        .modelRequest()
+                        .prefixDeveloperMessages()
+                        .isEmpty());
     }
 
     /** 新会话绑定不可用工具时拒绝且不产生部分快照 */

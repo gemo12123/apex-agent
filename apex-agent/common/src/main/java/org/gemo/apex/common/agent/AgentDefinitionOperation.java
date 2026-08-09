@@ -4,5 +4,6 @@ public sealed interface AgentDefinitionOperation
         permits AddAvailableTool,
                 RemoveAvailableTool,
                 ReplacePrompt,
+                AppendPrefixDeveloperMessage,
                 AddHookBinding,
                 RemoveHookBinding {}

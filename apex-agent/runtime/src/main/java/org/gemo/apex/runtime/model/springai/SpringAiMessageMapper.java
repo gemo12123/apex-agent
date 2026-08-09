@@ -2,12 +2,21 @@ package org.gemo.apex.runtime.model.springai;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.*;
+import org.gemo.apex.common.agent.PrefixDeveloperMessage;
 import org.gemo.apex.common.message.*;
 import org.gemo.apex.common.tool.*;
 import org.springframework.ai.chat.messages.*;
 
 public final class SpringAiMessageMapper {
     private final ObjectMapper json = new ObjectMapper();
+
+    public Message toSpring(PrefixDeveloperMessage message) {
+        return switch (message.role()) {
+            case SYSTEM -> new SystemMessage(message.content());
+            case USER -> new UserMessage(message.content());
+            default -> throw new IllegalArgumentException("PrefixDeveloperMessage 角色不受支持");
+        };
+    }
 
     public Message toSpring(AgentMessageEntry e) {
         return switch (e.role()) {

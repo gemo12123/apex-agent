@@ -15,15 +15,29 @@ public final class AgentDefinitionDraft {
     private PromptDefinition prompt;
     private final Set<String> availableTools;
     private final Map<HookPoint, List<HookBinding>> hooks;
+    private final List<PrefixDeveloperMessage> prefixDeveloperMessages;
 
     public AgentDefinitionDraft(AgentDefinition definition) {
         nonNull(definition, "definition");
         this.prompt = definition.prompt();
         this.availableTools = new LinkedHashSet<>(definition.tools().availableTools());
         this.hooks = new EnumMap<>(HookPoint.class);
+        this.prefixDeveloperMessages = new ArrayList<>();
         definition
                 .hooks()
                 .forEach((point, bindings) -> this.hooks.put(point, new ArrayList<>(bindings)));
+    }
+
+    private AgentDefinitionDraft(AgentDefinitionDraft source) {
+        this.prompt = source.prompt;
+        this.availableTools = new LinkedHashSet<>(source.availableTools);
+        this.hooks = new EnumMap<>(HookPoint.class);
+        source.hooks.forEach((point, bindings) -> this.hooks.put(point, new ArrayList<>(bindings)));
+        this.prefixDeveloperMessages = new ArrayList<>(source.prefixDeveloperMessages);
+    }
+
+    public AgentDefinitionDraft copy() {
+        return new AgentDefinitionDraft(this);
     }
 
     public PromptDefinition prompt() {
@@ -40,12 +54,18 @@ public final class AgentDefinitionDraft {
         return Map.copyOf(copy);
     }
 
+    public List<PrefixDeveloperMessage> prefixDeveloperMessages() {
+        return List.copyOf(prefixDeveloperMessages);
+    }
+
     public void apply(AgentDefinitionOperation operation) {
         nonNull(operation, "operation");
         switch (operation) {
             case AddAvailableTool add -> availableTools.add(add.toolName());
             case RemoveAvailableTool remove -> availableTools.remove(remove.toolName());
             case ReplacePrompt replace -> prompt = replace.prompt();
+            case AppendPrefixDeveloperMessage append ->
+                    prefixDeveloperMessages.add(append.message());
             case AddHookBinding add ->
                     hooks.computeIfAbsent(add.hookPoint(), ignored -> new ArrayList<>())
                             .add(add.binding());

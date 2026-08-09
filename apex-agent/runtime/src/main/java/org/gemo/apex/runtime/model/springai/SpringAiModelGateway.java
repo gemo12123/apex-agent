@@ -29,6 +29,7 @@ public final class SpringAiModelGateway implements ModelGateway {
         o.cancellationToken().throwIfCancellationRequested();
         List<Message> ms = new ArrayList<>();
         ms.add(new SystemMessage(r.systemPrompt()));
+        ms.addAll(r.prefixDeveloperMessages().stream().map(mapper::toSpring).toList());
         ms.addAll(r.messages().stream().map(mapper::toSpring).toList());
         var callbacks =
                 r.tools().stream()

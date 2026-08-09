@@ -5,12 +5,14 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.gemo.apex.common.agent.*;
 import org.gemo.apex.common.execution.AgentRequest;
 import org.gemo.apex.common.execution.IterationStatus;
 import org.gemo.apex.common.execution.SessionStatus;
 import org.gemo.apex.common.execution.TurnStatus;
 import org.gemo.apex.common.hook.*;
+import org.gemo.apex.common.hook.context.AgentBuildContext;
 import org.gemo.apex.common.hook.context.PostToolCallContext;
 import org.gemo.apex.common.hook.context.PreToolCallContext;
 import org.gemo.apex.common.hook.operation.HookMutations;
@@ -18,10 +20,13 @@ import org.gemo.apex.common.hook.operation.SkillActivationDelta;
 import org.gemo.apex.common.hook.operation.ToolActivationDelta;
 import org.gemo.apex.common.hook.operation.ToolCallPatch;
 import org.gemo.apex.common.hook.operation.ToolResultPatch;
+import org.gemo.apex.common.hook.result.AgentBuildHookResult;
+import org.gemo.apex.common.hook.result.ContinueAgentBuild;
 import org.gemo.apex.common.hook.result.ContinuePostToolCall;
 import org.gemo.apex.common.hook.result.ContinuePreToolCall;
 import org.gemo.apex.common.hook.result.PostToolCallHookResult;
 import org.gemo.apex.common.hook.result.PreToolCallHookResult;
+import org.gemo.apex.common.message.MessageRole;
 import org.gemo.apex.common.message.MessageType;
 import org.gemo.apex.common.model.ModelResponse;
 import org.gemo.apex.common.tool.ToolCall;
@@ -31,6 +36,99 @@ import org.gemo.apex.protocol.event.EndMessage;
 import org.junit.jupiter.api.Test;
 
 class ApexAgentExecutionTest {
+    /** AGENT_BUILD按固定顺序追加前置消息，同一请求各Iteration复用且快照不保存 */
+    @Test
+    void appendsPrefixDeveloperMessagesOncePerRequestAndExcludesThemFromSnapshot() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        AtomicInteger buildCalls = new AtomicInteger();
+        PrefixDeveloperMessage system = new PrefixDeveloperMessage(MessageRole.SYSTEM, "系统前置");
+        PrefixDeveloperMessage user = new PrefixDeveloperMessage(MessageRole.USER, "用户前置");
+        fixture.hooks.put(
+                "prefix-first",
+                buildHook(
+                        context -> {
+                            buildCalls.incrementAndGet();
+                            assertTrue(context.definition().prefixDeveloperMessages().isEmpty());
+                            return List.of(
+                                    new AppendPrefixDeveloperMessage(system),
+                                    new AppendPrefixDeveloperMessage(system));
+                        }));
+        fixture.hooks.put(
+                "prefix-second",
+                buildHook(
+                        context -> {
+                            buildCalls.incrementAndGet();
+                            assertEquals(
+                                    List.of(system, system),
+                                    context.definition().prefixDeveloperMessages());
+                            return List.of(new AppendPrefixDeveloperMessage(user));
+                        }));
+        fixture.tool(
+                "tool",
+                (call, context, observer) ->
+                        new ToolResult(call.toolCallId(), call.name(), "结果", Map.of()));
+        fixture.definition =
+                fixture.definition(
+                        Map.of(
+                                HookPoint.AGENT_BUILD,
+                                List.of(
+                                        new HookBinding(
+                                                "second",
+                                                "prefix-second",
+                                                20,
+                                                true,
+                                                List.of(),
+                                                Map.of()),
+                                        new HookBinding(
+                                                "first",
+                                                "prefix-first",
+                                                10,
+                                                true,
+                                                List.of(),
+                                                Map.of()))),
+                        Set.of("tool"),
+                        Set.of("tool"));
+        fixture.modelResponses.add(
+                new ModelResponse(
+                        "",
+                        List.of(new ToolCall("call", "tool", 0, Map.of(), Map.of())),
+                        Map.of()));
+        fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
+
+        ApexAgent agent = create(fixture);
+        assertInstanceOf(AgentRunOutcome.Completed.class, agent.run());
+
+        assertEquals(2, buildCalls.get());
+        assertEquals(2, fixture.modelRequests.size());
+        assertTrue(
+                fixture.modelRequests.stream()
+                        .allMatch(
+                                request ->
+                                        request.prefixDeveloperMessages()
+                                                .equals(List.of(system, system, user))));
+        assertTrue(
+                agent.snapshot()
+                        .activeTurn()
+                        .currentIteration()
+                        .modelRequest()
+                        .prefixDeveloperMessages()
+                        .isEmpty());
+        assertTrue(
+                fixture.sessions
+                        .get("session-1")
+                        .activeTurn()
+                        .currentIteration()
+                        .modelRequest()
+                        .prefixDeveloperMessages()
+                        .isEmpty());
+        assertTrue(
+                fixture.conversation.stream()
+                        .noneMatch(
+                                message ->
+                                        "系统前置".equals(message.content())
+                                                || "用户前置".equals(message.content())));
+    }
+
     /** 无工具响应完成单次ReAct并只请求一次End */
     @Test
     void completesSingleReactWithToolFreeResponseAndRequestsEndOnce() {
@@ -154,6 +252,19 @@ class ApexAgentExecutionTest {
     @Test
     void callsModelOnlyAfterCompactionGateAndSessionSave() {
         CoreTestFixture fixture = new CoreTestFixture();
+        PrefixDeveloperMessage prefix =
+                new PrefixDeveloperMessage(MessageRole.SYSTEM, "不会进入摘要的前置消息");
+        fixture.hooks.put(
+                "prefix", buildHook(context -> List.of(new AppendPrefixDeveloperMessage(prefix))));
+        fixture.definition =
+                fixture.definition(
+                        Map.of(
+                                HookPoint.AGENT_BUILD,
+                                List.of(
+                                        new HookBinding(
+                                                "prefix", "prefix", 0, true, List.of(), Map.of()))),
+                        Set.of(),
+                        Set.of());
         fixture.compact = true;
         fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
         ApexAgent agent = create(fixture);
@@ -170,6 +281,14 @@ class ApexAgentExecutionTest {
                 fixture.modelRequests.getFirst().messages().getFirst().messageType());
         assertEquals("摘要", fixture.modelRequests.getFirst().messages().getFirst().content());
         assertFalse(fixture.modelRequests.getFirst().systemPrompt().contains("摘要"));
+        assertEquals(List.of(prefix), fixture.modelRequests.getFirst().prefixDeveloperMessages());
+        assertEquals(1, fixture.compactionCheck.messages().size());
+        assertTrue(
+                fixture.compactionCheck.messageCharacterEstimate()
+                        >= prefix.content().length() + "你好".length());
+        assertTrue(
+                fixture.compactionRequest.sourceMessages().stream()
+                        .noneMatch(message -> prefix.content().equals(message.content())));
     }
 
     /** 关闭压缩时跳过策略Hook执行和持久化 */
@@ -500,6 +619,22 @@ class ApexAgentExecutionTest {
                         new ToolResultPatch(
                                 context.toolResult().content(), context.toolResult().metadata()),
                         new SkillActivationDelta(Set.of(skillName), Set.of()));
+            }
+        };
+    }
+
+    private LifecycleHook<AgentBuildContext, AgentBuildHookResult> buildHook(
+            java.util.function.Function<AgentBuildContext, List<AgentDefinitionOperation>> action) {
+        return new LifecycleHook<>() {
+            @Override
+            public HookTypeDescriptor descriptor() {
+                return new HookTypeDescriptor(
+                        HookPoint.AGENT_BUILD, AgentBuildContext.class, AgentBuildHookResult.class);
+            }
+
+            @Override
+            public AgentBuildHookResult apply(AgentBuildContext context) {
+                return new ContinueAgentBuild(action.apply(context));
             }
         };
     }

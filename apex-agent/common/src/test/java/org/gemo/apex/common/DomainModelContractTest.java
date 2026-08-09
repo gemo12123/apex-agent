@@ -9,10 +9,13 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.gemo.apex.common.agent.PrefixDeveloperMessage;
 import org.gemo.apex.common.agent.ToolSetDefinition;
 import org.gemo.apex.common.execution.*;
 import org.gemo.apex.common.hook.operation.SkillActivationDelta;
 import org.gemo.apex.common.json.JsonUtils;
+import org.gemo.apex.common.message.MessageRole;
+import org.gemo.apex.common.model.ModelRequest;
 import org.gemo.apex.common.model.ModelResponse;
 import org.gemo.apex.common.skill.SkillSetDefinition;
 import org.gemo.apex.common.snapshot.ToolExecutionSnapshot;
@@ -20,6 +23,37 @@ import org.gemo.apex.common.tool.*;
 import org.junit.jupiter.api.Test;
 
 class DomainModelContractTest {
+    /** 前置开发者消息只允许系统和用户文本，模型请求兼容旧构造器并冻结列表 */
+    @Test
+    void validatesPrefixDeveloperMessagesAndKeepsLegacyModelRequestConstructor() {
+        PrefixDeveloperMessage system = new PrefixDeveloperMessage(MessageRole.SYSTEM, "系统前置");
+        List<PrefixDeveloperMessage> source = new ArrayList<>(List.of(system));
+        ModelRequest request =
+                new ModelRequest(
+                        "系统",
+                        source,
+                        CommonFixtures.modelRequest().messages(),
+                        List.of(),
+                        Map.of());
+
+        source.add(new PrefixDeveloperMessage(MessageRole.USER, "用户前置"));
+
+        assertEquals(List.of(system), request.prefixDeveloperMessages());
+        assertTrue(CommonFixtures.modelRequest().prefixDeveloperMessages().isEmpty());
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> request.prefixDeveloperMessages().add(system));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new PrefixDeveloperMessage(MessageRole.ASSISTANT, "不允许"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new PrefixDeveloperMessage(MessageRole.TOOL, "不允许"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new PrefixDeveloperMessage(MessageRole.SYSTEM, " "));
+    }
+
     /** toolCall和ToolResult应无损往返并保持顺序 */
     @Test
     void toolCallAndToolResultRoundTripLosslesslyAndPreserveOrder() {
