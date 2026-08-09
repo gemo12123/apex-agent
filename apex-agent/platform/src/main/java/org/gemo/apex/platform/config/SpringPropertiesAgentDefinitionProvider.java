@@ -74,7 +74,7 @@ public final class SpringPropertiesAgentDefinitionProvider implements AgentDefin
                                                         binding ->
                                                                 new HookBinding(
                                                                         binding.getId(),
-                                                                        binding.getName(),
+                                                                        binding.getHook(),
                                                                         binding.getOrder(),
                                                                         binding.isEnabled(),
                                                                         binding.getTools(),

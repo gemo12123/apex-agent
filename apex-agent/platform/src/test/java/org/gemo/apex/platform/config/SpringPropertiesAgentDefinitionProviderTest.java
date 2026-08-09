@@ -3,7 +3,10 @@ package org.gemo.apex.platform.config;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import org.gemo.apex.common.hook.HookPoint;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.DefaultResourceLoader;
 
@@ -20,6 +23,11 @@ class SpringPropertiesAgentDefinitionProviderTest {
         agent.getMessageCompression().setCharacterHardLimit(120000L);
         agent.getTools().setAvailable(Set.of("search"));
         agent.getTools().setDefaultEnabled(Set.of("search"));
+        var hook = new ApexAgentPlatformProperties.Hook();
+        hook.setId("confirm-search");
+        hook.setHook("toolConfirmHook");
+        hook.setTools(List.of("search"));
+        agent.setHooks(Map.of("PRE_TOOL_CALL", List.of(hook)));
         var agents = new LinkedHashMap<String, ApexAgentPlatformProperties.Agent>();
         agents.put("default", agent);
         properties.setAgents(agents);
@@ -33,6 +41,9 @@ class SpringPropertiesAgentDefinitionProviderTest {
         assertTrue(provider.load("default").prompt().systemPrompt().contains("通用智能体"));
         assertEquals(32000L, provider.load("default").messageCompression().tokenThreshold());
         assertEquals(120000L, provider.load("default").messageCompression().characterHardLimit());
+        assertEquals(
+                "toolConfirmHook",
+                provider.load("default").hooks().get(HookPoint.PRE_TOOL_CALL).getFirst().name());
     }
 
     /** 多定义源和缺失Prompt应在构造期失败 */

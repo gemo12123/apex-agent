@@ -215,7 +215,7 @@ public class ApexAgentPlatformProperties {
 
     public static class Hook {
         private String id;
-        private String name;
+        private String hook;
         private int order;
         private boolean enabled = true;
         private List<String> tools = List.of();
@@ -229,12 +229,12 @@ public class ApexAgentPlatformProperties {
             this.id = id;
         }
 
-        public String getName() {
-            return name;
+        public String getHook() {
+            return hook;
         }
 
-        public void setName(String name) {
-            this.name = name;
+        public void setHook(String hook) {
+            this.hook = hook;
         }
 
         public int getOrder() {
