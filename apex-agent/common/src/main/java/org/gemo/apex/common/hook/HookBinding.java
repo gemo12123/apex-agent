@@ -8,14 +8,14 @@ import org.gemo.apex.common.support.DomainValues;
 
 public record HookBinding(
         String id,
-        String name,
+        String hook,
         int order,
         boolean enabled,
         List<String> tools,
         Map<String, Object> options) {
     public HookBinding {
         id = required(id, "id");
-        name = required(name, "name");
+        hook = required(hook, "hook");
         nonNegative(order, "order");
         tools =
                 immutableList(tools, "tools").stream()

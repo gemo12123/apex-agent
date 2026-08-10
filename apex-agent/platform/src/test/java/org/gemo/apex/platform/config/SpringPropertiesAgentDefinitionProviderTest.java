@@ -43,7 +43,7 @@ class SpringPropertiesAgentDefinitionProviderTest {
         assertEquals(120000L, provider.load("default").messageCompression().characterHardLimit());
         assertEquals(
                 "toolConfirmHook",
-                provider.load("default").hooks().get(HookPoint.PRE_TOOL_CALL).getFirst().name());
+                provider.load("default").hooks().get(HookPoint.PRE_TOOL_CALL).getFirst().hook());
     }
 
     /** 多定义源和缺失Prompt应在构造期失败 */

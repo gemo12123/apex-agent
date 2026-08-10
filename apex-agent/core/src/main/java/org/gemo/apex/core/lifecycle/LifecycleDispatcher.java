@@ -74,7 +74,7 @@ public final class LifecycleDispatcher {
                                         .thenComparing(HookBinding::id))
                         .toList();
         for (HookBinding binding : bindings) {
-            LifecycleHook hook = context.ports().hookResolver().resolve(point, binding.name());
+            LifecycleHook hook = context.ports().hookResolver().resolve(point, binding.hook());
             if (hook == null
                     || hook.descriptor() == null
                     || hook.descriptor().hookPoint() != point) {

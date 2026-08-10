@@ -11,6 +11,7 @@ import java.util.Set;
 import org.gemo.apex.common.exception.InvalidSnapshotException;
 import org.gemo.apex.common.exception.SnapshotDecodingException;
 import org.gemo.apex.common.exception.UnsupportedSnapshotVersionException;
+import org.gemo.apex.common.json.JsonUtils;
 import org.gemo.apex.common.snapshot.*;
 import org.gemo.apex.common.tool.CancellationToken;
 import org.gemo.apex.common.tool.ToolOrigin;
@@ -31,6 +32,21 @@ class SessionSnapshotContractTest {
         assertEquals(
                 List.of("audit", "confirm"),
                 copy.suspendedToolBatch().toolCalls().getFirst().executedPreToolHookIds());
+    }
+
+    /** HookBinding快照字段应与领域模型统一使用hook */
+    @Test
+    void writesHookBindingHookField() {
+        String json = new SessionSnapshotJsonAdapter().write(CommonFixtures.suspendedSnapshot());
+
+        var binding =
+                JsonUtils.parseTree(json)
+                        .path("activeDefinition")
+                        .path("hooks")
+                        .path("PRE_TOOL_CALL")
+                        .get(0);
+        assertEquals("confirm", binding.path("hook").asText());
+        assertFalse(binding.has("name"));
     }
 
     /** 未知版本应显式拒绝且不尝试升级 */

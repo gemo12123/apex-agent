@@ -104,7 +104,7 @@ public final class AgentDefinitionValidator {
                     throw new InvalidAgentDefinitionException(
                             "Hook 工具匹配超出 availableTools: " + binding.id());
                 }
-                LifecycleHook<?, ?> hook = ports.hookResolver().resolve(point, binding.name());
+                LifecycleHook<?, ?> hook = ports.hookResolver().resolve(point, binding.hook());
                 if (hook == null
                         || hook.descriptor() == null
                         || hook.descriptor().hookPoint() != point

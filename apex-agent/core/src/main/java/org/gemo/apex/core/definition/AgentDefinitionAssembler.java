@@ -95,7 +95,7 @@ public final class AgentDefinitionAssembler {
                         .toList();
         for (HookBinding binding : snapshot) {
             LifecycleHook hook =
-                    ports.hookResolver().resolve(HookPoint.AGENT_BUILD, binding.name());
+                    ports.hookResolver().resolve(HookPoint.AGENT_BUILD, binding.hook());
             try {
                 Object raw =
                         hook.apply(
@@ -257,7 +257,7 @@ public final class AgentDefinitionAssembler {
         }
         return new HookBinding(
                 binding.id(),
-                binding.name(),
+                binding.hook(),
                 binding.order(),
                 binding.enabled(),
                 retainedPatterns,
