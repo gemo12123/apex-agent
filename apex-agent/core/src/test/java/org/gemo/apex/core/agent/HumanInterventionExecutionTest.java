@@ -97,6 +97,7 @@ class HumanInterventionExecutionTest {
         AgentRunOutcome outcome = resumed.run();
 
         assertInstanceOf(AgentRunOutcome.Suspended.class, outcome);
+        assertEquals(2, scenario.fixture.windowLoads);
         assertEquals(
                 List.of("pre-1", "pre-2"),
                 resumed.snapshot()

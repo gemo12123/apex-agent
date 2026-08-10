@@ -110,7 +110,7 @@ public final class ModelStepExecutor {
                         context.modelResponse().text(),
                         payload,
                         context.ports().timeProvider().now());
-        context.ports().conversationRepository().append(List.of(entry));
+        context.appendConversation(List.of(entry));
         context.updateIteration(
                 context.modelRequest(),
                 context.modelResponse(),

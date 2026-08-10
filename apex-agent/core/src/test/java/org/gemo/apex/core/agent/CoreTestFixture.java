@@ -48,6 +48,7 @@ final class CoreTestFixture {
     int providerLoads;
     int modelCalls;
     int toolCalls;
+    int windowLoads;
     RuntimeException modelFailure;
     boolean failSuspensionSave;
     int remainingSessionSaveFailures;
@@ -180,6 +181,7 @@ final class CoreTestFixture {
                     }
                 },
                 request -> {
+                    windowLoads++;
                     List<AgentMessageEntry> messages =
                             new ArrayList<>(
                                     conversation.stream()

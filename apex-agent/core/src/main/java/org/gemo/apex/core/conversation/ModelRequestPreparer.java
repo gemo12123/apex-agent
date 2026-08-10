@@ -7,7 +7,6 @@ import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.common.hook.context.PostMessageCompressionContext;
 import org.gemo.apex.common.hook.context.PreMessageCompressionContext;
 import org.gemo.apex.common.message.AgentMessageEntry;
-import org.gemo.apex.common.message.MessageRole;
 import org.gemo.apex.common.message.MessageType;
 import org.gemo.apex.common.model.ModelRequest;
 import org.gemo.apex.common.tool.ToolDefinition;
@@ -28,12 +27,7 @@ public final class ModelRequestPreparer {
         context.ports().cancellationToken().throwIfCancellationRequested();
         var compression = context.definition().definition().messageCompression();
         int maxMessages = compression.maxMessages();
-        ConversationWindow window =
-                context.ports()
-                        .windowManager()
-                        .prepare(
-                                new ConversationWindowRequest(
-                                        new ConversationQuery(context.snapshot().sessionId())));
+        ConversationWindow window = context.conversationWindow();
         List<ToolDefinition> tools =
                 context.toolCatalog().ordered().stream()
                         .filter(
@@ -136,15 +130,11 @@ public final class ModelRequestPreparer {
         if (post instanceof LifecycleDispatchOutcome.EndTurn end) {
             return new PreparationOutcome.EndTurn(end.reason());
         }
-        List<AgentMessageEntry> compactedMessages = new ArrayList<>();
-        compactedMessages.add(summaryMessage(context.snapshot().sessionId(), summary));
-        compactedMessages.addAll(context.compactionResult().retainedMessages());
-        compactedMessages.sort(Comparator.comparingLong(AgentMessageEntry::sortNo));
         ModelRequest compacted =
                 new ModelRequest(
                         systemPrompt,
                         base.prefixDeveloperMessages(),
-                        compactedMessages,
+                        context.conversationWindow().messages(),
                         tools,
                         base.options());
         context.modelRequest(compacted);
@@ -157,14 +147,12 @@ public final class ModelRequestPreparer {
             ConversationSummary summary) {
         List<String> ids =
                 result.retainedMessages().stream().map(AgentMessageEntry::entryId).toList();
-        context.ports()
-                .conversationRepository()
-                .compact(
-                        new ConversationCompactionCommit(
-                                context.snapshot().sessionId(),
-                                summary,
-                                ids,
-                                result.retainedMessages()));
+        context.compactConversation(
+                new ConversationCompactionCommit(
+                        context.snapshot().sessionId(),
+                        summary,
+                        ids,
+                        result.retainedMessages()));
         context.save();
     }
 
@@ -189,21 +177,6 @@ public final class ModelRequestPreparer {
                 discarded.getLast().sortNo(),
                 discarded.getLast().turnNo(),
                 context.ports().timeProvider().now());
-    }
-
-    private AgentMessageEntry summaryMessage(String sessionId, ConversationSummary summary) {
-        return new AgentMessageEntry(
-                "summary:" + summary.compactionId(),
-                sessionId,
-                summary.sourceTurnNo(),
-                summary.sourceEndSortNo(),
-                MessageRole.SYSTEM,
-                MessageType.SUMMARY,
-                summary.content(),
-                Map.of(
-                        "sourceStartSortNo", summary.sourceStartSortNo(),
-                        "sourceEndSortNo", summary.sourceEndSortNo()),
-                summary.updatedTime());
     }
 
     public sealed interface PreparationOutcome {

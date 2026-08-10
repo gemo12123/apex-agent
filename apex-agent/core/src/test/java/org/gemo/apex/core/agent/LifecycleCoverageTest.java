@@ -273,6 +273,11 @@ class LifecycleCoverageTest {
                         new AgentDefinitionSnapshot(fixture.definition),
                         new ToolCatalog(List.copyOf(fixture.tools.values())),
                         fresh.snapshot(),
+                        ports.windowManager()
+                                .prepare(
+                                        new org.gemo.apex.common.conversation.ConversationWindowRequest(
+                                                new org.gemo.apex.common.conversation.ConversationQuery(
+                                                        "session-1"))),
                         null);
         context.startIteration(1);
         ToolCall call = new ToolCall("call-1", "ask_human", 0, Map.of(), Map.of());

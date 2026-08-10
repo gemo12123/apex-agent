@@ -4,13 +4,19 @@ import java.time.Instant;
 import java.util.*;
 import org.gemo.apex.common.agent.AgentDefinitionRecoverySnapshot;
 import org.gemo.apex.common.agent.AgentDefinitionSnapshot;
+import org.gemo.apex.common.conversation.ConversationCompactionCommit;
 import org.gemo.apex.common.conversation.ConversationCompactionRequest;
 import org.gemo.apex.common.conversation.ConversationCompactionResult;
+import org.gemo.apex.common.conversation.ConversationSummary;
+import org.gemo.apex.common.conversation.ConversationWindow;
 import org.gemo.apex.common.execution.IterationStatus;
 import org.gemo.apex.common.execution.SessionStatus;
 import org.gemo.apex.common.execution.TurnStatus;
 import org.gemo.apex.common.hook.operation.SkillActivationDelta;
 import org.gemo.apex.common.intervention.HumanSubmission;
+import org.gemo.apex.common.message.AgentMessageEntry;
+import org.gemo.apex.common.message.MessageRole;
+import org.gemo.apex.common.message.MessageType;
 import org.gemo.apex.common.model.ModelRequest;
 import org.gemo.apex.common.model.ModelResponse;
 import org.gemo.apex.common.snapshot.*;
@@ -26,6 +32,7 @@ public final class ApexAgentContext {
     private final AgentDefinitionSnapshot definition;
     private final ToolCatalog toolCatalog;
     private SessionSnapshot snapshot;
+    private ConversationWindow conversationWindow;
     private ModelRequest modelRequest;
     private ModelResponse modelResponse;
     private ToolCall toolCall;
@@ -41,11 +48,16 @@ public final class ApexAgentContext {
             AgentDefinitionSnapshot definition,
             ToolCatalog toolCatalog,
             SessionSnapshot snapshot,
+            ConversationWindow conversationWindow,
             Map<String, Object> humanResponses) {
         this.ports = ports;
         this.definition = definition;
         this.toolCatalog = toolCatalog;
         this.snapshot = snapshot;
+        if (!snapshot.sessionId().equals(conversationWindow.sessionId())) {
+            throw new IllegalArgumentException("ConversationWindow 必须属于当前 Session");
+        }
+        this.conversationWindow = conversationWindow;
         this.humanResponses = humanResponses == null ? null : Map.copyOf(humanResponses);
     }
 
@@ -63,6 +75,27 @@ public final class ApexAgentContext {
 
     public SessionSnapshot snapshot() {
         return snapshot;
+    }
+
+    public ConversationWindow conversationWindow() {
+        return conversationWindow;
+    }
+
+    /** 预先构造下一窗口，Repository 成功后再替换内存状态。 */
+    public void appendConversation(List<AgentMessageEntry> entries) {
+        ConversationAppend append = prepareAppend(entries);
+        if (append.newEntries().isEmpty()) {
+            return;
+        }
+        ports.conversationRepository().append(append.newEntries());
+        conversationWindow = append.window();
+    }
+
+    /** 压缩提交成功后，将有效窗口同步切换为累计摘要与保留尾部。 */
+    public void compactConversation(ConversationCompactionCommit commit) {
+        ConversationWindow next = prepareCompactedWindow(commit);
+        ports.conversationRepository().compact(commit);
+        conversationWindow = next;
     }
 
     public ModelRequest modelRequest() {
@@ -412,6 +445,96 @@ public final class ApexAgentContext {
                         value + 1,
                         snapshot.lastActiveTime());
         return value;
+    }
+
+    private ConversationAppend prepareAppend(List<AgentMessageEntry> entries) {
+        Objects.requireNonNull(entries, "entries");
+        List<AgentMessageEntry> messages = new ArrayList<>(conversationWindow.messages());
+        List<AgentMessageEntry> additions = new ArrayList<>();
+        for (AgentMessageEntry entry : List.copyOf(entries)) {
+            if (!snapshot.sessionId().equals(entry.sessionId())) {
+                throw new IllegalArgumentException("追加消息必须属于当前 Session");
+            }
+            if (entry.messageType() == MessageType.SUMMARY) {
+                throw new IllegalArgumentException("SUMMARY 不能作为普通消息追加");
+            }
+            ConversationSummary summary = conversationWindow.summary();
+            if (summary != null && entry.sortNo() <= summary.sourceEndSortNo()) {
+                throw new IllegalStateException("追加消息不能位于摘要覆盖范围内");
+            }
+            AgentMessageEntry sameId =
+                    messages.stream()
+                            .filter(current -> current.entryId().equals(entry.entryId()))
+                            .findFirst()
+                            .orElse(null);
+            if (sameId != null) {
+                if (!samePersistentMessage(sameId, entry)) {
+                    throw new IllegalStateException("消息 entryId 冲突: " + entry.entryId());
+                }
+                continue;
+            }
+            if (messages.stream().anyMatch(current -> current.sortNo() == entry.sortNo())) {
+                throw new IllegalStateException("消息 sortNo 冲突: " + entry.sortNo());
+            }
+            messages.add(entry);
+            additions.add(entry);
+        }
+        messages.sort(Comparator.comparingLong(AgentMessageEntry::sortNo));
+        return new ConversationAppend(window(conversationWindow.summary(), messages), additions);
+    }
+
+    private ConversationWindow prepareCompactedWindow(ConversationCompactionCommit commit) {
+        if (!snapshot.sessionId().equals(commit.sessionId())) {
+            throw new IllegalArgumentException("压缩提交必须属于当前 Session");
+        }
+        List<AgentMessageEntry> messages = new ArrayList<>();
+        messages.add(summaryMessage(commit.summary()));
+        messages.addAll(commit.finalMessages());
+        messages.sort(Comparator.comparingLong(AgentMessageEntry::sortNo));
+        return window(commit.summary(), messages);
+    }
+
+    private ConversationWindow window(
+            ConversationSummary summary, List<AgentMessageEntry> messages) {
+        return new ConversationWindow(
+                snapshot.sessionId(),
+                summary,
+                messages,
+                messages.isEmpty() ? null : messages.getFirst().sortNo(),
+                messages.isEmpty() ? null : messages.getLast().sortNo());
+    }
+
+    private AgentMessageEntry summaryMessage(ConversationSummary summary) {
+        return new AgentMessageEntry(
+                "summary:" + summary.compactionId(),
+                snapshot.sessionId(),
+                summary.sourceTurnNo(),
+                summary.sourceEndSortNo(),
+                MessageRole.SYSTEM,
+                MessageType.SUMMARY,
+                summary.content(),
+                Map.of(
+                        "sourceStartSortNo", summary.sourceStartSortNo(),
+                        "sourceEndSortNo", summary.sourceEndSortNo()),
+                summary.updatedTime());
+    }
+
+    private boolean samePersistentMessage(AgentMessageEntry left, AgentMessageEntry right) {
+        return left.entryId().equals(right.entryId())
+                && left.sessionId().equals(right.sessionId())
+                && left.turnNo() == right.turnNo()
+                && left.sortNo() == right.sortNo()
+                && left.role() == right.role()
+                && left.messageType() == right.messageType()
+                && Objects.equals(left.content(), right.content())
+                && left.payload().equals(right.payload());
+    }
+
+    private record ConversationAppend(
+            ConversationWindow window, List<AgentMessageEntry> newEntries) {
+        private ConversationAppend {
+            newEntries = List.copyOf(newEntries);
+        }
     }
 
     private void replaceSnapshot(

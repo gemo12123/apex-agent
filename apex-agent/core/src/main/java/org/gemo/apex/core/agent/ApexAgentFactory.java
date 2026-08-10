@@ -5,6 +5,9 @@ import org.gemo.apex.common.agent.*;
 import org.gemo.apex.common.execution.AgentRequest;
 import org.gemo.apex.common.execution.SessionStatus;
 import org.gemo.apex.common.execution.TurnStatus;
+import org.gemo.apex.common.conversation.ConversationQuery;
+import org.gemo.apex.common.conversation.ConversationWindow;
+import org.gemo.apex.common.conversation.ConversationWindowRequest;
 import org.gemo.apex.common.intervention.HumanResponseCommand;
 import org.gemo.apex.common.message.AgentMessageEntry;
 import org.gemo.apex.common.message.MessageRole;
@@ -73,13 +76,20 @@ public final class ApexAgentFactory {
                         request.query(),
                         Map.of(),
                         now);
-        ports.cancellationToken().throwIfCancellationRequested();
-        ports.conversationRepository().append(List.of(user));
-        ports.cancellationToken().throwIfCancellationRequested();
-        ports.sessionRepository().save(snapshot);
-        return new ApexAgent(
+        ConversationWindow window = loadWindow(request.sessionId(), ports);
+        ApexAgentContext context =
                 new ApexAgentContext(
-                        ports, assembly.definition(), assembly.toolCatalog(), snapshot, null));
+                        ports,
+                        assembly.definition(),
+                        assembly.toolCatalog(),
+                        snapshot,
+                        window,
+                        null);
+        ports.cancellationToken().throwIfCancellationRequested();
+        context.appendConversation(List.of(user));
+        ports.cancellationToken().throwIfCancellationRequested();
+        context.save();
+        return new ApexAgent(context);
     }
 
     /** 创建人工介入后的恢复执行，并校验所有权、挂起状态和 ToolCall 的唯一对应关系。 */
@@ -128,7 +138,17 @@ public final class ApexAgentFactory {
                         assembly.definition(),
                         assembly.toolCatalog(),
                         resumedSnapshot,
+                        loadWindow(command.sessionId(), ports),
                         command.response()));
+    }
+
+    private ConversationWindow loadWindow(String sessionId, AgentPorts ports) {
+        ports.cancellationToken().throwIfCancellationRequested();
+        ConversationWindow window =
+                ports.windowManager()
+                        .prepare(new ConversationWindowRequest(new ConversationQuery(sessionId)));
+        ports.cancellationToken().throwIfCancellationRequested();
+        return window;
     }
 
     /** 拒绝越权请求及尚未结束或等待人工响应的会话上创建新 Turn。 */

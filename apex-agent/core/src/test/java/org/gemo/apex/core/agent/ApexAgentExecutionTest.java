@@ -145,6 +145,43 @@ class ApexAgentExecutionTest {
         assertEquals(1, fixture.events.stream().filter(EndMessage.class::isInstance).count());
     }
 
+    /** 同一次execution只加载一次窗口，后续Iteration使用Context中的写穿结果。 */
+    @Test
+    void loadsConversationWindowOnceAndReusesWriteThroughMessagesAcrossIterations() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        fixture.tool(
+                "tool",
+                (call, context, observer) ->
+                        new ToolResult(call.toolCallId(), call.name(), "工具结果", Map.of()));
+        fixture.definition = fixture.definition(Map.of(), Set.of("tool"), Set.of("tool"));
+        fixture.modelResponses.add(
+                new ModelResponse(
+                        "",
+                        List.of(new ToolCall("call-1", "tool", 0, Map.of(), Map.of())),
+                        Map.of()));
+        fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
+
+        AgentRunOutcome outcome = create(fixture).run();
+
+        assertInstanceOf(AgentRunOutcome.Completed.class, outcome);
+        assertEquals(1, fixture.windowLoads);
+        assertEquals(
+                List.of(MessageRole.USER),
+                fixture.modelRequests.getFirst().messages().stream()
+                        .map(message -> message.role())
+                        .toList());
+        assertEquals(
+                List.of(MessageRole.USER, MessageRole.ASSISTANT, MessageRole.TOOL),
+                fixture.modelRequests.getLast().messages().stream()
+                        .map(message -> message.role())
+                        .toList());
+        assertEquals(
+                List.of(MessageType.TEXT, MessageType.TOOL_CALLS, MessageType.TOOL_RESULT),
+                fixture.modelRequests.getLast().messages().stream()
+                        .map(message -> message.messageType())
+                        .toList());
+    }
+
     /** 多ToolCall按序执行并在工具异常后继续下一轮模型 */
     @Test
     void executesMultipleToolCallsInOrderAndContinuesNextModelRoundAfterToolException() {
@@ -290,6 +327,34 @@ class ApexAgentExecutionTest {
         assertTrue(
                 fixture.compactionRequest.sourceMessages().stream()
                         .noneMatch(message -> prefix.content().equals(message.content())));
+    }
+
+    /** 压缩后的下一Iteration直接复用Context窗口，不重新加载会话历史。 */
+    @Test
+    void reusesCompactedContextWindowWithoutReloadingOnNextIteration() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        fixture.compact = true;
+        fixture.tool(
+                "tool",
+                (call, context, observer) ->
+                        new ToolResult(call.toolCallId(), call.name(), "工具结果", Map.of()));
+        fixture.definition = fixture.definition(Map.of(), Set.of("tool"), Set.of("tool"));
+        fixture.modelResponses.add(
+                new ModelResponse(
+                        "",
+                        List.of(new ToolCall("call-1", "tool", 0, Map.of(), Map.of())),
+                        Map.of()));
+        fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
+
+        AgentRunOutcome outcome = create(fixture).run();
+
+        assertInstanceOf(AgentRunOutcome.Completed.class, outcome);
+        assertEquals(1, fixture.windowLoads);
+        assertEquals(
+                List.of(MessageType.SUMMARY, MessageType.TOOL_RESULT),
+                fixture.modelRequests.getLast().messages().stream()
+                        .map(message -> message.messageType())
+                        .toList());
     }
 
     /** 关闭压缩时跳过策略Hook执行和持久化 */

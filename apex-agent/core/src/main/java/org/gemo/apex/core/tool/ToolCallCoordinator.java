@@ -414,7 +414,7 @@ public final class ToolCallCoordinator {
                             stableEntryId == null
                                     ? context.ports().idGenerator().newEntryId()
                                     : stableEntryId);
-            context.ports().conversationRepository().append(List.of(entry));
+            context.appendConversation(List.of(entry));
             context.applyPendingSkillActivation();
             context.addToolResults(List.of(result));
             context.save();
@@ -439,7 +439,7 @@ public final class ToolCallCoordinator {
                                                 result,
                                                 context.ports().idGenerator().newEntryId()))
                         .toList();
-        context.ports().conversationRepository().append(entries);
+        context.appendConversation(entries);
         context.addToolResults(batch);
         context.save();
     }
@@ -454,7 +454,7 @@ public final class ToolCallCoordinator {
                                                 result,
                                                 context.ports().idGenerator().newEntryId()))
                         .toList();
-        context.ports().conversationRepository().append(entries);
+        context.appendConversation(entries);
         context.addToolResults(batch);
         context.cancel();
         context.ports().sessionRepository().save(context.snapshot());
