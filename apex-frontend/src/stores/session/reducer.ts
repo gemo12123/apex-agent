@@ -249,8 +249,14 @@ export function applyEnvelope(state: SessionViewModel, envelope: SseEnvelope): S
       nextState.pendingInterventions = createPendingInterventionRecords(envelope)
       nextState.status = 'waiting-intervention'
       return nextState
+    case 'TASK_ERROR':
+      nextState.status = 'error'
+      return nextState
     case 'END':
       if (!context.execution_status) {
+        if (nextState.status === 'error') {
+          return nextState
+        }
         nextState.status = nextState.pendingInterventions.length > 0
           ? 'waiting-intervention'
           : 'completed'

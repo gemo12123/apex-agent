@@ -297,6 +297,22 @@ describe('session reducer', () => {
     expect(state.status).toBe('error')
   })
 
+  it('TASK_ERROR 后的裸 END 保持 error 状态', () => {
+    let state = startAssistantMessage(createSessionViewModel())
+    state = applyEnvelope(state, {
+      event_type: 'TASK_ERROR',
+      context: { mode: 'react' },
+      messages: [{ message: 'model down' }],
+    } satisfies SseEnvelope)
+    state = applyEnvelope(state, {
+      event_type: 'END',
+      context: {},
+      messages: [],
+    } satisfies SseEnvelope)
+
+    expect(state.status).toBe('error')
+  })
+
   it('END 携带 HUMAN_IN_THE_LOOP 时保持统一等待状态', () => {
     let state = applyEnvelope(createSessionViewModel(), humanInterventionEnvelope())
 

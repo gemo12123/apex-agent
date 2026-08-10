@@ -77,6 +77,17 @@ public final class AgentEventFactory {
         return EndMessage.builder().build();
     }
 
+    public TaskErrorMessage taskError(Throwable error) {
+        String message = error.getMessage();
+        if (message == null || message.isBlank()) {
+            message = "Agent 执行失败";
+        }
+        return TaskErrorMessage.builder()
+                .context(context(Map.of()))
+                .messages(List.of(new TaskErrorMessage.ErrorDetail(message)))
+                .build();
+    }
+
     private Map<String, Object> context(Map<String, Object> extra) {
         Map<String, Object> result = new LinkedHashMap<>(extra);
         result.put("mode", "react");

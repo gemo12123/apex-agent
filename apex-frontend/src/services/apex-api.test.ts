@@ -53,18 +53,13 @@ describe('createApexApiClient', () => {
     )
   })
 
-  it('parses terminal SSE envelopes with explicit execution status', async () => {
+  it('parses TASK_ERROR SSE envelopes', async () => {
     vi.mocked(fetchEventSource).mockImplementationOnce(async (_url, options) => {
       options?.onmessage?.({
         data: JSON.stringify({
-          event_type: 'END',
-          context: {
-            mode: 'react',
-            execution_status: 'FAILED',
-            error_code: 'STREAM_EXECUTION_FAILED',
-            error_message: 'boom',
-          },
-          messages: [],
+          event_type: 'TASK_ERROR',
+          context: { mode: 'react' },
+          messages: [{ message: 'boom' }],
         } satisfies SseEnvelope),
         event: 'message',
         id: 'event-1',
@@ -84,11 +79,8 @@ describe('createApexApiClient', () => {
 
     expect(onEnvelope).toHaveBeenCalledWith(
       expect.objectContaining({
-        event_type: 'END',
-        context: expect.objectContaining({
-          execution_status: 'FAILED',
-          error_code: 'STREAM_EXECUTION_FAILED',
-        }),
+        event_type: 'TASK_ERROR',
+        messages: [{ message: 'boom' }],
       }),
     )
   })

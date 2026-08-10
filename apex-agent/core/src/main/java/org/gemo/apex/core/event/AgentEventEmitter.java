@@ -7,6 +7,7 @@ import org.gemo.apex.protocol.event.AgentMessage;
 public final class AgentEventEmitter {
     private final AgentEventPublisher publisher;
     private final AgentEventFactory factory;
+    private boolean taskErrorRequested;
     private boolean endRequested;
 
     public AgentEventEmitter(AgentEventPublisher publisher, AgentEventFactory factory) {
@@ -22,6 +23,13 @@ public final class AgentEventEmitter {
         if (!endRequested) {
             endRequested = true;
             publisher.publish(factory.end());
+        }
+    }
+
+    public void requestTaskError(Throwable error) {
+        if (!taskErrorRequested) {
+            taskErrorRequested = true;
+            publisher.publish(factory.taskError(error));
         }
     }
 }

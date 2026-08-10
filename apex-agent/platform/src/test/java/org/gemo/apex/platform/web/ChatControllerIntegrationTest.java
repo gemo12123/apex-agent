@@ -2,6 +2,7 @@ package org.gemo.apex.platform.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -11,6 +12,7 @@ import java.util.Map;
 import java.util.concurrent.Executor;
 import org.gemo.apex.common.execution.AgentRequest;
 import org.gemo.apex.common.model.ModelResponse;
+import org.gemo.apex.extension.model.ModelGateway;
 import org.gemo.apex.platform.config.ApexAgentPlatformProperties;
 import org.gemo.apex.platform.web.sse.RequestBoundAgentEventPublisherFactory;
 import org.gemo.apex.platform.web.sse.SseEmitterAgentEventPublisher;
@@ -58,6 +60,42 @@ class ChatControllerIntegrationTest {
                         .getResponse()
                         .getContentAsString();
         assertEquals(1, occurrences(body, "\"event_type\":\"END\""));
+    }
+
+    /** Agent循环异常依次输出TaskError和裸End */
+    @Test
+    void emitsTaskErrorBeforeBareEndWhenAgentLoopFails() throws Exception {
+        var fixture =
+                fixture(
+                        Runnable::run,
+                        (request, observer) -> {
+                            throw new IllegalStateException("model down");
+                        });
+        MvcResult started =
+                fixture.mvc()
+                        .perform(
+                                post("/api/sse/chat")
+                                        .header("X-User-Id", "user-1")
+                                        .contentType(MediaType.APPLICATION_JSON)
+                                        .content(
+                                                "{\"sessionId\":\"failed\",\"agentKey\":\"default\",\"type\":\"NEW\",\"query\":\"hello\"}"))
+                        .andExpect(request().asyncStarted())
+                        .andReturn();
+        String body =
+                fixture.mvc()
+                        .perform(asyncDispatch(started))
+                        .andExpect(status().isOk())
+                        .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                        .andReturn()
+                        .getResponse()
+                        .getContentAsString();
+
+        String taskError =
+                "{\"event_type\":\"TASK_ERROR\",\"context\":{\"mode\":\"react\"},\"messages\":[{\"message\":\"model down\"}]}";
+        String end = "{\"event_type\":\"END\"}";
+        assertEquals(1, occurrences(body, taskError));
+        assertEquals(1, occurrences(body, end));
+        assertTrue(body.indexOf(taskError) < body.indexOf(end));
     }
 
     /** 参数错误返回400且Busy返回409并且均无End */
@@ -163,11 +201,15 @@ class ChatControllerIntegrationTest {
     }
 
     private Fixture fixture(Executor executor) {
+        return fixture(
+                executor, (request, observer) -> new ModelResponse("完成", List.of(), Map.of()));
+    }
+
+    private Fixture fixture(Executor executor, ModelGateway modelGateway) {
         var publishers = new RequestBoundAgentEventPublisherFactory();
         runtime =
                 ApexAgentRuntime.builder()
-                        .modelGateway(
-                                (request, observer) -> new ModelResponse("完成", List.of(), Map.of()))
+                        .modelGateway(modelGateway)
                         .defaultEventPublisherFactory(publishers)
                         .build();
         var properties = new ApexAgentPlatformProperties();

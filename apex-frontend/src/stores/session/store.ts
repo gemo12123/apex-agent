@@ -255,6 +255,10 @@ export const useSessionStore = defineStore('session', () => {
 
     try {
       await getApexApiClient().streamChat(request, userId.value, controller.signal, (envelope) => {
+        if (envelope.event_type === 'TASK_ERROR') {
+          const message = envelope.messages[0]?.message
+          errorMessage.value = message?.trim() ? message : 'Agent 执行失败。'
+        }
         session.value = applyEnvelope(session.value, envelope)
       })
     } catch (error) {

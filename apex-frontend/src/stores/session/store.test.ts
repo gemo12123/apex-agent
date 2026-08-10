@@ -226,7 +226,7 @@ describe('useSessionStore', () => {
     expect(store.session.status).toBe('completed')
   })
 
-  it('marks the active session as error when the stream terminates with FAILED status', async () => {
+  it('展示 TASK_ERROR message，并在后续 END 后保持 error', async () => {
     const mockClient: ApexApiClient = {
       async fetchAgents() {
         return [{ agentKey: 'default_agent', name: 'Default Agent' }]
@@ -239,13 +239,13 @@ describe('useSessionStore', () => {
             messages: [{ content: 'hello' }],
           },
           {
+            event_type: 'TASK_ERROR',
+            context: { mode: 'react' },
+            messages: [{ message: 'boom' }],
+          },
+          {
             event_type: 'END',
-            context: {
-              mode: 'react',
-              execution_status: 'FAILED',
-              error_code: 'STREAM_EXECUTION_FAILED',
-              error_message: 'boom',
-            },
+            context: {},
             messages: [],
           },
         ]
@@ -262,7 +262,33 @@ describe('useSessionStore', () => {
     await store.sendPrompt('Trigger failure')
 
     expect(store.session.status).toBe('error')
+    expect(store.errorMessage).toBe('boom')
     expect(localStorage.getItem('apex:active-session:v1')).toBeNull()
+  })
+
+  it('TASK_ERROR 缺少有效 message 时展示固定兜底', async () => {
+    const mockClient: ApexApiClient = {
+      async fetchAgents() {
+        return [{ agentKey: 'default_agent', name: 'Default Agent' }]
+      },
+      async streamChat(_request, _userId, _signal, onEnvelope) {
+        onEnvelope({
+          event_type: 'TASK_ERROR',
+          context: { mode: 'react' },
+          messages: [{ message: '   ' }],
+        })
+        onEnvelope({ event_type: 'END', context: {}, messages: [] })
+      },
+    }
+
+    setActivePinia(createPinia())
+    setApexApiClientForTesting(mockClient)
+    const store = useSessionStore()
+    await store.initialize()
+    await store.sendPrompt('Trigger failure')
+
+    expect(store.session.status).toBe('error')
+    expect(store.errorMessage).toBe('Agent 执行失败。')
   })
 
   it('刷新后恢复完整人工介入批次且不自动提交', async () => {

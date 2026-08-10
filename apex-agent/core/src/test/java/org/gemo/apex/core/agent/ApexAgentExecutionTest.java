@@ -33,6 +33,7 @@ import org.gemo.apex.common.tool.ToolCall;
 import org.gemo.apex.common.tool.ToolResult;
 import org.gemo.apex.extension.hook.LifecycleHook;
 import org.gemo.apex.protocol.event.EndMessage;
+import org.gemo.apex.protocol.event.TaskErrorMessage;
 import org.junit.jupiter.api.Test;
 
 class ApexAgentExecutionTest {
@@ -361,6 +362,11 @@ class ApexAgentExecutionTest {
         assertEquals(TurnStatus.FAILED, agent.snapshot().activeTurn().status());
         assertEquals(
                 IterationStatus.FAILED, agent.snapshot().activeTurn().currentIteration().status());
+        assertEquals(2, fixture.events.size());
+        TaskErrorMessage taskError =
+                assertInstanceOf(TaskErrorMessage.class, fixture.events.getFirst());
+        assertEquals("model down", taskError.getMessages().getFirst().getMessage());
+        assertInstanceOf(EndMessage.class, fixture.events.getLast());
     }
 
     /** prepared取消不创建Iteration或调用模型工具Hook */

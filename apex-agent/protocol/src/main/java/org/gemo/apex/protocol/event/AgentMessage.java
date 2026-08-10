@@ -33,6 +33,7 @@ import lombok.experimental.SuperBuilder;
     @JsonSubTypes.Type(
             value = TaskThinkChangeMessage.class,
             name = AgentEventType.TASK_THINK_CHANGE),
+    @JsonSubTypes.Type(value = TaskErrorMessage.class, name = AgentEventType.TASK_ERROR),
     @JsonSubTypes.Type(
             value = ArtifactDeclaredMessage.class,
             name = AgentEventType.ARTIFACT_DECLARED),

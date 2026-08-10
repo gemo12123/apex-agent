@@ -47,9 +47,10 @@ class ProtocolDtoTest {
                         .map(JsonSubTypes.Type::name)
                         .collect(Collectors.toSet());
 
-        assertEquals(12, constants.size());
+        assertEquals(13, constants.size());
         assertEquals(constants, subtypeNames);
         assertEquals("STREAM_CONTENT", AgentEventType.STREAM_CONTENT);
+        assertEquals("TASK_ERROR", AgentEventType.TASK_ERROR);
         assertEquals("HUMAN_INTERVENTION", AgentEventType.HUMAN_INTERVENTION);
     }
 

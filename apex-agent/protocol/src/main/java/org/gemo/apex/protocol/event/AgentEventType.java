@@ -9,6 +9,7 @@ public final class AgentEventType {
     public static final String INVOCATION_CHANGE = "INVOCATION_CHANGE";
     public static final String TASK_THINK_DECLARED = "TASK_THINK_DECLARED";
     public static final String TASK_THINK_CHANGE = "TASK_THINK_CHANGE";
+    public static final String TASK_ERROR = "TASK_ERROR";
     public static final String ARTIFACT_DECLARED = "ARTIFACT_DECLARED";
     public static final String ARTIFACT_CHANGE = "ARTIFACT_CHANGE";
     public static final String END = "END";

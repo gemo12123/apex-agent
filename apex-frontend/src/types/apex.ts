@@ -35,6 +35,10 @@ export interface StreamMessage {
   content: string
 }
 
+export interface TaskErrorDetail {
+  message: string
+}
+
 export interface PlanMessage {
   stage_id: string
   stage_name: string
@@ -158,6 +162,7 @@ export type InvocationDeclaredEnvelope = SseEnvelopeBase<'INVOCATION_DECLARED', 
 export type InvocationChangeEnvelope = SseEnvelopeBase<'INVOCATION_CHANGE', InvocationChangeDetail>
 export type ArtifactDeclaredEnvelope = SseEnvelopeBase<'ARTIFACT_DECLARED', ArtifactDeclaredDetail>
 export type ArtifactChangeEnvelope = SseEnvelopeBase<'ARTIFACT_CHANGE', ArtifactChangeDetail>
+export type TaskErrorEnvelope = SseEnvelopeBase<'TASK_ERROR', TaskErrorDetail>
 export type HumanInterventionDetail = AskHumanInterventionDetail | ToolConfirmationDetail
 export type HumanInterventionEnvelope = SseEnvelopeBase<
   'HUMAN_INTERVENTION',
@@ -174,6 +179,7 @@ export type SseEnvelope =
   | InvocationChangeEnvelope
   | ArtifactDeclaredEnvelope
   | ArtifactChangeEnvelope
+  | TaskErrorEnvelope
   | HumanInterventionEnvelope
   | EndEnvelope
 

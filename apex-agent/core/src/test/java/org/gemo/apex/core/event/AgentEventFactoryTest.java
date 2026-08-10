@@ -11,6 +11,7 @@ import org.gemo.apex.common.snapshot.PreparedToolCallDisposition;
 import org.gemo.apex.common.snapshot.PreparedToolCallSnapshot;
 import org.gemo.apex.common.snapshot.SuspendedToolBatch;
 import org.gemo.apex.protocol.event.EndMessage;
+import org.gemo.apex.protocol.event.TaskErrorMessage;
 import org.junit.jupiter.api.Test;
 
 class AgentEventFactoryTest {
@@ -61,5 +62,15 @@ class AgentEventFactoryTest {
     void endPreservesEmptyMessageProtocolExactly() {
         assertEquals("{\"event_type\":\"END\"}", JsonUtils.toJson(factory.end()));
         assertInstanceOf(EndMessage.class, factory.end());
+    }
+
+    /** taskError仅输出异常message，空message使用固定兜底 */
+    @Test
+    void taskErrorPublishesOnlyMessageWithFallback() {
+        assertEquals(
+                "{\"event_type\":\"TASK_ERROR\",\"context\":{\"mode\":\"react\"},\"messages\":[{\"message\":\"model down\"}]}",
+                JsonUtils.toJson(factory.taskError(new IllegalStateException("model down"))));
+        TaskErrorMessage fallback = factory.taskError(new IllegalStateException());
+        assertEquals("Agent 执行失败", fallback.getMessages().getFirst().getMessage());
     }
 }

@@ -28,6 +28,7 @@ import org.gemo.apex.protocol.event.PlanChangeMessage;
 import org.gemo.apex.protocol.event.PlanDeclaredMessage;
 import org.gemo.apex.protocol.event.StreamContentMessage;
 import org.gemo.apex.protocol.event.StreamThinkMessage;
+import org.gemo.apex.protocol.event.TaskErrorMessage;
 import org.gemo.apex.protocol.event.TaskThinkChangeMessage;
 import org.gemo.apex.protocol.event.TaskThinkDeclaredMessage;
 import org.gemo.apex.protocol.request.SessionStateView;
@@ -122,6 +123,7 @@ class ProtocolGoldenFileTest {
         return Stream.of(
                 Arguments.of("stream-content.json", StreamContentMessage.class, true),
                 Arguments.of("human-intervention.json", HumanInterventionMessage.class, true),
+                Arguments.of("task-error.json", TaskErrorMessage.class, true),
                 Arguments.of("end.json", EndMessage.class, false),
                 Arguments.of("plan-declared.compat.json", PlanDeclaredMessage.class, false),
                 Arguments.of("plan-change.compat.json", PlanChangeMessage.class, false),

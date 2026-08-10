@@ -48,6 +48,7 @@ public final class ApexAgent {
      * <p>恢复请求先补完挂起工具调用；随后每轮依次保存 Iteration、分发生命周期、准备模型请求、 调用模型并处理工具。任一边界发生取消、挂起或结束时立即收口并保留可恢复状态。
      */
     public AgentRunOutcome run() {
+        RuntimeException failure = null;
         try {
             int firstIteration = 1;
             // 恢复必须先消费原先挂起的 ToolCall，不能直接开始下一次模型调用。
@@ -145,19 +146,28 @@ public final class ApexAgent {
             }
             throw new IllegalStateException("ReAct 循环未在最大轮次内收口");
         } catch (InvalidHumanResponseException error) {
+            failure = error;
             return new AgentRunOutcome.Failed(error);
         } catch (SuspensionEventPublishException | ResumePersistenceException error) {
+            failure = error;
             return new AgentRunOutcome.Failed(error);
         } catch (CancellationRequestedException cancellation) {
             context.cancel();
             bestEffortSave(cancellation);
             return new AgentRunOutcome.Cancelled();
         } catch (RuntimeException error) {
+            failure = error;
             context.fail();
             bestEffortSave(error);
             return new AgentRunOutcome.Failed(error);
         } finally {
-            emitter.requestEnd();
+            try {
+                if (failure != null) {
+                    emitter.requestTaskError(failure);
+                }
+            } finally {
+                emitter.requestEnd();
+            }
         }
     }
 
