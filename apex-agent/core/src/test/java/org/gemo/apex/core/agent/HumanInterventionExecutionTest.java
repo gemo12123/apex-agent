@@ -319,6 +319,11 @@ class HumanInterventionExecutionTest {
                 "post",
                 new LifecycleHook<PostToolCallContext, PostToolCallHookResult>() {
                     @Override
+                    public String name() {
+                        return "post";
+                    }
+
+                    @Override
                     public HookTypeDescriptor descriptor() {
                         return new HookTypeDescriptor(
                                 HookPoint.POST_TOOL_CALL,
@@ -589,6 +594,11 @@ class HumanInterventionExecutionTest {
                 "post",
                 new LifecycleHook<PostToolCallContext, PostToolCallHookResult>() {
                     @Override
+                    public String name() {
+                        return "post";
+                    }
+
+                    @Override
                     public HookTypeDescriptor descriptor() {
                         return new HookTypeDescriptor(
                                 HookPoint.POST_TOOL_CALL,
@@ -639,6 +649,11 @@ class HumanInterventionExecutionTest {
     private LifecycleHook<PreToolCallContext, PreToolCallHookResult> preHook(
             Function<PreToolCallContext, PreToolCallHookResult> action) {
         return new LifecycleHook<>() {
+            @Override
+            public String name() {
+                return "pre";
+            }
+
             @Override
             public HookTypeDescriptor descriptor() {
                 return new HookTypeDescriptor(

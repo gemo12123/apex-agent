@@ -37,6 +37,11 @@ class ApexAgentFactoryTest {
                 "build",
                 new LifecycleHook<AgentBuildContext, AgentBuildHookResult>() {
                     @Override
+                    public String name() {
+                        return "build";
+                    }
+
+                    @Override
                     public HookTypeDescriptor descriptor() {
                         return new HookTypeDescriptor(
                                 HookPoint.AGENT_BUILD,
@@ -146,6 +151,11 @@ class ApexAgentFactoryTest {
         fixture.hooks.put(
                 "build",
                 new LifecycleHook<AgentBuildContext, AgentBuildHookResult>() {
+                    @Override
+                    public String name() {
+                        return "build";
+                    }
+
                     @Override
                     public HookTypeDescriptor descriptor() {
                         return new HookTypeDescriptor(

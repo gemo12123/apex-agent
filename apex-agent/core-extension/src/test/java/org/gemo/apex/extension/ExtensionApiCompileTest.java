@@ -271,6 +271,11 @@ class ExtensionApiCompileTest {
     private static final class FakeLifecycleHook
             implements LifecycleHook<HookContextView, LifecycleHookResult> {
         @Override
+        public String name() {
+            return "fake";
+        }
+
+        @Override
         public HookTypeDescriptor descriptor() {
             return null;
         }

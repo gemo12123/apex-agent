@@ -49,7 +49,8 @@ class MatcherAndCompositeTest {
                 hook(calls, "never", continueResult());
 
         CompositeLifecycleHook<PreToolCallContext, PreToolCallHookResult> composite =
-                new CompositeLifecycleHook<>(List.of(first, stop, never));
+                new CompositeLifecycleHook<>("composite", List.of(first, stop, never));
+        assertEquals("composite", composite.name());
         assertInstanceOf(BlockTool.class, composite.apply(context()));
         assertEquals(List.of("first", "stop"), calls);
     }
@@ -59,6 +60,11 @@ class MatcherAndCompositeTest {
     void propagatesCompositeExceptionsAndRejectsDifferentDescriptors() {
         LifecycleHook<PreToolCallContext, PreToolCallHookResult> throwing =
                 new LifecycleHook<>() {
+                    @Override
+                    public String name() {
+                        return "throwing";
+                    }
+
                     @Override
                     public HookTypeDescriptor descriptor() {
                         return PRE;
@@ -70,11 +76,16 @@ class MatcherAndCompositeTest {
                     }
                 };
         CompositeLifecycleHook<PreToolCallContext, PreToolCallHookResult> composite =
-                new CompositeLifecycleHook<>(List.of(throwing));
+                new CompositeLifecycleHook<>("composite", List.of(throwing));
         assertThrows(IllegalStateException.class, () -> composite.apply(context()));
 
         LifecycleHook<PreToolCallContext, PreToolCallHookResult> mismatched =
                 new LifecycleHook<>() {
+                    @Override
+                    public String name() {
+                        return "mismatched";
+                    }
+
                     @Override
                     public HookTypeDescriptor descriptor() {
                         return new HookTypeDescriptor(
@@ -90,12 +101,20 @@ class MatcherAndCompositeTest {
                 };
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new CompositeLifecycleHook<>(List.of(throwing, mismatched)));
+                () -> new CompositeLifecycleHook<>("composite", List.of(throwing, mismatched)));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new CompositeLifecycleHook<>(" ", List.of(throwing)));
     }
 
     private LifecycleHook<PreToolCallContext, PreToolCallHookResult> hook(
             List<String> calls, String name, PreToolCallHookResult result) {
         return new LifecycleHook<>() {
+            @Override
+            public String name() {
+                return name;
+            }
+
             @Override
             public HookTypeDescriptor descriptor() {
                 return PRE;

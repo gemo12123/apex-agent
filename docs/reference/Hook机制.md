@@ -31,22 +31,24 @@ Hook 生效需要同时完成“注册实现”和“绑定定义”。
 
 ### 注册实现
 
-runtime 使用 `(HookPoint, stableName)` 作为注册键：
+runtime 使用 `(HookPoint, LifecycleHook.name())` 作为注册键：
 
 ```java
-builder.registerHook(ToolConfirmHook.REGISTRATION_NAME, new ToolConfirmHook());
+builder.registerHook(new ToolConfirmHook());
 ```
 
-同一生命周期点内稳定名称不能重复。`HookRegistry` 只负责解析，不负责排序。
+每个 Hook 实例通过 `name()` 提供唯一规范名称，不支持注册别名。同一生命周期点内名称不能重复。`HookRegistry` 只负责解析，不负责排序。
 
-platform 中的扩展实现通常先声明 `PlatformHookRegistration` Bean，再由 `ApexAgentPlatformConfiguration` 收集到 runtime：
+platform 中的扩展实现直接声明为 `LifecycleHook` Bean，再由 `ApexAgentPlatformConfiguration` 收集到 runtime：
 
 ```java
 @Bean
-PlatformHookRegistration customHookRegistration() {
-    return new PlatformHookRegistration("customHook", new CustomHook());
+CustomHook customHook() {
+    return new CustomHook();
 }
 ```
+
+`CustomHook.name()` 必须返回 Agent Binding 中 `hook` 字段使用的稳定名称。
 
 ### 绑定定义
 

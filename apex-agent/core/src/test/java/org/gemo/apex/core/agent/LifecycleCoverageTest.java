@@ -275,9 +275,10 @@ class LifecycleCoverageTest {
                         fresh.snapshot(),
                         ports.windowManager()
                                 .prepare(
-                                        new org.gemo.apex.common.conversation.ConversationWindowRequest(
-                                                new org.gemo.apex.common.conversation.ConversationQuery(
-                                                        "session-1"))),
+                                        new org.gemo.apex.common.conversation
+                                                .ConversationWindowRequest(
+                                                new org.gemo.apex.common.conversation
+                                                        .ConversationQuery("session-1"))),
                         null);
         context.startIteration(1);
         ToolCall call = new ToolCall("call-1", "ask_human", 0, Map.of(), Map.of());
@@ -305,6 +306,11 @@ class LifecycleCoverageTest {
             Function<TurnStartContext, LoopHookResult> function) {
         return new LifecycleHook<>() {
             @Override
+            public String name() {
+                return "turnStart";
+            }
+
+            @Override
             public HookTypeDescriptor descriptor() {
                 return new HookTypeDescriptor(
                         HookPoint.TURN_START, TurnStartContext.class, LoopHookResult.class);
@@ -320,6 +326,11 @@ class LifecycleCoverageTest {
     private LifecycleHook<PreToolCallContext, PreToolCallHookResult> preToolHook(
             Function<PreToolCallContext, PreToolCallHookResult> function) {
         return new LifecycleHook<>() {
+            @Override
+            public String name() {
+                return "preToolCall";
+            }
+
             @Override
             public HookTypeDescriptor descriptor() {
                 return new HookTypeDescriptor(
@@ -340,6 +351,11 @@ class LifecycleCoverageTest {
         Class contextType = contextType(point);
         Class resultType = resultType(point);
         return new LifecycleHook() {
+            @Override
+            public String name() {
+                return point.name();
+            }
+
             @Override
             public HookTypeDescriptor descriptor() {
                 return new HookTypeDescriptor(point, contextType, resultType);

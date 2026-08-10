@@ -12,6 +12,7 @@ import org.gemo.apex.common.model.ModelResponse;
 import org.gemo.apex.common.skill.SkillDefinition;
 import org.gemo.apex.core.agent.AgentRunOutcome;
 import org.gemo.apex.extension.definition.AgentDefinitionProvider;
+import org.gemo.apex.extension.hook.LifecycleHook;
 import org.gemo.apex.extension.model.ModelGateway;
 import org.gemo.apex.kit.hook.SkillActivationStateHook;
 import org.gemo.apex.kit.tool.ActivateSkillTool;
@@ -24,6 +25,7 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.tool.*;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -65,11 +67,7 @@ class ApexAgentPlatformConfigurationTest {
         SkillDefinition skill = new SkillDefinition("pdf", "PDF", "使用 PDF 指令", Map.of());
         beans.registerSingleton("pdfSkill", skill);
         beans.registerSingleton("activateSkillTool", new ActivateSkillTool(() -> List.of(skill)));
-        beans.registerSingleton(
-                "skillActivationStateHook",
-                new PlatformHookRegistration(
-                        SkillActivationStateHook.REGISTRATION_NAME,
-                        new SkillActivationStateHook()));
+        beans.registerSingleton("skillActivationStateHook", new SkillActivationStateHook());
 
         RequestBoundAgentEventPublisherFactory publishers =
                 new RequestBoundAgentEventPublisherFactory();
@@ -115,8 +113,13 @@ class ApexAgentPlatformConfigurationTest {
                         beans.getBeanProvider(org.gemo.apex.extension.tool.AgentTool.class),
                         beans.getBeanProvider(ToolCallback.class),
                         beans.getBeanProvider(ToolCallbackProvider.class),
-                        beans.getBeanProvider(PlatformHookRegistration.class),
+                        hookBeans(beans),
                         beans.getBeanProvider(org.gemo.apex.common.skill.SkillDefinition.class));
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static ObjectProvider<LifecycleHook<?, ?>> hookBeans(DefaultListableBeanFactory beans) {
+        return (ObjectProvider) beans.getBeanProvider(LifecycleHook.class);
     }
 
     private static DefaultListableBeanFactory beans() {

@@ -17,18 +17,28 @@ import org.gemo.apex.extension.hook.LifecycleHook;
 
 public final class CompositeLifecycleHook<C extends HookContextView, R extends LifecycleHookResult>
         implements LifecycleHook<C, R> {
+    private final String name;
     private final HookTypeDescriptor descriptor;
     private final List<LifecycleHook<C, R>> hooks;
 
-    public CompositeLifecycleHook(List<LifecycleHook<C, R>> hooks) {
+    public CompositeLifecycleHook(String name, List<LifecycleHook<C, R>> hooks) {
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("name 不能为空");
+        }
         if (hooks == null || hooks.isEmpty()) {
             throw new IllegalArgumentException("hooks 不能为空");
         }
+        this.name = name;
         this.hooks = List.copyOf(hooks);
         this.descriptor = this.hooks.getFirst().descriptor();
         if (this.hooks.stream().anyMatch(hook -> !descriptor.equals(hook.descriptor()))) {
             throw new IllegalArgumentException("组合器中的 Hook descriptor 必须一致");
         }
+    }
+
+    @Override
+    public String name() {
+        return name;
     }
 
     @Override

@@ -31,6 +31,11 @@ public final class AskHumanInterventionHook
     }
 
     @Override
+    public String name() {
+        return REGISTRATION_NAME;
+    }
+
+    @Override
     public HookTypeDescriptor descriptor() {
         return DESCRIPTOR;
     }

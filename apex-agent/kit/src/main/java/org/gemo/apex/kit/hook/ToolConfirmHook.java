@@ -29,6 +29,11 @@ public final class ToolConfirmHook
     }
 
     @Override
+    public String name() {
+        return REGISTRATION_NAME;
+    }
+
+    @Override
     public HookTypeDescriptor descriptor() {
         return DESCRIPTOR;
     }

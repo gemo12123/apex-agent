@@ -106,10 +106,15 @@ public final class ApexAgentRuntimeBuilder {
         return this;
     }
 
-    public ApexAgentRuntimeBuilder registerHook(String n, LifecycleHook<?, ?> v) {
-        var k = new HookRegistry.Key(v.descriptor().hookPoint(), n);
+    public ApexAgentRuntimeBuilder registerHook(LifecycleHook<?, ?> v) {
+        Objects.requireNonNull(v, "hook");
+        String name = v.name();
+        if (name == null || name.isBlank()) {
+            throw new RuntimeConfigurationException("Hook 注册名称不能为空");
+        }
+        var k = new HookRegistry.Key(v.descriptor().hookPoint(), name);
         if (hooks.putIfAbsent(k, v) != null) {
-            throw new RuntimeConfigurationException("Hook 重名: " + n);
+            throw new RuntimeConfigurationException("Hook 重名: " + name);
         }
         return this;
     }

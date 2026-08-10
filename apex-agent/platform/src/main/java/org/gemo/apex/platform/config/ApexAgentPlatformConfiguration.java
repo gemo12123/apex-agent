@@ -1,7 +1,9 @@
 package org.gemo.apex.platform.config;
 
+import java.util.concurrent.Executor;
 import org.gemo.apex.common.skill.SkillDefinition;
 import org.gemo.apex.extension.definition.AgentDefinitionProvider;
+import org.gemo.apex.extension.hook.LifecycleHook;
 import org.gemo.apex.extension.model.ModelGateway;
 import org.gemo.apex.extension.repository.ConversationRepository;
 import org.gemo.apex.extension.repository.SessionRepository;
@@ -21,11 +23,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
-import java.util.concurrent.Executor;
-
-/**
- * 将 Spring Bean 装配为独立于 IoC 的 {@link ApexAgentRuntime}，并配置执行线程池。
- */
+/** 将 Spring Bean 装配为独立于 IoC 的 {@link ApexAgentRuntime}，并配置执行线程池。 */
 @Configuration
 @EnableConfigurationProperties(ApexAgentPlatformProperties.class)
 public class ApexAgentPlatformConfiguration {
@@ -40,9 +38,7 @@ public class ApexAgentPlatformConfiguration {
         return new RequestBoundAgentEventPublisherFactory();
     }
 
-    /**
-     * 收集平台提供的端口、工具、Hook 与 Skill。模型 Bean 必须唯一，避免运行时隐式选择模型。
-     */
+    /** 收集平台提供的端口、工具、Hook 与 Skill。模型 Bean 必须唯一，避免运行时隐式选择模型。 */
     @Bean(destroyMethod = "close")
     ApexAgentRuntime apexAgentRuntime(
             AgentDefinitionProvider definitions,
@@ -55,7 +51,7 @@ public class ApexAgentPlatformConfiguration {
             ObjectProvider<AgentTool> tools,
             ObjectProvider<ToolCallback> toolCallbacks,
             ObjectProvider<ToolCallbackProvider> toolCallbackProviders,
-            ObjectProvider<PlatformHookRegistration> hooks,
+            ObjectProvider<LifecycleHook<?, ?>> hooks,
             ObjectProvider<SkillDefinition> skills) {
         var builder =
                 ApexAgentRuntime.builder()
@@ -79,15 +75,12 @@ public class ApexAgentPlatformConfiguration {
         }
         toolCallbacks.orderedStream().forEach(builder::registerToolCallback);
         toolCallbackProviders.orderedStream().forEach(builder::registerToolCallbackProvider);
-        hooks.orderedStream()
-                .forEach(value -> builder.registerHook(value.stableName(), value.hook()));
+        hooks.orderedStream().forEach(builder::registerHook);
         skills.orderedStream().forEach(builder::registerSkill);
         return builder.build();
     }
 
-    /**
-     * 创建承载 Agent 的线程池，并通过 decorator 传播请求用户上下文。
-     */
+    /** 创建承载 Agent 的线程池，并通过 decorator 传播请求用户上下文。 */
     @Bean(name = "agentExecutionExecutor")
     Executor agentExecutionExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
@@ -101,8 +94,7 @@ public class ApexAgentPlatformConfiguration {
     }
 
     @Bean
-    PlatformHookRegistration toolConfirmHookRegistration() {
-        return new PlatformHookRegistration(
-                ToolConfirmHook.REGISTRATION_NAME, new ToolConfirmHook());
+    ToolConfirmHook toolConfirmHook() {
+        return new ToolConfirmHook();
     }
 }

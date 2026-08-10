@@ -12,12 +12,16 @@ import org.gemo.apex.common.conversation.*;
 import org.gemo.apex.common.execution.*;
 import org.gemo.apex.common.hook.HookBinding;
 import org.gemo.apex.common.hook.HookPoint;
+import org.gemo.apex.common.hook.HookTypeDescriptor;
+import org.gemo.apex.common.hook.context.HookContextView;
+import org.gemo.apex.common.hook.result.LifecycleHookResult;
 import org.gemo.apex.common.message.*;
 import org.gemo.apex.common.model.*;
 import org.gemo.apex.common.skill.SkillDefinition;
 import org.gemo.apex.common.tool.*;
 import org.gemo.apex.core.agent.AgentRunOutcome;
 import org.gemo.apex.extension.definition.AgentDefinitionProvider;
+import org.gemo.apex.extension.hook.LifecycleHook;
 import org.gemo.apex.extension.tool.ToolExecutionObserver;
 import org.gemo.apex.kit.hook.SkillActivationStateHook;
 import org.gemo.apex.kit.tool.ActivateSkillTool;
@@ -35,6 +39,23 @@ import org.junit.jupiter.api.*;
 import org.springframework.ai.chat.messages.AssistantMessage;
 
 class RuntimeContractTest {
+    @Test
+    void validatesHookNamesAndUniquenessWithinHookPoint() {
+        assertThrows(
+                RuntimeConfigurationException.class,
+                () -> ApexAgentRuntime.builder().registerHook(hook(" ", HookPoint.PRE_TOOL_CALL)));
+        assertThrows(
+                RuntimeConfigurationException.class,
+                () -> ApexAgentRuntime.builder().registerHook(hook(null, HookPoint.PRE_TOOL_CALL)));
+
+        var builder = ApexAgentRuntime.builder();
+        builder.registerHook(hook("same", HookPoint.PRE_TOOL_CALL));
+        assertThrows(
+                RuntimeConfigurationException.class,
+                () -> builder.registerHook(hook("same", HookPoint.PRE_TOOL_CALL)));
+        assertDoesNotThrow(() -> builder.registerHook(hook("same", HookPoint.POST_TOOL_CALL)));
+    }
+
     /** 无IoC默认Agent执行且End精确一次 */
     @Test
     void executesDefaultAgentWithoutIoCAndPublishesEndExactlyOnce() {
@@ -444,9 +465,7 @@ class RuntimeContractTest {
                         .sessionRepository(sessions)
                         .registerSkill(skill)
                         .registerTool(new ActivateSkillTool(() -> List.of(skill)))
-                        .registerHook(
-                                SkillActivationStateHook.REGISTRATION_NAME,
-                                new SkillActivationStateHook())
+                        .registerHook(new SkillActivationStateHook())
                         .build()) {
             ApexAgentExecution execution =
                     runtime.newAgent(new AgentRequest("explicit", "default", "u", "q"));
@@ -466,6 +485,27 @@ class RuntimeContractTest {
                 Set.of(),
                 Map.of(),
                 Map.of());
+    }
+
+    private static LifecycleHook<HookContextView, LifecycleHookResult> hook(
+            String name, HookPoint point) {
+        return new LifecycleHook<>() {
+            @Override
+            public String name() {
+                return name;
+            }
+
+            @Override
+            public HookTypeDescriptor descriptor() {
+                return new HookTypeDescriptor(
+                        point, HookContextView.class, LifecycleHookResult.class);
+            }
+
+            @Override
+            public LifecycleHookResult apply(HookContextView context) {
+                return null;
+            }
+        };
     }
 
     private static AgentMessageEntry entry(String id, long sort) {

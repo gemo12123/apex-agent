@@ -465,6 +465,11 @@ class ApexAgentExecutionTest {
                 "disable-second",
                 new LifecycleHook<PreToolCallContext, PreToolCallHookResult>() {
                     @Override
+                    public String name() {
+                        return "disableSecond";
+                    }
+
+                    @Override
                     public HookTypeDescriptor descriptor() {
                         return new HookTypeDescriptor(
                                 HookPoint.PRE_TOOL_CALL,
@@ -675,6 +680,11 @@ class ApexAgentExecutionTest {
     private LifecycleHook<PostToolCallContext, PostToolCallHookResult> activationStateHook() {
         return new LifecycleHook<>() {
             @Override
+            public String name() {
+                return "skillActivation";
+            }
+
+            @Override
             public HookTypeDescriptor descriptor() {
                 return new HookTypeDescriptor(
                         HookPoint.POST_TOOL_CALL,
@@ -697,6 +707,11 @@ class ApexAgentExecutionTest {
     private LifecycleHook<AgentBuildContext, AgentBuildHookResult> buildHook(
             java.util.function.Function<AgentBuildContext, List<AgentDefinitionOperation>> action) {
         return new LifecycleHook<>() {
+            @Override
+            public String name() {
+                return "agentBuild";
+            }
+
             @Override
             public HookTypeDescriptor descriptor() {
                 return new HookTypeDescriptor(
