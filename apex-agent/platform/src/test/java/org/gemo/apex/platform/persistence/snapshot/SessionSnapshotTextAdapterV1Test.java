@@ -12,9 +12,12 @@ import org.gemo.apex.common.exception.UnsupportedSnapshotVersionException;
 import org.gemo.apex.common.execution.IterationStatus;
 import org.gemo.apex.common.execution.SessionStatus;
 import org.gemo.apex.common.execution.TurnStatus;
+import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.common.json.JsonUtils;
 import org.gemo.apex.common.shared.SharedDataCleanupPolicy;
 import org.gemo.apex.common.shared.SharedDataEntry;
+import org.gemo.apex.common.snapshot.ExecutionErrorSnapshot;
+import org.gemo.apex.common.snapshot.ExecutionErrorType;
 import org.gemo.apex.common.snapshot.IterationSnapshot;
 import org.gemo.apex.common.snapshot.SessionSnapshot;
 import org.gemo.apex.common.snapshot.TurnSnapshot;
@@ -47,17 +50,29 @@ class SessionSnapshotTextAdapterV1Test {
                                 "state",
                                 new SharedDataEntry(
                                         SharedDataCleanupPolicy.NEVER, Map.of("count", 1))),
+                        List.of(
+                                new ExecutionErrorSnapshot(
+                                        1,
+                                        1,
+                                        ExecutionErrorType.HOOK,
+                                        HookPoint.PRE_MODEL_CALL,
+                                        "guard",
+                                        "第 1 个 Turn 第 1 轮的 PRE_MODEL_CALL Hook guard 执行失败",
+                                        PlatformFixtures.NOW)),
                         source.nextMessageSortNo(),
                         source.lastActiveTime());
 
         var entity = adapter.encode(snapshot);
         assertEquals(snapshot.sharedData(), adapter.decode(entity).sharedData());
+        assertEquals(snapshot.executionErrors(), adapter.decode(entity).executionErrors());
         Assertions.assertTrue(entity.runtimeSnapshot().contains("sharedData"));
+        Assertions.assertTrue(entity.runtimeSnapshot().contains("executionErrors"));
 
         var legacyTree =
                 (com.fasterxml.jackson.databind.node.ObjectNode)
                         JsonUtils.parseTree(entity.runtimeSnapshot());
         legacyTree.remove("sharedData");
+        legacyTree.remove("executionErrors");
         var legacy =
                 new AgentSessionEntity(
                         entity.sessionId(),
@@ -72,6 +87,7 @@ class SessionSnapshotTextAdapterV1Test {
                         entity.suspendedToolCall(),
                         entity.lastActiveTime());
         assertEquals(Map.of(), adapter.decode(legacy).sharedData());
+        assertEquals(List.of(), adapter.decode(legacy).executionErrors());
     }
 
     /** 挂起快照只保留恢复投影，不复制完整模型请求和响应。 */

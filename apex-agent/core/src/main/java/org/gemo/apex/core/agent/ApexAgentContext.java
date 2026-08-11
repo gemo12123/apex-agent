@@ -12,6 +12,7 @@ import org.gemo.apex.common.conversation.ConversationWindow;
 import org.gemo.apex.common.execution.IterationStatus;
 import org.gemo.apex.common.execution.SessionStatus;
 import org.gemo.apex.common.execution.TurnStatus;
+import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.common.hook.operation.SkillActivationDelta;
 import org.gemo.apex.common.intervention.HumanSubmission;
 import org.gemo.apex.common.message.AgentMessageEntry;
@@ -352,6 +353,7 @@ public final class ApexAgentContext {
                         snapshot.activeTurn(),
                         snapshot.suspendedToolBatch(),
                         sharedData.entries(),
+                        snapshot.executionErrors(),
                         snapshot.nextMessageSortNo(),
                         ports.timeProvider().now());
     }
@@ -392,6 +394,7 @@ public final class ApexAgentContext {
                         snapshot.activeTurn(),
                         snapshot.suspendedToolBatch(),
                         sharedData.entries(),
+                        snapshot.executionErrors(),
                         snapshot.nextMessageSortNo(),
                         ports.timeProvider().now());
         pendingActivatedSkills = null;
@@ -417,6 +420,40 @@ public final class ApexAgentContext {
     public void cancel() {
         transitionTerminal(
                 SessionStatus.CANCELLED, TurnStatus.CANCELLED, IterationStatus.CANCELLED);
+    }
+
+    public void recordHookFailure(HookPoint point, String hookId) {
+        IterationSnapshot iteration = snapshot.activeTurn().currentIteration();
+        Integer iterationNo = iteration == null ? null : iteration.iterationNo();
+        String location =
+                iterationNo == null
+                        ? "第 " + snapshot.currentTurnNo() + " 个 Turn"
+                        : "第 " + snapshot.currentTurnNo() + " 个 Turn 第 " + iterationNo + " 轮";
+        recordExecutionError(
+                new ExecutionErrorSnapshot(
+                        snapshot.currentTurnNo(),
+                        iterationNo,
+                        ExecutionErrorType.HOOK,
+                        point,
+                        hookId,
+                        location + " 的 " + point + " Hook " + hookId + " 执行失败",
+                        ports.timeProvider().now()));
+    }
+
+    public void recordModelFailure(RuntimeException error) {
+        IterationSnapshot iteration = snapshot.activeTurn().currentIteration();
+        String message = error.getMessage();
+        recordExecutionError(
+                new ExecutionErrorSnapshot(
+                        snapshot.currentTurnNo(),
+                        iteration == null ? null : iteration.iterationNo(),
+                        ExecutionErrorType.MODEL,
+                        null,
+                        null,
+                        message == null || message.isBlank()
+                                ? error.getClass().getSimpleName()
+                                : message,
+                        ports.timeProvider().now()));
     }
 
     private void transitionTerminal(
@@ -468,6 +505,7 @@ public final class ApexAgentContext {
                         snapshot.activeTurn(),
                         snapshot.suspendedToolBatch(),
                         sharedData.entries(),
+                        snapshot.executionErrors(),
                         value + 1,
                         snapshot.lastActiveTime());
         return value;
@@ -584,6 +622,7 @@ public final class ApexAgentContext {
                         turn,
                         suspended,
                         sharedData.entries(),
+                        snapshot.executionErrors(),
                         snapshot.nextMessageSortNo(),
                         activeTime);
     }
@@ -608,8 +647,32 @@ public final class ApexAgentContext {
                         snapshot.activeTurn(),
                         snapshot.suspendedToolBatch(),
                         current,
+                        snapshot.executionErrors(),
                         snapshot.nextMessageSortNo(),
                         snapshot.lastActiveTime());
+    }
+
+    private void recordExecutionError(ExecutionErrorSnapshot error) {
+        List<ExecutionErrorSnapshot> errors = new ArrayList<>(snapshot.executionErrors());
+        errors.add(error);
+        snapshot =
+                new SessionSnapshot(
+                        snapshot.schemaVersion(),
+                        snapshot.sessionId(),
+                        snapshot.userId(),
+                        snapshot.agentKey(),
+                        snapshot.status(),
+                        snapshot.currentTurnNo(),
+                        snapshot.enabledTools(),
+                        snapshot.activatedSkills(),
+                        snapshot.historicalToolBindings(),
+                        snapshot.activeDefinition(),
+                        snapshot.activeTurn(),
+                        snapshot.suspendedToolBatch(),
+                        sharedData.entries(),
+                        errors,
+                        snapshot.nextMessageSortNo(),
+                        ports.timeProvider().now());
     }
 
     static AgentDefinitionRecoverySnapshot recovery(AgentDefinitionSnapshot snapshot) {

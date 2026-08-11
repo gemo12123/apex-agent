@@ -30,6 +30,7 @@ public record SessionSnapshot(
         TurnSnapshot activeTurn,
         SuspendedToolBatch suspendedToolBatch,
         Map<String, SharedDataEntry> sharedData,
+        List<ExecutionErrorSnapshot> executionErrors,
         long nextMessageSortNo,
         Instant lastActiveTime) {
     public SessionSnapshot(
@@ -61,6 +62,42 @@ public record SessionSnapshot(
                 activeTurn,
                 suspendedToolBatch,
                 Map.of(),
+                List.of(),
+                nextMessageSortNo,
+                lastActiveTime);
+    }
+
+    public SessionSnapshot(
+            String schemaVersion,
+            String sessionId,
+            String userId,
+            String agentKey,
+            SessionStatus status,
+            long currentTurnNo,
+            Set<String> enabledTools,
+            Set<String> activatedSkills,
+            List<HistoricalToolBinding> historicalToolBindings,
+            AgentDefinitionRecoverySnapshot activeDefinition,
+            TurnSnapshot activeTurn,
+            SuspendedToolBatch suspendedToolBatch,
+            Map<String, SharedDataEntry> sharedData,
+            long nextMessageSortNo,
+            Instant lastActiveTime) {
+        this(
+                schemaVersion,
+                sessionId,
+                userId,
+                agentKey,
+                status,
+                currentTurnNo,
+                enabledTools,
+                activatedSkills,
+                historicalToolBindings,
+                activeDefinition,
+                activeTurn,
+                suspendedToolBatch,
+                sharedData,
+                List.of(),
                 nextMessageSortNo,
                 lastActiveTime);
     }
@@ -135,6 +172,7 @@ public record SessionSnapshot(
                                     nonNull(value, "sharedData value")));
         }
         sharedData = java.util.Collections.unmodifiableMap(sharedDataCopy);
+        executionErrors = immutableList(executionErrors, "executionErrors");
         nonNegative(nextMessageSortNo, "nextMessageSortNo");
         lastActiveTime = nonNull(lastActiveTime, "lastActiveTime");
     }

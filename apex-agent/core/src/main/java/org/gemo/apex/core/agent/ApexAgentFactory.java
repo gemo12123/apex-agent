@@ -69,6 +69,7 @@ public final class ApexAgentFactory {
                         turn,
                         null,
                         sharedData.entries(),
+                        assembly.executionErrors(),
                         nextSort + 1,
                         now);
         AgentMessageEntry user =
@@ -128,6 +129,8 @@ public final class ApexAgentFactory {
                         sharedData);
         Set<String> activated = new LinkedHashSet<>(snapshot.activatedSkills());
         activated.retainAll(assembly.definition().definition().enabledSkills());
+        List<ExecutionErrorSnapshot> executionErrors = new ArrayList<>(snapshot.executionErrors());
+        executionErrors.addAll(assembly.executionErrors());
         SessionSnapshot resumedSnapshot =
                 new SessionSnapshot(
                         snapshot.schemaVersion(),
@@ -143,6 +146,7 @@ public final class ApexAgentFactory {
                         snapshot.activeTurn(),
                         suspended,
                         sharedData.entries(),
+                        executionErrors,
                         snapshot.nextMessageSortNo(),
                         snapshot.lastActiveTime());
         return new ApexAgent(

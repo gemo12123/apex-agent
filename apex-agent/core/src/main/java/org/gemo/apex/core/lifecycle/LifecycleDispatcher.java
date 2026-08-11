@@ -94,6 +94,7 @@ public final class LifecycleDispatcher {
                         System.Logger.Level.WARNING,
                         "生命周期 Hook 执行失败，已跳过: point=" + point + ", hookId=" + binding.id(),
                         error);
+                context.recordHookFailure(point, binding.id());
                 continue;
             }
             if (raw == null || !hook.descriptor().resultType().isInstance(raw)) {

@@ -7,11 +7,14 @@ import java.util.function.Function;
 import org.gemo.apex.common.agent.AgentDefinitionSnapshot;
 import org.gemo.apex.common.execution.AgentRequest;
 import org.gemo.apex.common.execution.IterationStatus;
+import org.gemo.apex.common.execution.SessionStatus;
 import org.gemo.apex.common.hook.*;
 import org.gemo.apex.common.hook.context.*;
 import org.gemo.apex.common.hook.operation.*;
 import org.gemo.apex.common.hook.result.*;
 import org.gemo.apex.common.model.ModelResponse;
+import org.gemo.apex.common.snapshot.ExecutionErrorSnapshot;
+import org.gemo.apex.common.snapshot.ExecutionErrorType;
 import org.gemo.apex.common.tool.ToolCall;
 import org.gemo.apex.common.tool.ToolResult;
 import org.gemo.apex.core.event.AgentEventEmitter;
@@ -103,15 +106,169 @@ class LifecycleCoverageTest {
                         Set.of());
         fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
 
-        AgentRunOutcome outcome =
+        ApexAgent agent =
                 new ApexAgentFactory()
                         .createNew(
                                 new AgentRequest("session-1", "demo", "user-1", "你好"),
-                                fixture.ports())
-                        .run();
+                                fixture.ports());
+        AgentRunOutcome outcome = agent.run();
 
         assertInstanceOf(AgentRunOutcome.Completed.class, outcome, outcome.toString());
         assertEquals(List.of("broken", "next"), invoked);
+        var error = assertSingleError(agent, ExecutionErrorType.HOOK);
+        assertEquals(1, error.turnNo());
+        assertNull(error.iterationNo());
+        assertEquals(HookPoint.TURN_START, error.hookPoint());
+        assertEquals("b", error.hookId());
+        assertEquals("第 1 个 Turn 的 TURN_START Hook b 执行失败", error.message());
+    }
+
+    @Test
+    void agentBuildHookExceptionIsPersistedAndDoesNotStopLaterBuildHooks() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        Map<HookPoint, Integer> counts = new EnumMap<>(HookPoint.class);
+        fixture.hooks.put("broken-build", throwingHook(HookPoint.AGENT_BUILD));
+        fixture.hooks.put("next-build", hook(HookPoint.AGENT_BUILD, counts));
+        fixture.definition =
+                fixture.definition(
+                        Map.of(
+                                HookPoint.AGENT_BUILD,
+                                List.of(
+                                        new HookBinding(
+                                                "broken",
+                                                "broken-build",
+                                                0,
+                                                true,
+                                                List.of(),
+                                                Map.of()),
+                                        new HookBinding(
+                                                "next",
+                                                "next-build",
+                                                1,
+                                                true,
+                                                List.of(),
+                                                Map.of()))),
+                        Set.of(),
+                        Set.of());
+        fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
+
+        ApexAgent agent =
+                new ApexAgentFactory()
+                        .createNew(
+                                new AgentRequest("session-build", "demo", "user-1", "你好"),
+                                fixture.ports());
+        AgentRunOutcome outcome = agent.run();
+
+        assertInstanceOf(AgentRunOutcome.Completed.class, outcome);
+        assertEquals(1, counts.get(HookPoint.AGENT_BUILD));
+        var error = assertSingleError(agent, ExecutionErrorType.HOOK);
+        assertEquals(HookPoint.AGENT_BUILD, error.hookPoint());
+        assertEquals("broken", error.hookId());
+    }
+
+    @Test
+    void retriesModelThreeTimesThenRunsTerminalHooksAndPersistsFailure() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        Map<HookPoint, Integer> counts = new EnumMap<>(HookPoint.class);
+        bindCountingHook(fixture, counts, HookPoint.ITERATION_END);
+        bindCountingHook(fixture, counts, HookPoint.TURN_END);
+        fixture.definition =
+                fixture.definition(
+                        Map.of(
+                                HookPoint.ITERATION_END,
+                                List.of(binding(HookPoint.ITERATION_END)),
+                                HookPoint.TURN_END,
+                                List.of(binding(HookPoint.TURN_END))),
+                        Set.of(),
+                        Set.of());
+        fixture.modelFailure = new IllegalStateException("model down");
+        ApexAgent agent =
+                new ApexAgentFactory()
+                        .createNew(
+                                new AgentRequest("session-model", "demo", "user-1", "你好"),
+                                fixture.ports());
+
+        AgentRunOutcome outcome = agent.run();
+
+        assertInstanceOf(AgentRunOutcome.Failed.class, outcome);
+        assertEquals(4, fixture.modelCalls);
+        assertEquals(1, counts.get(HookPoint.ITERATION_END));
+        assertEquals(1, counts.get(HookPoint.TURN_END));
+        assertEquals(SessionStatus.FAILED, agent.snapshot().status());
+        assertEquals(
+                IterationStatus.FAILED, agent.snapshot().activeTurn().currentIteration().status());
+        var error = assertSingleError(agent, ExecutionErrorType.MODEL);
+        assertEquals(1, error.iterationNo());
+        assertNull(error.hookPoint());
+        assertNull(error.hookId());
+        assertEquals("model down", error.message());
+    }
+
+    @Test
+    void stopsRetryingAfterModelCallSucceeds() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        fixture.modelFailures.add(new IllegalStateException("first"));
+        fixture.modelFailures.add(new IllegalStateException("second"));
+        fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
+        ApexAgent agent =
+                new ApexAgentFactory()
+                        .createNew(
+                                new AgentRequest("session-retry", "demo", "user-1", "你好"),
+                                fixture.ports());
+
+        AgentRunOutcome outcome = agent.run();
+
+        assertInstanceOf(AgentRunOutcome.Completed.class, outcome);
+        assertEquals(3, fixture.modelCalls);
+        assertTrue(agent.snapshot().executionErrors().isEmpty());
+    }
+
+    @Test
+    void cancellationRunsIterationEndAndTurnEndAfterCancellationIsObserved() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        Map<HookPoint, Integer> counts = new EnumMap<>(HookPoint.class);
+        bindCountingHook(fixture, counts, HookPoint.POST_TOOL_CALL);
+        bindCountingHook(fixture, counts, HookPoint.ITERATION_END);
+        bindCountingHook(fixture, counts, HookPoint.TURN_END);
+        fixture.tool(
+                "cancel",
+                (call, context, observer) -> {
+                    fixture.token.cancel();
+                    context.cancellationToken().throwIfCancellationRequested();
+                    throw new AssertionError();
+                });
+        fixture.definition =
+                fixture.definition(
+                        Map.of(
+                                HookPoint.POST_TOOL_CALL,
+                                List.of(binding(HookPoint.POST_TOOL_CALL)),
+                                HookPoint.ITERATION_END,
+                                List.of(binding(HookPoint.ITERATION_END)),
+                                HookPoint.TURN_END,
+                                List.of(binding(HookPoint.TURN_END))),
+                        Set.of("cancel"),
+                        Set.of("cancel"));
+        fixture.modelResponses.add(
+                new ModelResponse(
+                        "",
+                        List.of(new ToolCall("call-1", "cancel", 0, Map.of(), Map.of())),
+                        Map.of()));
+        ApexAgent agent =
+                new ApexAgentFactory()
+                        .createNew(
+                                new AgentRequest("session-cancel", "demo", "user-1", "你好"),
+                                fixture.ports());
+
+        AgentRunOutcome outcome = agent.run();
+
+        assertInstanceOf(AgentRunOutcome.Cancelled.class, outcome);
+        assertEquals(SessionStatus.CANCELLED, agent.snapshot().status());
+        assertEquals(
+                IterationStatus.CANCELLED,
+                agent.snapshot().activeTurn().currentIteration().status());
+        assertEquals(0, counts.getOrDefault(HookPoint.POST_TOOL_CALL, 0));
+        assertEquals(1, counts.get(HookPoint.ITERATION_END));
+        assertEquals(1, counts.get(HookPoint.TURN_END));
     }
 
     /** Hook非法工具变更不会留下部分状态 */
@@ -304,6 +461,24 @@ class LifecycleCoverageTest {
         assertEquals(Arrays.asList(null, null), observed);
     }
 
+    private void bindCountingHook(
+            CoreTestFixture fixture, Map<HookPoint, Integer> counts, HookPoint point) {
+        fixture.hooks.put(point.name(), hook(point, counts));
+    }
+
+    private HookBinding binding(HookPoint point) {
+        return new HookBinding("id-" + point, point.name(), 0, true, List.of(), Map.of());
+    }
+
+    private ExecutionErrorSnapshot assertSingleError(
+            ApexAgent agent, ExecutionErrorType expectedType) {
+        ExecutionErrorSnapshot error =
+                assertDoesNotThrow(() -> agent.snapshot().executionErrors().getFirst());
+        assertEquals(1, agent.snapshot().executionErrors().size());
+        assertEquals(expectedType, error.type());
+        return error;
+    }
+
     private LifecycleHook<TurnStartContext, LoopHookResult> loopHook(
             Function<TurnStartContext, LoopHookResult> function) {
         return new LifecycleHook<>() {
@@ -367,6 +542,28 @@ class LifecycleCoverageTest {
             public LifecycleHookResult apply(HookContextView context) {
                 counts.merge(point, 1, Integer::sum);
                 return result(point, context);
+            }
+        };
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private LifecycleHook<?, ?> throwingHook(HookPoint point) {
+        Class contextType = contextType(point);
+        Class resultType = resultType(point);
+        return new LifecycleHook() {
+            @Override
+            public String name() {
+                return "throwing-" + point;
+            }
+
+            @Override
+            public HookTypeDescriptor descriptor() {
+                return new HookTypeDescriptor(point, contextType, resultType);
+            }
+
+            @Override
+            public LifecycleHookResult apply(HookContextView context) {
+                throw new IllegalStateException("boom");
             }
         };
     }

@@ -11,6 +11,7 @@ import org.gemo.apex.core.conversation.ModelRequestPreparer;
 import org.gemo.apex.core.event.AgentEventEmitter;
 import org.gemo.apex.core.event.AgentEventFactory;
 import org.gemo.apex.core.exception.InvalidHumanResponseException;
+import org.gemo.apex.core.exception.ModelInvocationException;
 import org.gemo.apex.core.exception.ResumePersistenceException;
 import org.gemo.apex.core.exception.SuspensionEventPublishException;
 import org.gemo.apex.core.lifecycle.LifecycleDispatchOutcome;
@@ -25,6 +26,7 @@ import org.gemo.apex.core.tool.ToolResultFactory;
  * <p>负责按固定顺序驱动生命周期 Hook、模型调用和工具调用；会话快照由 {@link ApexAgentContext} 持有并在状态边界持久化，因此本类不承担跨请求并发控制。
  */
 public final class ApexAgent {
+    private static final System.Logger LOG = System.getLogger(ApexAgent.class.getName());
     private final ApexAgentContext context;
     private final LifecycleDispatcher dispatcher;
     private final AgentEventEmitter emitter;
@@ -59,7 +61,7 @@ public final class ApexAgent {
                     return new AgentRunOutcome.Suspended();
                 }
                 if (resumed instanceof ToolCallCoordinator.ToolCallsOutcome.Cancelled) {
-                    return new AgentRunOutcome.Cancelled();
+                    return finalizeCancelled();
                 }
                 if (resumed instanceof ToolCallCoordinator.ToolCallsOutcome.EndTurn) {
                     return finalizeTurn("resume-hook", true, true);
@@ -132,7 +134,7 @@ public final class ApexAgent {
                 }
                 ToolCallCoordinator.ToolCallsOutcome toolOutcome = tools.process(context, calls);
                 if (toolOutcome instanceof ToolCallCoordinator.ToolCallsOutcome.Cancelled) {
-                    return new AgentRunOutcome.Cancelled();
+                    return finalizeCancelled();
                 }
                 if (toolOutcome instanceof ToolCallCoordinator.ToolCallsOutcome.Suspended) {
                     return new AgentRunOutcome.Suspended();
@@ -154,10 +156,14 @@ public final class ApexAgent {
         } catch (SuspensionEventPublishException | ResumePersistenceException error) {
             failure = error;
             return new AgentRunOutcome.Failed(error);
+        } catch (ModelInvocationException error) {
+            failure = error;
+            context.fail();
+            dispatchTerminalHooksBestEffort(error);
+            bestEffortSave(error);
+            return new AgentRunOutcome.Failed(error);
         } catch (CancellationRequestedException cancellation) {
-            context.cancel();
-            bestEffortSave(cancellation);
-            return new AgentRunOutcome.Cancelled();
+            return finalizeCancelled();
         } catch (RuntimeException error) {
             failure = error;
             context.fail();
@@ -178,6 +184,7 @@ public final class ApexAgent {
     public AgentRunOutcome cancelBeforeRun() {
         try {
             context.cancel();
+            dispatchTerminalHooksBestEffort(null);
             context.saveWithoutCancellationCheck();
             return new AgentRunOutcome.Cancelled();
         } catch (RuntimeException error) {
@@ -235,6 +242,62 @@ public final class ApexAgent {
                         Set.of());
         context.cleanupSharedData(SharedDataCleanupPolicy.ITERATION_END);
         return outcome;
+    }
+
+    private AgentRunOutcome finalizeCancelled() {
+        context.cancel();
+        dispatchTerminalHooksBestEffort(null);
+        try {
+            context.saveWithoutCancellationCheck();
+        } catch (RuntimeException saveError) {
+            LOG.log(System.Logger.Level.WARNING, "取消终态保存失败", saveError);
+        }
+        return new AgentRunOutcome.Cancelled();
+    }
+
+    private void dispatchTerminalHooksBestEffort(RuntimeException primary) {
+        if (context.snapshot().activeTurn().currentIteration() != null) {
+            try {
+                dispatcher.dispatch(
+                        HookPoint.ITERATION_END,
+                        context,
+                        (current, binding) ->
+                                new IterationEndContext(
+                                        current.snapshot().sessionId(),
+                                        binding,
+                                        current.snapshot().activeTurn().currentIteration(),
+                                        current.sharedData()),
+                        Set.of());
+            } catch (RuntimeException error) {
+                recordTerminalHookFailure(primary, HookPoint.ITERATION_END, error);
+            } finally {
+                context.cleanupSharedData(SharedDataCleanupPolicy.ITERATION_END);
+            }
+        }
+        try {
+            dispatcher.dispatch(
+                    HookPoint.TURN_END,
+                    context,
+                    (current, binding) ->
+                            new TurnEndContext(
+                                    current.snapshot().sessionId(),
+                                    binding,
+                                    current.snapshot().activeTurn(),
+                                    current.sharedData()),
+                    Set.of());
+        } catch (RuntimeException error) {
+            recordTerminalHookFailure(primary, HookPoint.TURN_END, error);
+        } finally {
+            context.cleanupSharedData(SharedDataCleanupPolicy.TURN_END);
+        }
+    }
+
+    private void recordTerminalHookFailure(
+            RuntimeException primary, HookPoint point, RuntimeException error) {
+        LOG.log(System.Logger.Level.WARNING, "异常收口阶段 Hook 分发失败: point=" + point, error);
+        if (primary != null) {
+            primary.addSuppressed(error);
+        }
     }
 
     /** 失败路径尽力保存终态；保存错误作为原始异常的 suppressed 信息保留。 */

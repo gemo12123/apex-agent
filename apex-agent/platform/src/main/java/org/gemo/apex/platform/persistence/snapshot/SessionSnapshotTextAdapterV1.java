@@ -28,6 +28,7 @@ public final class SessionSnapshotTextAdapterV1 {
                         encodeTurn(snapshot),
                         snapshot.suspendedToolBatch(),
                         snapshot.sharedData(),
+                        snapshot.executionErrors(),
                         snapshot.nextMessageSortNo());
         return new AgentSessionEntity(
                 snapshot.sessionId(),
@@ -75,6 +76,7 @@ public final class SessionSnapshotTextAdapterV1 {
                 activeTurn,
                 suspended,
                 state.sharedData(),
+                state.executionErrors(),
                 state.nextMessageSortNo(),
                 entity.lastActiveTime());
     }
@@ -155,6 +157,7 @@ public final class SessionSnapshotTextAdapterV1 {
             PersistedTurn activeTurn,
             SuspendedToolBatch suspendedToolBatch,
             Map<String, SharedDataEntry> sharedData,
+            List<ExecutionErrorSnapshot> executionErrors,
             long nextMessageSortNo) {
         public RuntimeState {
             historicalToolBindings =
@@ -162,6 +165,7 @@ public final class SessionSnapshotTextAdapterV1 {
                             ? List.of()
                             : List.copyOf(historicalToolBindings);
             sharedData = sharedData == null ? Map.of() : Map.copyOf(sharedData);
+            executionErrors = executionErrors == null ? List.of() : List.copyOf(executionErrors);
         }
 
         public RuntimeState(
@@ -176,6 +180,7 @@ public final class SessionSnapshotTextAdapterV1 {
                     activeTurn,
                     suspendedToolBatch,
                     Map.of(),
+                    List.of(),
                     nextMessageSortNo);
         }
     }

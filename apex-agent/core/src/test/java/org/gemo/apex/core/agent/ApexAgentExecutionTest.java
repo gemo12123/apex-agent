@@ -29,6 +29,7 @@ import org.gemo.apex.common.hook.result.PreToolCallHookResult;
 import org.gemo.apex.common.message.MessageRole;
 import org.gemo.apex.common.message.MessageType;
 import org.gemo.apex.common.model.ModelResponse;
+import org.gemo.apex.common.snapshot.ExecutionErrorType;
 import org.gemo.apex.common.tool.ToolCall;
 import org.gemo.apex.common.tool.ToolResult;
 import org.gemo.apex.extension.hook.LifecycleHook;
@@ -413,9 +414,9 @@ class ApexAgentExecutionTest {
         assertTrue(fixture.modelRequests.getFirst().systemPrompt().contains("直接输出最终结论"));
     }
 
-    /** 模型失败后三层失败且不执行结束生命周期 */
+    /** 模型失败重试三次后三层失败并发送错误事件 */
     @Test
-    void failsAtThreeLevelsAndSkipsEndLifecycleAfterModelFailure() {
+    void retriesThenFailsAtThreeLevelsAfterModelFailure() {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.modelFailure = new IllegalStateException("model down");
         ApexAgent agent = create(fixture);
@@ -423,6 +424,7 @@ class ApexAgentExecutionTest {
         AgentRunOutcome outcome = agent.run();
 
         assertInstanceOf(AgentRunOutcome.Failed.class, outcome);
+        assertEquals(4, fixture.modelCalls);
         assertEquals(SessionStatus.FAILED, agent.snapshot().status());
         assertEquals(TurnStatus.FAILED, agent.snapshot().activeTurn().status());
         assertEquals(
@@ -432,11 +434,14 @@ class ApexAgentExecutionTest {
                 assertInstanceOf(TaskErrorMessage.class, fixture.events.getFirst());
         assertEquals("model down", taskError.getMessages().getFirst().getMessage());
         assertInstanceOf(EndMessage.class, fixture.events.getLast());
+        assertEquals(1, agent.snapshot().executionErrors().size());
+        assertEquals(
+                ExecutionErrorType.MODEL, agent.snapshot().executionErrors().getFirst().type());
     }
 
-    /** prepared取消不创建Iteration或调用模型工具Hook */
+    /** prepared取消不创建Iteration或调用模型工具 */
     @Test
-    void preparedCancellationDoesNotCreateIterationOrInvokeModelToolOrHook() {
+    void preparedCancellationDoesNotCreateIterationOrInvokeModelOrTool() {
         CoreTestFixture fixture = new CoreTestFixture();
         ApexAgent agent = create(fixture);
 

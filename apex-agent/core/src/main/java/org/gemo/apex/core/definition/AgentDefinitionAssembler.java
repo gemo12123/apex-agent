@@ -3,13 +3,18 @@ package org.gemo.apex.core.definition;
 import java.util.*;
 import java.util.stream.Collectors;
 import org.gemo.apex.common.agent.*;
+import org.gemo.apex.common.execution.SessionStatus;
 import org.gemo.apex.common.hook.HookBinding;
 import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.common.hook.context.AgentBuildContext;
 import org.gemo.apex.common.hook.result.ContinueAgentBuild;
 import org.gemo.apex.common.shared.SharedDataStore;
+import org.gemo.apex.common.snapshot.ExecutionErrorSnapshot;
+import org.gemo.apex.common.snapshot.ExecutionErrorType;
 import org.gemo.apex.common.snapshot.HistoricalToolBinding;
+import org.gemo.apex.common.snapshot.IterationSnapshot;
 import org.gemo.apex.common.snapshot.SessionSnapshot;
+import org.gemo.apex.common.snapshot.TurnSnapshot;
 import org.gemo.apex.common.tool.ToolAvailabilitySnapshot;
 import org.gemo.apex.common.tool.ToolOrigin;
 import org.gemo.apex.common.tool.UnavailableToolSource;
@@ -44,7 +49,24 @@ public final class AgentDefinitionAssembler {
         }
         validator.structuralPrecheck(source, ports);
         AgentDefinitionDraft draft = new AgentDefinitionDraft(source);
-        dispatchAgentBuild(sessionId, source, draft, ports, sharedData);
+        long turnNo =
+                existingSession
+                        .map(
+                                snapshot ->
+                                        snapshot.status() == SessionStatus.HUMAN_IN_THE_LOOP
+                                                ? snapshot.currentTurnNo()
+                                                : snapshot.currentTurnNo() + 1)
+                        .orElse(1L);
+        Integer iterationNo =
+                existingSession
+                        .filter(snapshot -> snapshot.status() == SessionStatus.HUMAN_IN_THE_LOOP)
+                        .map(SessionSnapshot::activeTurn)
+                        .map(TurnSnapshot::currentIteration)
+                        .map(IterationSnapshot::iterationNo)
+                        .orElse(null);
+        List<ExecutionErrorSnapshot> buildErrors = new ArrayList<>();
+        dispatchAgentBuild(
+                sessionId, source, draft, ports, sharedData, turnNo, iterationNo, buildErrors);
         AgentDefinition candidate = materialize(source, draft);
         ToolCatalog loadedCatalog = new ToolCatalog(ports.toolProvider().loadTools(candidate));
         Classification classification =
@@ -79,6 +101,7 @@ public final class AgentDefinitionAssembler {
                         classification.definition(), draft.prefixDeveloperMessages()),
                 enabled,
                 classification.history(),
+                buildErrors,
                 classification.catalog());
     }
 
@@ -88,7 +111,10 @@ public final class AgentDefinitionAssembler {
             AgentDefinition source,
             AgentDefinitionDraft draft,
             AgentPorts ports,
-            SharedDataStore sharedData) {
+            SharedDataStore sharedData,
+            long turnNo,
+            Integer iterationNo,
+            List<ExecutionErrorSnapshot> buildErrors) {
         List<HookBinding> snapshot =
                 source.hooks().getOrDefault(HookPoint.AGENT_BUILD, List.of()).stream()
                         .filter(HookBinding::enabled)
@@ -123,6 +149,19 @@ public final class AgentDefinitionAssembler {
                         System.Logger.Level.WARNING,
                         "AGENT_BUILD Hook 执行失败，已跳过: " + binding.id(),
                         error);
+                String location =
+                        iterationNo == null
+                                ? "第 " + turnNo + " 个 Turn"
+                                : "第 " + turnNo + " 个 Turn 第 " + iterationNo + " 轮";
+                buildErrors.add(
+                        new ExecutionErrorSnapshot(
+                                turnNo,
+                                iterationNo,
+                                ExecutionErrorType.HOOK,
+                                HookPoint.AGENT_BUILD,
+                                binding.id(),
+                                location + " 的 AGENT_BUILD Hook " + binding.id() + " 执行失败",
+                                ports.timeProvider().now()));
             }
         }
     }

@@ -1,6 +1,7 @@
 package org.gemo.apex.core.model;
 
 import java.util.*;
+import org.gemo.apex.common.exception.CancellationRequestedException;
 import org.gemo.apex.common.execution.IterationStatus;
 import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.common.hook.context.PostModelCallContext;
@@ -14,12 +15,15 @@ import org.gemo.apex.common.tool.ToolCall;
 import org.gemo.apex.core.agent.ApexAgentContext;
 import org.gemo.apex.core.event.AgentEventEmitter;
 import org.gemo.apex.core.event.AgentEventFactory;
+import org.gemo.apex.core.exception.ModelInvocationException;
 import org.gemo.apex.core.lifecycle.LifecycleDispatchOutcome;
 import org.gemo.apex.core.lifecycle.LifecycleDispatcher;
 import org.gemo.apex.extension.model.ModelStreamObserver;
 
 /** 执行一次模型步骤，并把流式文本和最终模型响应接入 Agent 状态。 */
 public final class ModelStepExecutor {
+    private static final System.Logger LOG = System.getLogger(ModelStepExecutor.class.getName());
+    private static final int MODEL_RETRY_COUNT = 3;
     private final LifecycleDispatcher dispatcher;
     private final AgentEventEmitter emitter;
     private final AgentEventFactory events;
@@ -51,24 +55,7 @@ public final class ModelStepExecutor {
         String contentId = context.ports().idGenerator().newInvocationId();
         context.ports().cancellationToken().throwIfCancellationRequested();
         // 流式分片只向客户端转发；完整响应仍由 gateway 返回后一次性进入快照。
-        ModelResponse response =
-                context.ports().modelGateway().stream(
-                        context.modelRequest(),
-                        new ModelStreamObserver() {
-                            @Override
-                            public void onChunk(ModelStreamChunk chunk) {
-                                context.ports().cancellationToken().throwIfCancellationRequested();
-                                if (chunk.textDelta() != null && !chunk.textDelta().isEmpty()) {
-                                    emitter.publish(
-                                            events.streamContent(contentId, chunk.textDelta()));
-                                }
-                            }
-
-                            @Override
-                            public CancellationToken cancellationToken() {
-                                return context.ports().cancellationToken();
-                            }
-                        });
+        ModelResponse response = invokeModel(context, contentId);
         context.ports().cancellationToken().throwIfCancellationRequested();
         context.modelResponse(response);
         LifecycleDispatchOutcome post =
@@ -89,6 +76,46 @@ public final class ModelStepExecutor {
         return context.modelResponse().toolCalls().isEmpty()
                 ? new ModelStepOutcome.FinalText(context.modelResponse().text())
                 : new ModelStepOutcome.ToolCalls(context.modelResponse().toolCalls());
+    }
+
+    private ModelResponse invokeModel(ApexAgentContext context, String contentId) {
+        int maxAttempts = MODEL_RETRY_COUNT + 1;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                return context.ports().modelGateway().stream(
+                        context.modelRequest(),
+                        new ModelStreamObserver() {
+                            @Override
+                            public void onChunk(ModelStreamChunk chunk) {
+                                context.ports().cancellationToken().throwIfCancellationRequested();
+                                if (chunk.textDelta() != null && !chunk.textDelta().isEmpty()) {
+                                    emitter.publish(
+                                            events.streamContent(contentId, chunk.textDelta()));
+                                }
+                            }
+
+                            @Override
+                            public CancellationToken cancellationToken() {
+                                return context.ports().cancellationToken();
+                            }
+                        });
+            } catch (CancellationRequestedException error) {
+                throw error;
+            } catch (RuntimeException error) {
+                if (context.ports().cancellationToken().isCancellationRequested()) {
+                    throw new CancellationRequestedException();
+                }
+                LOG.log(
+                        System.Logger.Level.WARNING,
+                        "模型调用失败: attempt=" + attempt + "/" + maxAttempts,
+                        error);
+                if (attempt == maxAttempts) {
+                    context.recordModelFailure(error);
+                    throw new ModelInvocationException(error);
+                }
+            }
+        }
+        throw new IllegalStateException("模型重试循环未正常收口");
     }
 
     /** 将模型文本和 ToolCall 一并写为一条助手消息，以维持会话顺序。 */
