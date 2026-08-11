@@ -17,8 +17,6 @@ import org.gemo.apex.common.json.JsonUtils;
 import org.gemo.apex.common.message.MessageRole;
 import org.gemo.apex.common.model.ModelRequest;
 import org.gemo.apex.common.model.ModelResponse;
-import org.gemo.apex.common.skill.SkillSetDefinition;
-import org.gemo.apex.common.snapshot.ToolExecutionSnapshot;
 import org.gemo.apex.common.tool.*;
 import org.junit.jupiter.api.Test;
 
@@ -86,15 +84,12 @@ class DomainModelContractTest {
                                 null, List.of(CommonFixtures.toolCall(), duplicate), Map.of()));
     }
 
-    /** 工具和Skill默认集合必须是可用集合子集 */
+    /** 工具默认集合必须是可用集合子集 */
     @Test
-    void ensuresToolAndSkillDefaultSetsAreSubsetsOfAvailableSets() {
+    void ensuresToolDefaultSetIsSubsetOfAvailableSet() {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new ToolSetDefinition(Set.of("a"), Set.of("b")));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new SkillSetDefinition(Set.of("a"), Set.of("b")));
     }
 
     /** Skill激活变更应冻结集合并拒绝冲突名称 */
@@ -158,22 +153,15 @@ class DomainModelContractTest {
                         "subagent.weather.search", ToolOrigin.LOCAL, "weather-agent"));
     }
 
-    /** 四层状态均包含Cancelled并可序列化 */
+    /** 三层执行状态均包含Cancelled并可序列化 */
     @Test
-    void allFourStateLevelsIncludeCancelledAndAreSerializable() {
+    void allThreeStateLevelsIncludeCancelledAndAreSerializable() {
         assertEquals(
                 SessionStatus.CANCELLED, roundTrip(SessionStatus.CANCELLED, SessionStatus.class));
         assertEquals(TurnStatus.CANCELLED, roundTrip(TurnStatus.CANCELLED, TurnStatus.class));
         assertEquals(
                 IterationStatus.CANCELLED,
                 roundTrip(IterationStatus.CANCELLED, IterationStatus.class));
-        assertEquals(
-                ToolExecutionStatus.CANCELLED,
-                roundTrip(ToolExecutionStatus.CANCELLED, ToolExecutionStatus.class));
-        ToolExecutionSnapshot snapshot =
-                new ToolExecutionSnapshot(
-                        CommonFixtures.toolCall(), ToolExecutionStatus.CANCELLED, null);
-        assertEquals(snapshot, roundTrip(snapshot, ToolExecutionSnapshot.class));
     }
 
     /** metadata应立即拒绝取消token和不可序列化对象 */

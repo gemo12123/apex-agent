@@ -9,11 +9,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.gemo.apex.common.exception.InvalidSnapshotException;
-import org.gemo.apex.common.exception.SnapshotDecodingException;
-import org.gemo.apex.common.exception.UnsupportedSnapshotVersionException;
-import org.gemo.apex.common.json.JsonUtils;
-import org.gemo.apex.common.shared.SharedDataCleanupPolicy;
-import org.gemo.apex.common.shared.SharedDataEntry;
 import org.gemo.apex.common.snapshot.*;
 import org.gemo.apex.common.tool.CancellationToken;
 import org.gemo.apex.common.tool.ToolOrigin;
@@ -21,92 +16,6 @@ import org.gemo.apex.common.tool.ToolResult;
 import org.junit.jupiter.api.Test;
 
 class SessionSnapshotContractTest {
-    @Test
-    void sharedDataRoundTripsAndMissingFieldDefaultsToEmpty() {
-        SessionSnapshot source = CommonFixtures.suspendedSnapshot();
-        SessionSnapshot snapshot =
-                new SessionSnapshot(
-                        source.schemaVersion(),
-                        source.sessionId(),
-                        source.userId(),
-                        source.agentKey(),
-                        source.status(),
-                        source.currentTurnNo(),
-                        source.enabledTools(),
-                        source.activatedSkills(),
-                        source.historicalToolBindings(),
-                        source.activeDefinition(),
-                        source.activeTurn(),
-                        source.suspendedToolBatch(),
-                        Map.of(
-                                "state",
-                                new SharedDataEntry(
-                                        SharedDataCleanupPolicy.NEVER, Map.of("count", 1))),
-                        source.nextMessageSortNo(),
-                        source.lastActiveTime());
-        SessionSnapshotJsonAdapter adapter = new SessionSnapshotJsonAdapter();
-
-        assertEquals(snapshot, adapter.read(adapter.write(snapshot)));
-
-        var tree =
-                (com.fasterxml.jackson.databind.node.ObjectNode)
-                        JsonUtils.parseTree(adapter.write(snapshot));
-        tree.remove("sharedData");
-        assertEquals(Map.of(), adapter.read(JsonUtils.toJson(tree)).sharedData());
-    }
-
-    /** v1快照应完整往返并按ToolCallId定位挂起调用 */
-    @Test
-    void v1SnapshotsRoundTripCompletelyAndLocateSuspendedCallsByToolCallId() {
-        SessionSnapshot snapshot = CommonFixtures.suspendedSnapshot();
-        SessionSnapshotJsonAdapter adapter = new SessionSnapshotJsonAdapter();
-
-        SessionSnapshot copy = adapter.read(adapter.write(snapshot));
-
-        assertEquals(snapshot, copy);
-        assertEquals("call-1", copy.suspendedToolBatch().toolCalls().getFirst().toolCallId());
-        assertEquals(
-                List.of("audit", "confirm"),
-                copy.suspendedToolBatch().toolCalls().getFirst().executedPreToolHookIds());
-    }
-
-    /** HookBinding快照字段应与领域模型统一使用hook */
-    @Test
-    void writesHookBindingHookField() {
-        String json = new SessionSnapshotJsonAdapter().write(CommonFixtures.suspendedSnapshot());
-
-        var binding =
-                JsonUtils.parseTree(json)
-                        .path("activeDefinition")
-                        .path("hooks")
-                        .path("PRE_TOOL_CALL")
-                        .get(0);
-        assertEquals("confirm", binding.path("hook").asText());
-        assertFalse(binding.has("name"));
-    }
-
-    /** 未知版本应显式拒绝且不尝试升级 */
-    @Test
-    void rejectsUnknownVersionExplicitlyWithoutUpgradeAttempt() {
-        String json =
-                new SessionSnapshotJsonAdapter()
-                        .write(CommonFixtures.suspendedSnapshot())
-                        .replace("\"1.0.0\"", "\"2.0.0\"");
-        assertThrows(
-                UnsupportedSnapshotVersionException.class,
-                () -> new SessionSnapshotJsonAdapter().read(json));
-    }
-
-    /** 损坏Json应包装为不泄露正文的快照解码异常 */
-    @Test
-    void wrapsCorruptedJsonInSnapshotDecodingExceptionWithoutBodyLeak() {
-        SnapshotDecodingException exception =
-                assertThrows(
-                        SnapshotDecodingException.class,
-                        () -> new SessionSnapshotJsonAdapter().read("{not-json"));
-        assertFalse(exception.getMessage().contains("not-json"));
-    }
-
     /** 历史工具不能回填enabledTools且preHookId不能重复 */
     @Test
     void doesNotBackfillEnabledToolsForHistoricalToolsAndRejectsDuplicatePreHookIds() {

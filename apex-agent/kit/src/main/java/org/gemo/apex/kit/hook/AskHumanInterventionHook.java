@@ -10,8 +10,9 @@ import org.gemo.apex.common.hook.result.BlockTool;
 import org.gemo.apex.common.hook.result.ContinuePreToolCall;
 import org.gemo.apex.common.hook.result.PreToolCallHookResult;
 import org.gemo.apex.common.hook.result.RequestHumanIntervention;
+import org.gemo.apex.common.intervention.QuestionInterventionRequest;
 import org.gemo.apex.extension.hook.LifecycleHook;
-import org.gemo.apex.kit.intervention.QuestionInterventionFactory;
+import org.gemo.apex.kit.intervention.AskHumanArgumentsParser;
 import org.gemo.apex.kit.tool.AskHumanTool;
 
 public final class AskHumanInterventionHook
@@ -20,14 +21,14 @@ public final class AskHumanInterventionHook
     private static final HookTypeDescriptor DESCRIPTOR =
             new HookTypeDescriptor(
                     HookPoint.PRE_TOOL_CALL, PreToolCallContext.class, PreToolCallHookResult.class);
-    private final QuestionInterventionFactory factory;
+    private final AskHumanArgumentsParser parser;
 
     public AskHumanInterventionHook() {
-        this(new QuestionInterventionFactory());
+        this(new AskHumanArgumentsParser());
     }
 
-    public AskHumanInterventionHook(QuestionInterventionFactory factory) {
-        this.factory = Objects.requireNonNull(factory, "factory");
+    public AskHumanInterventionHook(AskHumanArgumentsParser parser) {
+        this.parser = Objects.requireNonNull(parser, "parser");
     }
 
     @Override
@@ -48,7 +49,10 @@ public final class AskHumanInterventionHook
                     HookMutations.none(), new ToolCallPatch(context.toolCall().arguments()));
         }
         try {
-            return new RequestHumanIntervention(factory.create(context.toolCall()));
+            return new RequestHumanIntervention(
+                    new QuestionInterventionRequest(
+                            context.toolCall().toolCallId(),
+                            parser.parse(context.toolCall().arguments())));
         } catch (IllegalArgumentException exception) {
             return new BlockTool(exception.getMessage());
         }

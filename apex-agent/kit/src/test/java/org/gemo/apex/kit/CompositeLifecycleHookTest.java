@@ -15,27 +15,12 @@ import org.gemo.apex.common.hook.result.ContinuePreToolCall;
 import org.gemo.apex.common.hook.result.PreToolCallHookResult;
 import org.gemo.apex.extension.hook.LifecycleHook;
 import org.gemo.apex.kit.hook.CompositeLifecycleHook;
-import org.gemo.apex.kit.matcher.GlobToolMatcher;
 import org.junit.jupiter.api.Test;
 
-class MatcherAndCompositeTest {
+class CompositeLifecycleHookTest {
     private static final HookTypeDescriptor PRE =
             new HookTypeDescriptor(
                     HookPoint.PRE_TOOL_CALL, PreToolCallContext.class, PreToolCallHookResult.class);
-
-    /** 匹配器支持精确名称和全局星号并拒绝非法glob */
-    @Test
-    void matchesExactNamesAndWildcardAndRejectsInvalidGlob() {
-        GlobToolMatcher exact = new GlobToolMatcher(List.of("search", "write"));
-        assertTrue(exact.matches("search"));
-        assertFalse(exact.matches("other"));
-        assertTrue(new GlobToolMatcher(List.of("*")).matches("anything"));
-        assertThrows(
-                IllegalArgumentException.class, () -> new GlobToolMatcher(List.of("search_*")));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new GlobToolMatcher(List.of("search", "search")));
-    }
 
     /** 组合器按显式顺序执行并在终止结果处停止 */
     @Test

@@ -6,6 +6,7 @@ import org.gemo.apex.common.execution.*;
 import org.gemo.apex.common.intervention.HumanResponseCommand;
 import org.gemo.apex.core.agent.*;
 import org.gemo.apex.extension.event.*;
+import org.gemo.apex.protocol.request.RequestType;
 import org.gemo.apex.runtime.event.*;
 import org.gemo.apex.runtime.execution.*;
 import org.gemo.apex.runtime.resource.RuntimeResources;
@@ -51,7 +52,7 @@ public final class ApexAgentRuntime implements AutoCloseable {
                 r.sessionId(),
                 r.agentKey(),
                 r.userId(),
-                RequestKind.NEW,
+                RequestType.NEW,
                 p -> factory.createNew(r, p));
     }
 
@@ -61,7 +62,7 @@ public final class ApexAgentRuntime implements AutoCloseable {
                 r.sessionId(),
                 r.agentKey(),
                 r.userId(),
-                RequestKind.HUMAN_RESPONSE,
+                RequestType.HUMAN_RESPONSE,
                 p -> factory.createResumed(r, p));
     }
 
@@ -70,7 +71,7 @@ public final class ApexAgentRuntime implements AutoCloseable {
             String sid,
             String key,
             String uid,
-            RequestKind kind,
+            RequestType kind,
             Function<AgentPorts, ApexAgent> create) {
         active.ensureAccepting();
         var lease = coordinator.acquire(sid);

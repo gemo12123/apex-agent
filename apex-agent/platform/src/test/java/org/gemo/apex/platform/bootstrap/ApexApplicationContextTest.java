@@ -19,7 +19,8 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 @SpringBootTest(
         properties = {
-            "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration,org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration"
+            "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration,org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration",
+            "spring.ai.mcp.client.enabled=false"
         })
 @Import(ApexApplicationContextTest.ModelConfiguration.class)
 class ApexApplicationContextTest {
