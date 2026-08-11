@@ -7,6 +7,7 @@ import org.gemo.apex.common.hook.HookBinding;
 import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.common.hook.context.AgentBuildContext;
 import org.gemo.apex.common.hook.result.ContinueAgentBuild;
+import org.gemo.apex.common.shared.SharedDataStore;
 import org.gemo.apex.common.snapshot.HistoricalToolBinding;
 import org.gemo.apex.common.snapshot.SessionSnapshot;
 import org.gemo.apex.common.tool.ToolAvailabilitySnapshot;
@@ -32,7 +33,8 @@ public final class AgentDefinitionAssembler {
             String sessionId,
             String agentKey,
             Optional<SessionSnapshot> existingSession,
-            AgentPorts ports) {
+            AgentPorts ports,
+            SharedDataStore sharedData) {
         AgentDefinition source = ports.definitionProvider().load(agentKey);
         if (source == null) {
             throw new InvalidAgentDefinitionException("找不到 Agent 定义: " + agentKey);
@@ -42,7 +44,7 @@ public final class AgentDefinitionAssembler {
         }
         validator.structuralPrecheck(source, ports);
         AgentDefinitionDraft draft = new AgentDefinitionDraft(source);
-        dispatchAgentBuild(sessionId, source, draft, ports);
+        dispatchAgentBuild(sessionId, source, draft, ports, sharedData);
         AgentDefinition candidate = materialize(source, draft);
         ToolCatalog loadedCatalog = new ToolCatalog(ports.toolProvider().loadTools(candidate));
         Classification classification =
@@ -85,7 +87,8 @@ public final class AgentDefinitionAssembler {
             String sessionId,
             AgentDefinition source,
             AgentDefinitionDraft draft,
-            AgentPorts ports) {
+            AgentPorts ports,
+            SharedDataStore sharedData) {
         List<HookBinding> snapshot =
                 source.hooks().getOrDefault(HookPoint.AGENT_BUILD, List.of()).stream()
                         .filter(HookBinding::enabled)
@@ -104,7 +107,8 @@ public final class AgentDefinitionAssembler {
                                         binding,
                                         new AgentDefinitionSnapshot(
                                                 materialize(source, draft),
-                                                draft.prefixDeveloperMessages())));
+                                                draft.prefixDeveloperMessages()),
+                                        sharedData));
                 if (!(raw instanceof ContinueAgentBuild result)) {
                     throw new HookContractException("AGENT_BUILD 返回了非法结果: " + binding.id());
                 }

@@ -13,6 +13,8 @@ import org.gemo.apex.common.execution.IterationStatus;
 import org.gemo.apex.common.execution.SessionStatus;
 import org.gemo.apex.common.execution.TurnStatus;
 import org.gemo.apex.common.json.JsonUtils;
+import org.gemo.apex.common.shared.SharedDataCleanupPolicy;
+import org.gemo.apex.common.shared.SharedDataEntry;
 import org.gemo.apex.common.snapshot.IterationSnapshot;
 import org.gemo.apex.common.snapshot.SessionSnapshot;
 import org.gemo.apex.common.snapshot.TurnSnapshot;
@@ -23,6 +25,55 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 class SessionSnapshotTextAdapterV1Test {
+    @Test
+    void persistsSharedDataAndDefaultsMissingLegacyFieldToEmpty() {
+        var adapter = new SessionSnapshotTextAdapterV1();
+        var source = PlatformFixtures.suspendedSnapshot();
+        var snapshot =
+                new SessionSnapshot(
+                        source.schemaVersion(),
+                        source.sessionId(),
+                        source.userId(),
+                        source.agentKey(),
+                        source.status(),
+                        source.currentTurnNo(),
+                        source.enabledTools(),
+                        source.activatedSkills(),
+                        source.historicalToolBindings(),
+                        source.activeDefinition(),
+                        source.activeTurn(),
+                        source.suspendedToolBatch(),
+                        Map.of(
+                                "state",
+                                new SharedDataEntry(
+                                        SharedDataCleanupPolicy.NEVER, Map.of("count", 1))),
+                        source.nextMessageSortNo(),
+                        source.lastActiveTime());
+
+        var entity = adapter.encode(snapshot);
+        assertEquals(snapshot.sharedData(), adapter.decode(entity).sharedData());
+        Assertions.assertTrue(entity.runtimeSnapshot().contains("sharedData"));
+
+        var legacyTree =
+                (com.fasterxml.jackson.databind.node.ObjectNode)
+                        JsonUtils.parseTree(entity.runtimeSnapshot());
+        legacyTree.remove("sharedData");
+        var legacy =
+                new AgentSessionEntity(
+                        entity.sessionId(),
+                        entity.userId(),
+                        entity.agentKey(),
+                        entity.status(),
+                        entity.currentTurnNo(),
+                        entity.agentDefinitionSnapshot(),
+                        entity.enabledToolNames(),
+                        entity.activatedSkillNames(),
+                        JsonUtils.toJson(legacyTree),
+                        entity.suspendedToolCall(),
+                        entity.lastActiveTime());
+        assertEquals(Map.of(), adapter.decode(legacy).sharedData());
+    }
+
     /** 挂起快照只保留恢复投影，不复制完整模型请求和响应。 */
     @Test
     void suspendedSnapshotPersistsOnlyRecoveryProjection() {

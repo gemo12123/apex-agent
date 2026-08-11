@@ -13,6 +13,7 @@ import org.gemo.apex.common.execution.SessionStatus;
 import org.gemo.apex.common.execution.TurnStatus;
 import org.gemo.apex.common.json.JsonUtils;
 import org.gemo.apex.common.model.ModelResponse;
+import org.gemo.apex.common.shared.SharedDataEntry;
 import org.gemo.apex.common.snapshot.*;
 import org.gemo.apex.common.tool.ToolCall;
 import org.gemo.apex.common.tool.ToolResult;
@@ -26,6 +27,7 @@ public final class SessionSnapshotTextAdapterV1 {
                         snapshot.historicalToolBindings(),
                         encodeTurn(snapshot),
                         snapshot.suspendedToolBatch(),
+                        snapshot.sharedData(),
                         snapshot.nextMessageSortNo());
         return new AgentSessionEntity(
                 snapshot.sessionId(),
@@ -72,6 +74,7 @@ public final class SessionSnapshotTextAdapterV1 {
                 definition,
                 activeTurn,
                 suspended,
+                state.sharedData(),
                 state.nextMessageSortNo(),
                 entity.lastActiveTime());
     }
@@ -151,7 +154,31 @@ public final class SessionSnapshotTextAdapterV1 {
             List<HistoricalToolBinding> historicalToolBindings,
             PersistedTurn activeTurn,
             SuspendedToolBatch suspendedToolBatch,
-            long nextMessageSortNo) {}
+            Map<String, SharedDataEntry> sharedData,
+            long nextMessageSortNo) {
+        public RuntimeState {
+            historicalToolBindings =
+                    historicalToolBindings == null
+                            ? List.of()
+                            : List.copyOf(historicalToolBindings);
+            sharedData = sharedData == null ? Map.of() : Map.copyOf(sharedData);
+        }
+
+        public RuntimeState(
+                String schemaVersion,
+                List<HistoricalToolBinding> historicalToolBindings,
+                PersistedTurn activeTurn,
+                SuspendedToolBatch suspendedToolBatch,
+                long nextMessageSortNo) {
+            this(
+                    schemaVersion,
+                    historicalToolBindings,
+                    activeTurn,
+                    suspendedToolBatch,
+                    Map.of(),
+                    nextMessageSortNo);
+        }
+    }
 
     public record PersistedTurn(
             long turnNo,

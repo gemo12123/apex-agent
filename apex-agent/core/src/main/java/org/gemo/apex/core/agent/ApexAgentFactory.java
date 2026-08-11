@@ -2,16 +2,18 @@ package org.gemo.apex.core.agent;
 
 import java.util.*;
 import org.gemo.apex.common.agent.*;
-import org.gemo.apex.common.execution.AgentRequest;
-import org.gemo.apex.common.execution.SessionStatus;
-import org.gemo.apex.common.execution.TurnStatus;
 import org.gemo.apex.common.conversation.ConversationQuery;
 import org.gemo.apex.common.conversation.ConversationWindow;
 import org.gemo.apex.common.conversation.ConversationWindowRequest;
+import org.gemo.apex.common.execution.AgentRequest;
+import org.gemo.apex.common.execution.SessionStatus;
+import org.gemo.apex.common.execution.TurnStatus;
 import org.gemo.apex.common.intervention.HumanResponseCommand;
 import org.gemo.apex.common.message.AgentMessageEntry;
 import org.gemo.apex.common.message.MessageRole;
 import org.gemo.apex.common.message.MessageType;
+import org.gemo.apex.common.shared.SharedDataStore;
+import org.gemo.apex.common.shared.SharedDataStores;
 import org.gemo.apex.common.snapshot.*;
 import org.gemo.apex.core.definition.AgentDefinitionAssembler;
 import org.gemo.apex.core.exception.SessionOwnershipException;
@@ -31,9 +33,12 @@ public final class ApexAgentFactory {
         ports.cancellationToken().throwIfCancellationRequested();
         Optional<SessionSnapshot> existing = ports.sessionRepository().load(request.sessionId());
         existing.ifPresent(snapshot -> validateNewOwner(request, snapshot));
+        SharedDataStore sharedData =
+                SharedDataStores.create(existing.map(SessionSnapshot::sharedData).orElse(Map.of()));
         // 先把当前定义解析为快照，后续 Turn 可在配置变更后仍按该快照恢复。
         AgentAssemblyResult assembly =
-                assembler.assemble(request.sessionId(), request.agentKey(), existing, ports);
+                assembler.assemble(
+                        request.sessionId(), request.agentKey(), existing, ports, sharedData);
         long turnNo = existing.map(snapshot -> snapshot.currentTurnNo() + 1).orElse(1L);
         var now = ports.timeProvider().now();
         TurnSnapshot turn = new TurnSnapshot(turnNo, TurnStatus.IN_PROGRESS, null, now, null);
@@ -63,6 +68,7 @@ public final class ApexAgentFactory {
                         ApexAgentContext.recovery(assembly.definition()),
                         turn,
                         null,
+                        sharedData.entries(),
                         nextSort + 1,
                         now);
         AgentMessageEntry user =
@@ -84,7 +90,8 @@ public final class ApexAgentFactory {
                         assembly.toolCatalog(),
                         snapshot,
                         window,
-                        null);
+                        null,
+                        sharedData);
         ports.cancellationToken().throwIfCancellationRequested();
         context.appendConversation(List.of(user));
         ports.cancellationToken().throwIfCancellationRequested();
@@ -107,13 +114,18 @@ public final class ApexAgentFactory {
         }
         SuspendedToolBatch suspended =
                 Objects.requireNonNull(snapshot.suspendedToolBatch(), "suspendedToolBatch");
+        SharedDataStore sharedData = SharedDataStores.create(snapshot.sharedData());
         if (suspended.toolCalls().size()
                 != snapshot.activeTurn().currentIteration().modelResponse().toolCalls().size()) {
             throw new SessionStateException("挂起 ToolCall 批次无法完整定位");
         }
         AgentAssemblyResult assembly =
                 assembler.assemble(
-                        command.sessionId(), command.agentKey(), Optional.of(snapshot), ports);
+                        command.sessionId(),
+                        command.agentKey(),
+                        Optional.of(snapshot),
+                        ports,
+                        sharedData);
         Set<String> activated = new LinkedHashSet<>(snapshot.activatedSkills());
         activated.retainAll(assembly.definition().definition().enabledSkills());
         SessionSnapshot resumedSnapshot =
@@ -130,6 +142,7 @@ public final class ApexAgentFactory {
                         ApexAgentContext.recovery(assembly.definition()),
                         snapshot.activeTurn(),
                         suspended,
+                        sharedData.entries(),
                         snapshot.nextMessageSortNo(),
                         snapshot.lastActiveTime());
         return new ApexAgent(
@@ -139,7 +152,8 @@ public final class ApexAgentFactory {
                         assembly.toolCatalog(),
                         resumedSnapshot,
                         loadWindow(command.sessionId(), ports),
-                        command.response()));
+                        command.response(),
+                        sharedData));
     }
 
     private ConversationWindow loadWindow(String sessionId, AgentPorts ports) {

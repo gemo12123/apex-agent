@@ -8,17 +8,20 @@ import java.util.List;
 import org.gemo.apex.common.conversation.ConversationCompactionResult;
 import org.gemo.apex.common.hook.HookBinding;
 import org.gemo.apex.common.message.AgentMessageEntry;
+import org.gemo.apex.common.shared.SharedDataStore;
 
 public record PostMessageCompressionContext(
         String sessionId,
         HookBinding binding,
         List<AgentMessageEntry> originalMessages,
-        ConversationCompactionResult result)
+        ConversationCompactionResult result,
+        SharedDataStore sharedData)
         implements HookContextView {
     public PostMessageCompressionContext {
         sessionId = required(sessionId, "sessionId");
         binding = nonNull(binding, "binding");
         originalMessages = immutableList(originalMessages, "originalMessages");
         result = nonNull(result, "result");
+        sharedData = nonNull(sharedData, "sharedData");
     }
 }

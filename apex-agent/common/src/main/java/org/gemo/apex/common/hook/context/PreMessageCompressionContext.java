@@ -7,13 +7,15 @@ import org.gemo.apex.common.conversation.ConversationCompactionCheck;
 import org.gemo.apex.common.conversation.ConversationCompactionRequest;
 import org.gemo.apex.common.hook.HookBinding;
 import org.gemo.apex.common.model.ModelRequest;
+import org.gemo.apex.common.shared.SharedDataStore;
 
 public record PreMessageCompressionContext(
         String sessionId,
         HookBinding binding,
         ModelRequest baseModelRequest,
         ConversationCompactionCheck check,
-        ConversationCompactionRequest request)
+        ConversationCompactionRequest request,
+        SharedDataStore sharedData)
         implements HookContextView {
     public PreMessageCompressionContext {
         sessionId = required(sessionId, "sessionId");
@@ -21,6 +23,7 @@ public record PreMessageCompressionContext(
         baseModelRequest = nonNull(baseModelRequest, "baseModelRequest");
         check = nonNull(check, "check");
         request = nonNull(request, "request");
+        sharedData = nonNull(sharedData, "sharedData");
         if (!sessionId.equals(check.triggerContext().sessionId())
                 || !sessionId.equals(request.sessionId())) {
             throw new IllegalArgumentException("压缩上下文 sessionId 必须一致");

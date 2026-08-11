@@ -20,6 +20,7 @@ import org.gemo.apex.common.hook.result.*;
 import org.gemo.apex.common.intervention.*;
 import org.gemo.apex.common.message.MessageType;
 import org.gemo.apex.common.model.ModelResponse;
+import org.gemo.apex.common.shared.SharedDataCleanupPolicy;
 import org.gemo.apex.common.tool.ToolAvailabilitySnapshot;
 import org.gemo.apex.common.tool.ToolCall;
 import org.gemo.apex.common.tool.ToolResult;
@@ -32,6 +33,41 @@ import org.gemo.apex.protocol.event.detail.ToolConfirmationDetail;
 import org.junit.jupiter.api.Test;
 
 class HumanInterventionExecutionTest {
+    @Test
+    void persistsSharedDataAcrossSuspensionAndResume() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        fixture.tool(
+                "ask",
+                (call, context, observer) -> {
+                    assertEquals("resumed", context.sharedData().get("phase"));
+                    context.sharedData().put("tool", "done", SharedDataCleanupPolicy.NEVER);
+                    return new ToolResult(call.toolCallId(), call.name(), "ok", Map.of());
+                });
+        Scenario scenario =
+                scenario(
+                        fixture,
+                        context -> {
+                            context.sharedData()
+                                    .put("phase", "suspended", SharedDataCleanupPolicy.NEVER);
+                            return new RequestHumanIntervention(question(context.toolCall()));
+                        },
+                        context -> {
+                            assertEquals("suspended", context.sharedData().get("phase"));
+                            context.sharedData()
+                                    .put("phase", "resumed", SharedDataCleanupPolicy.NEVER);
+                            return continued(context);
+                        },
+                        false);
+
+        assertInstanceOf(AgentRunOutcome.Suspended.class, scenario.fresh.run());
+        assertEquals("suspended", scenario.fresh.snapshot().sharedData().get("phase").value());
+
+        ApexAgent resumed = resumeQuestion(scenario);
+        assertInstanceOf(AgentRunOutcome.Completed.class, resumed.run());
+        assertEquals("resumed", resumed.snapshot().sharedData().get("phase").value());
+        assertEquals("done", resumed.snapshot().sharedData().get("tool").value());
+    }
+
     /** question挂起先保存再发布且不执行工具和结束生命周期 */
     @Test
     void questionSuspensionSavesBeforePublishingAndDoesNotExecuteToolOrEndLifecycle() {

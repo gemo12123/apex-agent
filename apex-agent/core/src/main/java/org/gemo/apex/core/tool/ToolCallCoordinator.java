@@ -162,7 +162,8 @@ public final class ToolCallCoordinator {
                                         current.toolCall(),
                                         invocationId,
                                         current.ports().idGenerator().newConfirmationId(),
-                                        current.currentHumanSubmission()),
+                                        current.currentHumanSubmission(),
+                                        current.sharedData()),
                         executedHookIds);
         LifecycleDispatchOutcome outcome = dispatched.outcome();
         if (outcome instanceof LifecycleDispatchOutcome.EndTurn end) {
@@ -286,6 +287,7 @@ public final class ToolCallCoordinator {
                         context.currentHumanSubmission(),
                         null,
                         context.ports().cancellationToken(),
+                        context.sharedData(),
                         Map.of("invocationId", invocationId));
         try {
             context.ports().cancellationToken().throwIfCancellationRequested();
@@ -457,7 +459,7 @@ public final class ToolCallCoordinator {
         context.appendConversation(entries);
         context.addToolResults(batch);
         context.cancel();
-        context.ports().sessionRepository().save(context.snapshot());
+        context.saveWithoutCancellationCheck();
     }
 
     private AgentMessageEntry entry(ApexAgentContext context, ToolResult result, String entryId) {
@@ -490,7 +492,8 @@ public final class ToolCallCoordinator {
                                 current.snapshot().sessionId(),
                                 binding,
                                 current.toolCall(),
-                                current.toolResult()),
+                                current.toolResult(),
+                                current.sharedData()),
                 Set.of());
     }
 

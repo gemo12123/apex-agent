@@ -279,7 +279,9 @@ class LifecycleCoverageTest {
                                                 .ConversationWindowRequest(
                                                 new org.gemo.apex.common.conversation
                                                         .ConversationQuery("session-1"))),
-                        null);
+                        null,
+                        org.gemo.apex.common.shared.SharedDataStores.create(
+                                fresh.snapshot().sharedData()));
         context.startIteration(1);
         ToolCall call = new ToolCall("call-1", "ask_human", 0, Map.of(), Map.of());
         context.updateIteration(

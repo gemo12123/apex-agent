@@ -13,6 +13,9 @@ import org.gemo.apex.common.message.AgentMessageEntry;
 import org.gemo.apex.common.message.MessageRole;
 import org.gemo.apex.common.message.MessageType;
 import org.gemo.apex.common.model.ModelResponse;
+import org.gemo.apex.common.shared.SharedDataCleanupPolicy;
+import org.gemo.apex.common.shared.SharedDataEntry;
+import org.gemo.apex.common.snapshot.SessionSnapshot;
 import org.gemo.apex.common.tool.ToolCall;
 import org.gemo.apex.common.tool.ToolDefinition;
 import org.gemo.apex.common.tool.ToolExecutionContext;
@@ -64,7 +67,29 @@ class PostgresRepositoryIntegrationTest {
 
         var sessionsA = new PostgresSessionRepository(jdbc);
         var conversationsA = new PostgresConversationRepository(jdbc);
-        sessionsA.save(PlatformFixtures.suspendedSnapshot());
+        SessionSnapshot source = PlatformFixtures.suspendedSnapshot();
+        SessionSnapshot sharedSnapshot =
+                new SessionSnapshot(
+                        source.schemaVersion(),
+                        source.sessionId(),
+                        source.userId(),
+                        source.agentKey(),
+                        source.status(),
+                        source.currentTurnNo(),
+                        source.enabledTools(),
+                        source.activatedSkills(),
+                        source.historicalToolBindings(),
+                        source.activeDefinition(),
+                        source.activeTurn(),
+                        source.suspendedToolBatch(),
+                        Map.of(
+                                "resume-state",
+                                new SharedDataEntry(
+                                        SharedDataCleanupPolicy.NEVER,
+                                        Map.of("phase", "suspended"))),
+                        source.nextMessageSortNo(),
+                        source.lastActiveTime());
+        sessionsA.save(sharedSnapshot);
         String runtimeSnapshot =
                 jdbc.queryForObject(
                         "SELECT runtime_snapshot FROM apex_agent_session WHERE session_id='session-1'",
@@ -72,6 +97,9 @@ class PostgresRepositoryIntegrationTest {
         assertFalse(runtimeSnapshot.contains("modelRequest"));
         assertFalse(runtimeSnapshot.contains("modelResponse"));
         assertFalse(runtimeSnapshot.contains("hello"));
+        assertEquals(
+                sharedSnapshot.sharedData(),
+                sessionsA.load("session-1").orElseThrow().sharedData());
         String longText = "长内容".repeat(40_000);
         AgentMessageEntry entry =
                 new AgentMessageEntry(

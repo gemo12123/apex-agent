@@ -19,6 +19,9 @@ import org.gemo.apex.common.message.MessageRole;
 import org.gemo.apex.common.message.MessageType;
 import org.gemo.apex.common.model.ModelRequest;
 import org.gemo.apex.common.model.ModelResponse;
+import org.gemo.apex.common.shared.SharedDataCleanupPolicy;
+import org.gemo.apex.common.shared.SharedDataEntry;
+import org.gemo.apex.common.shared.SharedDataStore;
 import org.gemo.apex.common.snapshot.*;
 import org.gemo.apex.common.tool.ToolCall;
 import org.gemo.apex.common.tool.ToolOrigin;
@@ -41,6 +44,7 @@ public final class ApexAgentContext {
     private ConversationCompactionResult compactionResult;
     private Set<String> pendingActivatedSkills;
     private final Map<String, Object> humanResponses;
+    private final SharedDataStore sharedData;
     private HumanSubmission humanSubmission;
 
     ApexAgentContext(
@@ -49,7 +53,8 @@ public final class ApexAgentContext {
             ToolCatalog toolCatalog,
             SessionSnapshot snapshot,
             ConversationWindow conversationWindow,
-            Map<String, Object> humanResponses) {
+            Map<String, Object> humanResponses,
+            SharedDataStore sharedData) {
         this.ports = ports;
         this.definition = definition;
         this.toolCatalog = toolCatalog;
@@ -59,6 +64,7 @@ public final class ApexAgentContext {
         }
         this.conversationWindow = conversationWindow;
         this.humanResponses = humanResponses == null ? null : Map.copyOf(humanResponses);
+        this.sharedData = Objects.requireNonNull(sharedData, "sharedData");
     }
 
     public AgentPorts ports() {
@@ -74,7 +80,20 @@ public final class ApexAgentContext {
     }
 
     public SessionSnapshot snapshot() {
+        syncSharedDataSnapshot();
         return snapshot;
+    }
+
+    public SharedDataStore sharedData() {
+        return sharedData;
+    }
+
+    void cleanupSharedData(SharedDataCleanupPolicy cleanupPolicy) {
+        sharedData.entries().entrySet().stream()
+                .filter(entry -> entry.getValue().cleanupPolicy() == cleanupPolicy)
+                .map(Map.Entry::getKey)
+                .toList()
+                .forEach(sharedData::remove);
     }
 
     public ConversationWindow conversationWindow() {
@@ -332,6 +351,7 @@ public final class ApexAgentContext {
                         snapshot.activeDefinition(),
                         snapshot.activeTurn(),
                         snapshot.suspendedToolBatch(),
+                        sharedData.entries(),
                         snapshot.nextMessageSortNo(),
                         ports.timeProvider().now());
     }
@@ -371,6 +391,7 @@ public final class ApexAgentContext {
                         snapshot.activeDefinition(),
                         snapshot.activeTurn(),
                         snapshot.suspendedToolBatch(),
+                        sharedData.entries(),
                         snapshot.nextMessageSortNo(),
                         ports.timeProvider().now());
         pendingActivatedSkills = null;
@@ -422,8 +443,12 @@ public final class ApexAgentContext {
 
     public void save() {
         ports.cancellationToken().throwIfCancellationRequested();
-        ports.sessionRepository().save(snapshot);
+        saveWithoutCancellationCheck();
         ports.cancellationToken().throwIfCancellationRequested();
+    }
+
+    public void saveWithoutCancellationCheck() {
+        ports.sessionRepository().save(snapshot());
     }
 
     public long allocateSortNo() {
@@ -442,6 +467,7 @@ public final class ApexAgentContext {
                         snapshot.activeDefinition(),
                         snapshot.activeTurn(),
                         snapshot.suspendedToolBatch(),
+                        sharedData.entries(),
                         value + 1,
                         snapshot.lastActiveTime());
         return value;
@@ -557,8 +583,33 @@ public final class ApexAgentContext {
                         snapshot.activeDefinition(),
                         turn,
                         suspended,
+                        sharedData.entries(),
                         snapshot.nextMessageSortNo(),
                         activeTime);
+    }
+
+    private void syncSharedDataSnapshot() {
+        Map<String, SharedDataEntry> current = sharedData.entries();
+        if (snapshot.sharedData().equals(current)) {
+            return;
+        }
+        snapshot =
+                new SessionSnapshot(
+                        snapshot.schemaVersion(),
+                        snapshot.sessionId(),
+                        snapshot.userId(),
+                        snapshot.agentKey(),
+                        snapshot.status(),
+                        snapshot.currentTurnNo(),
+                        snapshot.enabledTools(),
+                        snapshot.activatedSkills(),
+                        snapshot.historicalToolBindings(),
+                        snapshot.activeDefinition(),
+                        snapshot.activeTurn(),
+                        snapshot.suspendedToolBatch(),
+                        current,
+                        snapshot.nextMessageSortNo(),
+                        snapshot.lastActiveTime());
     }
 
     static AgentDefinitionRecoverySnapshot recovery(AgentDefinitionSnapshot snapshot) {

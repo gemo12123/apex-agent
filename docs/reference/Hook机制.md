@@ -15,6 +15,8 @@ Hook 是 core ReAct 编排链中的同步拦截点，不是独立事件总线，
 
 Hook 只能接收 common 中定义的只读 Context。对 Agent 状态的修改必须通过结果对象声明，由 core 校验并应用。Hook 自身仍可能访问外部系统，因此外部副作用不受 core 回滚保护。
 
+唯一例外是显式的 Session 共享数据通道：所有 `HookContextView` 都提供 `sharedData()`。它不允许直接改写 Agent 定义、模型请求、工具状态或对话历史，只用于 Hook 与原生 `AgentTool` 交换可持久化的 JSON 数据。写入立即生效，后续 Hook/工具可见；Hook 随后失败不会回滚已经完成的共享数据写入。
+
 关键源码入口：
 
 - 生命周期枚举：[`HookPoint`](../../apex-agent/common/src/main/java/org/gemo/apex/common/hook/HookPoint.java)
@@ -112,6 +114,20 @@ AGENT_BUILD
 ```
 
 恢复请求不会重新执行原 Turn 的 `TURN_START`，也不会重新执行挂起 Iteration 的 `ITERATION_START`。每个 NEW 和 HUMAN_RESPONSE execution 都会从当前模板重新装配定义并执行一次 `AGENT_BUILD`。
+
+共享数据在 HITL 挂起时随 Session 快照保存，恢复时在 AGENT_BUILD 前重建，因此恢复阶段的 AGENT_BUILD、剩余 PRE_TOOL_CALL、真实工具和 POST_TOOL_CALL 继续访问同一份数据。
+
+## Session 共享数据
+
+`SharedDataStore` 按字符串 key 保存 `SharedDataEntry(cleanupPolicy, value)`：
+
+- `value` 写入时归一化为 JSON 值模型，恢复后为标准 Java 标量、`Map` 或 `List`，不恢复自定义类。
+- `ITERATION_END` 在 ITERATION_END Hook 全部完成后删除。
+- `TURN_END` 在 TURN_END Hook 全部完成后删除。
+- `NEVER` 不自动删除并跨 Turn 保留，可由 Hook/工具显式 `remove` 或覆盖。
+- FAILED/CANCELLED 不执行自动清理；短生命周期残留到后续第一个正常同类边界再删除。
+
+结束 Hook 写入与当前边界相同策略的条目会在 Hook 返回后立即被清理。Store 依赖现有 Session lease 的串行执行约束，不承诺多线程安全，也不得在 Hook 返回后由后台线程继续修改。
 
 ## 通用分发规则
 

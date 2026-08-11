@@ -42,7 +42,8 @@ public final class ModelStepExecutor {
                                 new PreModelCallContext(
                                         current.snapshot().sessionId(),
                                         binding,
-                                        current.modelRequest()),
+                                        current.modelRequest(),
+                                        current.sharedData()),
                         Set.of());
         if (pre instanceof LifecycleDispatchOutcome.EndTurn end) {
             return new ModelStepOutcome.EndTurn(end.reason());
@@ -78,7 +79,8 @@ public final class ModelStepExecutor {
                                 new PostModelCallContext(
                                         current.snapshot().sessionId(),
                                         binding,
-                                        current.modelResponse()),
+                                        current.modelResponse(),
+                                        current.sharedData()),
                         Set.of());
         if (post instanceof LifecycleDispatchOutcome.EndTurn end) {
             return new ModelStepOutcome.EndTurn(end.reason());

@@ -14,6 +14,7 @@ import org.gemo.apex.common.hook.context.PreToolCallContext;
 import org.gemo.apex.common.hook.operation.*;
 import org.gemo.apex.common.hook.result.*;
 import org.gemo.apex.common.intervention.QuestionSubmission;
+import org.gemo.apex.common.shared.SharedDataStores;
 import org.gemo.apex.common.tool.ToolResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -132,7 +133,8 @@ class HookContractTest {
                         CommonFixtures.toolCall(),
                         "invocation-1",
                         "confirmation-1",
-                        submission);
+                        submission,
+                        SharedDataStores.create());
 
         assertEquals(binding, context.binding());
         assertEquals("确认搜索", context.binding().options().get("title"));

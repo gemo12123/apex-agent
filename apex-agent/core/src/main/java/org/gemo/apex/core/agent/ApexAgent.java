@@ -5,6 +5,7 @@ import org.gemo.apex.common.exception.CancellationRequestedException;
 import org.gemo.apex.common.execution.IterationStatus;
 import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.common.hook.context.*;
+import org.gemo.apex.common.shared.SharedDataCleanupPolicy;
 import org.gemo.apex.common.snapshot.SessionSnapshot;
 import org.gemo.apex.core.conversation.ModelRequestPreparer;
 import org.gemo.apex.core.event.AgentEventEmitter;
@@ -81,7 +82,8 @@ public final class ApexAgent {
                                         new TurnStartContext(
                                                 current.snapshot().sessionId(),
                                                 binding,
-                                                current.snapshot()),
+                                                current.snapshot(),
+                                                current.sharedData()),
                                 Set.of());
                 if (turnStart instanceof LifecycleDispatchOutcome.EndTurn end) {
                     return finalizeTurn(end.reason(), true, false);
@@ -101,7 +103,8 @@ public final class ApexAgent {
                                         new IterationStartContext(
                                                 current.snapshot().sessionId(),
                                                 binding,
-                                                current.snapshot().activeTurn()),
+                                                current.snapshot().activeTurn(),
+                                                current.sharedData()),
                                 Set.of());
                 if (iterationStart instanceof LifecycleDispatchOutcome.EndTurn end) {
                     return finalizeTurn(end.reason(), true, true);
@@ -175,7 +178,7 @@ public final class ApexAgent {
     public AgentRunOutcome cancelBeforeRun() {
         try {
             context.cancel();
-            context.ports().sessionRepository().save(context.snapshot());
+            context.saveWithoutCancellationCheck();
             return new AgentRunOutcome.Cancelled();
         } catch (RuntimeException error) {
             return new AgentRunOutcome.Failed(error);
@@ -207,8 +210,10 @@ public final class ApexAgent {
                         new TurnEndContext(
                                 current.snapshot().sessionId(),
                                 binding,
-                                current.snapshot().activeTurn()),
+                                current.snapshot().activeTurn(),
+                                current.sharedData()),
                 Set.of());
+        context.cleanupSharedData(SharedDataCleanupPolicy.TURN_END);
         context.completeTurn(endedByHook);
         context.save();
         return endedByHook
@@ -217,21 +222,25 @@ public final class ApexAgent {
     }
 
     private LifecycleDispatchOutcome dispatchIterationEnd() {
-        return dispatcher.dispatch(
-                HookPoint.ITERATION_END,
-                context,
-                (current, binding) ->
-                        new IterationEndContext(
-                                current.snapshot().sessionId(),
-                                binding,
-                                current.snapshot().activeTurn().currentIteration()),
-                Set.of());
+        LifecycleDispatchOutcome outcome =
+                dispatcher.dispatch(
+                        HookPoint.ITERATION_END,
+                        context,
+                        (current, binding) ->
+                                new IterationEndContext(
+                                        current.snapshot().sessionId(),
+                                        binding,
+                                        current.snapshot().activeTurn().currentIteration(),
+                                        current.sharedData()),
+                        Set.of());
+        context.cleanupSharedData(SharedDataCleanupPolicy.ITERATION_END);
+        return outcome;
     }
 
     /** 失败路径尽力保存终态；保存错误作为原始异常的 suppressed 信息保留。 */
     private void bestEffortSave(RuntimeException primary) {
         try {
-            context.ports().sessionRepository().save(context.snapshot());
+            context.saveWithoutCancellationCheck();
         } catch (RuntimeException saveError) {
             primary.addSuppressed(saveError);
         }

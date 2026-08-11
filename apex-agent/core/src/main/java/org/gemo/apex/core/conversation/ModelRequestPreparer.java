@@ -107,7 +107,8 @@ public final class ModelRequestPreparer {
                                         binding,
                                         current.modelRequest(),
                                         check,
-                                        current.compactionRequest()),
+                                        current.compactionRequest(),
+                                        current.sharedData()),
                         Set.of());
         if (pre instanceof LifecycleDispatchOutcome.EndTurn end) {
             return new PreparationOutcome.EndTurn(end.reason());
@@ -123,7 +124,8 @@ public final class ModelRequestPreparer {
                                         current.snapshot().sessionId(),
                                         binding,
                                         current.compactionRequest().sourceMessages(),
-                                        current.compactionResult()),
+                                        current.compactionResult(),
+                                        current.sharedData()),
                         Set.of());
         ConversationSummary summary = buildSummary(context, context.compactionResult());
         commit(context, context.compactionResult(), summary);
@@ -149,10 +151,7 @@ public final class ModelRequestPreparer {
                 result.retainedMessages().stream().map(AgentMessageEntry::entryId).toList();
         context.compactConversation(
                 new ConversationCompactionCommit(
-                        context.snapshot().sessionId(),
-                        summary,
-                        ids,
-                        result.retainedMessages()));
+                        context.snapshot().sessionId(), summary, ids, result.retainedMessages()));
         context.save();
     }
 

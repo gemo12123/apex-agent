@@ -30,12 +30,7 @@ class ApexAgentContextConversationTest {
         assertEquals(loadWindow(scenario), context.conversationWindow());
         ConversationSummary summary =
                 new ConversationSummary(
-                        "compaction-1",
-                        "累计摘要",
-                        0,
-                        0,
-                        1,
-                        Instant.parse("2026-08-01T00:02:00Z"));
+                        "compaction-1", "累计摘要", 0, 0, 1, Instant.parse("2026-08-01T00:02:00Z"));
         context.compactConversation(
                 new ConversationCompactionCommit(
                         "session-1", summary, List.of(toolResult.entryId()), List.of(toolResult)));
@@ -71,8 +66,7 @@ class ApexAgentContextConversationTest {
                         context.allocateSortNo(),
                         Instant.parse("2026-08-01T00:03:00Z"));
         assertThrows(
-                IllegalStateException.class,
-                () -> context.appendConversation(List.of(failed)));
+                IllegalStateException.class, () -> context.appendConversation(List.of(failed)));
         assertEquals(beforeFailure, context.conversationWindow());
     }
 
@@ -81,8 +75,7 @@ class ApexAgentContextConversationTest {
         AgentPorts ports = fixture.ports();
         ApexAgent fresh =
                 new ApexAgentFactory()
-                        .createNew(
-                                new AgentRequest("session-1", "demo", "user-1", "你好"), ports);
+                        .createNew(new AgentRequest("session-1", "demo", "user-1", "你好"), ports);
         ApexAgentContext context =
                 new ApexAgentContext(
                         ports,
@@ -90,7 +83,9 @@ class ApexAgentContextConversationTest {
                         new ToolCatalog(List.of()),
                         fresh.snapshot(),
                         loadWindow(ports),
-                        null);
+                        null,
+                        org.gemo.apex.common.shared.SharedDataStores.create(
+                                fresh.snapshot().sharedData()));
         return new ContextScenario(fixture, ports, context);
     }
 

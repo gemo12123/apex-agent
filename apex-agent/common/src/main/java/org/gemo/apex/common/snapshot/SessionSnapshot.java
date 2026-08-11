@@ -4,13 +4,16 @@ import static org.gemo.apex.common.support.DomainValues.*;
 
 import java.time.Instant;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.gemo.apex.common.agent.AgentDefinitionRecoverySnapshot;
 import org.gemo.apex.common.exception.InvalidSnapshotException;
 import org.gemo.apex.common.execution.IterationStatus;
 import org.gemo.apex.common.execution.SessionStatus;
 import org.gemo.apex.common.execution.TurnStatus;
+import org.gemo.apex.common.shared.SharedDataEntry;
 import org.gemo.apex.common.tool.ToolCall;
 
 public record SessionSnapshot(
@@ -26,8 +29,42 @@ public record SessionSnapshot(
         AgentDefinitionRecoverySnapshot activeDefinition,
         TurnSnapshot activeTurn,
         SuspendedToolBatch suspendedToolBatch,
+        Map<String, SharedDataEntry> sharedData,
         long nextMessageSortNo,
         Instant lastActiveTime) {
+    public SessionSnapshot(
+            String schemaVersion,
+            String sessionId,
+            String userId,
+            String agentKey,
+            SessionStatus status,
+            long currentTurnNo,
+            Set<String> enabledTools,
+            Set<String> activatedSkills,
+            List<HistoricalToolBinding> historicalToolBindings,
+            AgentDefinitionRecoverySnapshot activeDefinition,
+            TurnSnapshot activeTurn,
+            SuspendedToolBatch suspendedToolBatch,
+            long nextMessageSortNo,
+            Instant lastActiveTime) {
+        this(
+                schemaVersion,
+                sessionId,
+                userId,
+                agentKey,
+                status,
+                currentTurnNo,
+                enabledTools,
+                activatedSkills,
+                historicalToolBindings,
+                activeDefinition,
+                activeTurn,
+                suspendedToolBatch,
+                Map.of(),
+                nextMessageSortNo,
+                lastActiveTime);
+    }
+
     public SessionSnapshot {
         if (!SnapshotSchemaVersion.V1.equals(schemaVersion)) {
             throw new InvalidSnapshotException("schemaVersion 必须为 " + SnapshotSchemaVersion.V1);
@@ -89,6 +126,15 @@ public record SessionSnapshot(
                                 suspendedToolBatch.toolCalls()))) {
             throw new InvalidSnapshotException("suspendedToolBatch 无法在活动 Turn/Iteration 中定位");
         }
+        Map<String, SharedDataEntry> sharedDataCopy = new LinkedHashMap<>();
+        if (sharedData != null) {
+            sharedData.forEach(
+                    (key, value) ->
+                            sharedDataCopy.put(
+                                    required(key, "sharedData key"),
+                                    nonNull(value, "sharedData value")));
+        }
+        sharedData = java.util.Collections.unmodifiableMap(sharedDataCopy);
         nonNegative(nextMessageSortNo, "nextMessageSortNo");
         lastActiveTime = nonNull(lastActiveTime, "lastActiveTime");
     }
