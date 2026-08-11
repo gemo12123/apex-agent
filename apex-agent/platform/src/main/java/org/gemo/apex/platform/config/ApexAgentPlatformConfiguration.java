@@ -8,7 +8,9 @@ import org.gemo.apex.extension.model.ModelGateway;
 import org.gemo.apex.extension.repository.ConversationRepository;
 import org.gemo.apex.extension.repository.SessionRepository;
 import org.gemo.apex.extension.tool.AgentTool;
+import org.gemo.apex.kit.hook.TodoMiddleware;
 import org.gemo.apex.kit.hook.ToolConfirmHook;
+import org.gemo.apex.kit.tool.WriteTodosTool;
 import org.gemo.apex.platform.execution.UserContextTaskDecorator;
 import org.gemo.apex.platform.web.sse.RequestBoundAgentEventPublisherFactory;
 import org.gemo.apex.runtime.api.ApexAgentRuntime;
@@ -96,5 +98,15 @@ public class ApexAgentPlatformConfiguration {
     @Bean
     ToolConfirmHook toolConfirmHook() {
         return new ToolConfirmHook();
+    }
+
+    @Bean
+    WriteTodosTool writeTodosTool() {
+        return new WriteTodosTool();
+    }
+
+    @Bean
+    TodoMiddleware todoMiddleware() {
+        return new TodoMiddleware();
     }
 }

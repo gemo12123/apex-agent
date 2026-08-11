@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.gemo.apex.common.agent.*;
 import org.gemo.apex.common.execution.AgentRequest;
 import org.gemo.apex.common.hook.HookBinding;
@@ -15,7 +16,9 @@ import org.gemo.apex.extension.definition.AgentDefinitionProvider;
 import org.gemo.apex.extension.hook.LifecycleHook;
 import org.gemo.apex.extension.model.ModelGateway;
 import org.gemo.apex.kit.hook.SkillActivationStateHook;
+import org.gemo.apex.kit.hook.TodoMiddleware;
 import org.gemo.apex.kit.tool.ActivateSkillTool;
+import org.gemo.apex.kit.tool.WriteTodosTool;
 import org.gemo.apex.platform.web.sse.RequestBoundAgentEventPublisherFactory;
 import org.gemo.apex.platform.web.sse.SseEmitterAgentEventPublisher;
 import org.gemo.apex.runtime.api.*;
@@ -86,6 +89,52 @@ class ApexAgentPlatformConfigurationTest {
                                                     new AgentRequest("skill", "default", "u", "q")))
                             .run());
         }
+    }
+
+    @Test
+    void registersTodoComponentsWithoutExposingThemToUnconfiguredAgent() {
+        AtomicReference<org.gemo.apex.common.model.ModelRequest> seen = new AtomicReference<>();
+        DefaultListableBeanFactory beans = new DefaultListableBeanFactory();
+        beans.registerSingleton(
+                "modelGateway",
+                (ModelGateway)
+                        (request, observer) -> {
+                            seen.set(request);
+                            return new ModelResponse("完成", List.of(), Map.of());
+                        });
+        ApexAgentPlatformConfiguration configuration = new ApexAgentPlatformConfiguration();
+        WriteTodosTool tool = configuration.writeTodosTool();
+        TodoMiddleware middleware = configuration.todoMiddleware();
+        beans.registerSingleton("writeTodosTool", tool);
+        beans.registerSingleton("todoMiddleware", middleware);
+
+        RequestBoundAgentEventPublisherFactory publishers =
+                new RequestBoundAgentEventPublisherFactory();
+        try (var runtime = createRuntime(beans, definitions(), publishers)) {
+            var publisher = new SseEmitterAgentEventPublisher(new SseEmitter());
+            assertInstanceOf(
+                    AgentRunOutcome.Completed.class,
+                    publishers
+                            .prepare(
+                                    "todo-unconfigured",
+                                    "default",
+                                    "u",
+                                    publisher,
+                                    () ->
+                                            runtime.newAgent(
+                                                    new AgentRequest(
+                                                            "todo-unconfigured",
+                                                            "default",
+                                                            "u",
+                                                            "q")))
+                            .run());
+        }
+
+        assertEquals(WriteTodosTool.NAME, tool.definition().name());
+        assertEquals(TodoMiddleware.REGISTRATION_NAME, middleware.name());
+        assertNotNull(seen.get());
+        assertTrue(seen.get().tools().isEmpty());
+        assertFalse(seen.get().systemPrompt().contains("todo_list_system"));
     }
 
     private static ApexAgentRuntime createRuntime(DefaultListableBeanFactory beans) {

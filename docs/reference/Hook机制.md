@@ -393,13 +393,14 @@ TURN_START 提前结束时尚未创建 Iteration，因此不会分发 ITERATION_
 | `AskHumanInterventionHook` | PRE_TOOL_CALL | 把 `ask_human` ToolCall 转换为问题介入；非法问题定义转为 BlockTool |
 | `PlainTextTruncateHook` | POST_TOOL_CALL | 截断过长纯文本 ToolResult，默认上限为 4000 个 Unicode 码点 |
 | `SkillActivationStateHook` | POST_TOOL_CALL | 从 ToolResult metadata 读取 Skill 名并声明激活状态 |
+| `TodoMiddleware` | PRE_MODEL_CALL | 注入 `write_todos` 使用规则；压缩淘汰原始 ToolCall 后，从共享数据补回当前 Todo 列表 |
 | `CompositeLifecycleHook` | 任意单一结果族 | 顺序调用相同 descriptor 的 Hook，遇到非 Continue 结果立即短路 |
 
 `CompositeLifecycleHook` 不合并多个 Continue 结果。如果所有子 Hook 都返回 Continue，只有最后一个 Continue 结果会交给 core 应用；前面返回的 Mutation 和 Patch 不会自动累积。需要组合修改时，应实现一个明确合并结果的专用 Hook，或使用多个独立 Binding 让 dispatcher 逐项应用。
 
 ## 当前默认启用状态
 
-platform 当前默认注册 `ToolConfirmHook`，但默认 `default_agent` 的配置是：
+platform 当前默认注册 `ToolConfirmHook`、`WriteTodosTool` 和 `TodoMiddleware`，但默认 `default_agent` 的配置没有 Todo 工具或 Hook：
 
 ```yaml
 tools:
@@ -409,6 +410,22 @@ hooks: {}
 ```
 
 因此默认配置下没有实际执行的 Hook。`AskHumanInterventionHook`、`PlainTextTruncateHook`、`SkillActivationStateHook` 及其相关工具都需要按需显式注册，并在 Agent 定义中绑定。注册实现不等于启用能力。
+
+为某个 Agent 启用 Todo 能力时，需要同时暴露工具并绑定 PRE_MODEL_CALL：
+
+```yaml
+tools:
+  available: [write_todos]
+  default-enabled: [write_todos]
+hooks:
+  PRE_MODEL_CALL:
+    - id: todo-context
+      hook: todoMiddleware
+      order: 100
+      enabled: true
+```
+
+`write_todos.todos` 是完整列表而不是增量，项目结构为 `{"content":"任务内容","status":"pending|in_progress|completed"}`。列表保存在共享数据键 `apex.todo.items`，正常或 Hook 结束的 Turn 在 TURN_END 后自动删除；HITL 挂起时保留。FAILED/CANCELLED 仍沿用共享数据的通用残留语义。
 
 ## 开发检查清单
 
@@ -435,6 +452,8 @@ hooks: {}
 - `kit/AskHumanContractTest`
 - `kit/ToolConfirmationContractTest`
 - `kit/PlainTextTruncateHookTest`
+- `kit/TodoMiddlewareTest`
+- `kit/WriteTodosToolTest`
 - `kit/MatcherAndCompositeTest`
 
 测试命令和交付范围见[验证与交付参考](验证与交付.md)。

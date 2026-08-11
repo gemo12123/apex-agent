@@ -7,6 +7,8 @@ import org.gemo.apex.common.hook.HookBinding;
 import org.gemo.apex.common.hook.context.PostToolCallContext;
 import org.gemo.apex.common.hook.context.PreToolCallContext;
 import org.gemo.apex.common.intervention.HumanSubmission;
+import org.gemo.apex.common.shared.SharedDataStore;
+import org.gemo.apex.common.shared.SharedDataStores;
 import org.gemo.apex.common.tool.CancellationRegistration;
 import org.gemo.apex.common.tool.CancellationToken;
 import org.gemo.apex.common.tool.ToolCall;
@@ -63,6 +65,24 @@ final class KitFixtures {
     static ToolExecutionContext execution(HumanSubmission submission) {
         return new ToolExecutionContext(
                 "session-1", 1, 1, "user-1", submission, null, TOKEN, Map.of());
+    }
+
+    static ToolExecutionContext execution(
+            SharedDataStore sharedData, long turnNo, int iterationNo) {
+        return new ToolExecutionContext(
+                "session-1",
+                turnNo,
+                iterationNo,
+                "user-1",
+                null,
+                null,
+                TOKEN,
+                sharedData,
+                Map.of());
+    }
+
+    static ToolExecutionContext execution(long turnNo, int iterationNo) {
+        return execution(SharedDataStores.create(), turnNo, iterationNo);
     }
 
     static ToolExecutionContext execution(Set<String> enabledSkills, Set<String> activatedSkills) {
