@@ -125,7 +125,7 @@ AGENT_BUILD
 - `ITERATION_END` 在 ITERATION_END Hook 全部完成后删除。
 - `TURN_END` 在 TURN_END Hook 全部完成后删除。
 - `NEVER` 不自动删除并跨 Turn 保留，可由 Hook/工具显式 `remove` 或覆盖。
-- FAILED/CANCELLED 不执行自动清理；短生命周期残留到后续第一个正常同类边界再删除。
+- 模型最终失败和手动取消会分发可用的 ITERATION_END、TURN_END，因此执行对应清理；其他未进入异常收口的 FAILED 路径仍把短生命周期数据保留到后续第一个正常同类边界。
 
 结束 Hook 写入与当前边界相同策略的条目会在 Hook 返回后立即被清理。Store 依赖现有 Session lease 的串行执行约束，不承诺多线程安全，也不得在 Hook 返回后由后台线程继续修改。
 
@@ -150,7 +150,7 @@ core 在每个 Hook 返回后立即校验和应用结果。出现以下结果时
 
 ### 普通异常与契约错误
 
-Hook `apply()` 抛出普通 `RuntimeException` 时，core 记录 warning、跳过当前 Binding 并继续后续 Hook。
+Hook `apply()` 抛出普通 `RuntimeException` 时，core 记录 warning、把 Turn/Iteration、HookPoint 和 Binding ID 写入 Session 运行时快照，跳过当前 Binding 并继续后续 Hook。数据库记录不包含异常堆栈或原始异常正文。
 
 以下情况属于契约错误，不会被当作普通异常吞掉：
 
@@ -362,7 +362,7 @@ Skill 激活先暂存，只有 ToolResult 成功追加到 ConversationRepository
 
 POST Hook 返回 EndTurn 时，当前 ToolResult 先按 Hook 修改后的内容提交；同批尚未消费的 ToolCall 写入固定强制结束结果，然后进入 ITERATION_END 和 TURN_END。
 
-取消、最大轮次强制结束和 PRE_TOOL_CALL 直接 EndTurn 生成的固定结果不进入普通 POST_TOOL_CALL。
+取消、最大轮次强制结束和 PRE_TOOL_CALL 直接 EndTurn 生成的固定结果不进入普通 POST_TOOL_CALL。取消结果提交后，core 仍以 CANCELLED 快照依次分发 ITERATION_END 和 TURN_END。
 
 ## EndTurn 收口语义
 

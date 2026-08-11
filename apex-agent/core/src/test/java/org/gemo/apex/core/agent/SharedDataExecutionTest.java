@@ -155,7 +155,7 @@ class SharedDataExecutionTest {
     }
 
     @Test
-    void cancellationKeepsShortLivedToolData() {
+    void cancellationCleansShortLivedToolDataAfterTerminalHooks() {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.tool(
                 "tool",
@@ -174,7 +174,7 @@ class SharedDataExecutionTest {
 
         ApexAgent agent = newAgent(fixture);
         assertInstanceOf(AgentRunOutcome.Cancelled.class, agent.run());
-        assertEquals(Set.of("iteration", "turn"), agent.snapshot().sharedData().keySet());
+        assertTrue(agent.snapshot().sharedData().isEmpty());
     }
 
     private ApexAgent newAgent(CoreTestFixture fixture) {

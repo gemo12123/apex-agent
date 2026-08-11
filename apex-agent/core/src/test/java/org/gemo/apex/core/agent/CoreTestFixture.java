@@ -35,6 +35,7 @@ final class CoreTestFixture {
     final Map<String, LifecycleHook<?, ?>> hooks = new HashMap<>();
     final Map<String, AgentTool> tools = new LinkedHashMap<>();
     final Deque<ModelResponse> modelResponses = new ArrayDeque<>();
+    final Deque<RuntimeException> modelFailures = new ArrayDeque<>();
     final List<ModelRequest> modelRequests = new ArrayList<>();
     final TestCancellationToken token = new TestCancellationToken();
     final AtomicInteger ids = new AtomicInteger();
@@ -109,6 +110,9 @@ final class CoreTestFixture {
                     modelCalls++;
                     calls.add("model");
                     modelRequests.add(request);
+                    if (!modelFailures.isEmpty()) {
+                        throw modelFailures.removeFirst();
+                    }
                     if (modelFailure != null) {
                         throw modelFailure;
                     }
