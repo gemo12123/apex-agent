@@ -3,6 +3,7 @@ package org.gemo.apex.runtime.registry;
 import java.util.*;
 import org.gemo.apex.common.agent.*;
 import org.gemo.apex.extension.tool.*;
+import org.gemo.apex.kit.tool.ReadSkillResourceTool;
 import org.gemo.apex.runtime.skill.*;
 
 public final class ToolRegistry implements ToolProvider {

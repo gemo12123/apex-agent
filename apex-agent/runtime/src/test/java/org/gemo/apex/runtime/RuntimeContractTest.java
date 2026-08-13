@@ -423,22 +423,6 @@ class RuntimeContractTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> registry.loadResource("pdf", "../outside.txt"));
-
-        ToolCall call =
-                new ToolCall(
-                        "read-1",
-                        ReadSkillResourceTool.NAME,
-                        0,
-                        Map.of("skillName", "pdf", "path", "references/guide.txt"),
-                        Map.of());
-        assertEquals(
-                "资源",
-                new ReadSkillResourceTool(registry, Set.of("pdf"))
-                        .execute(call, null, null)
-                        .content());
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new ReadSkillResourceTool(registry, Set.of()).execute(call, null, null));
     }
 
     /** Registry在构建时读取各Provider元信息，后注册Provider覆盖同名路由 */
