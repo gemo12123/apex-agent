@@ -19,6 +19,7 @@ import org.gemo.apex.common.model.ModelRequest;
 import org.gemo.apex.common.model.ModelResponse;
 import org.gemo.apex.common.skill.SkillDefinition;
 import org.gemo.apex.common.skill.SkillMeta;
+import org.gemo.apex.common.skill.SkillResource;
 import org.gemo.apex.common.tool.*;
 import org.junit.jupiter.api.Test;
 
@@ -208,6 +209,30 @@ class DomainModelContractTest {
         assertEquals("2", ((ExtendedSkillMeta) definition.meta()).version);
         assertThrows(IllegalArgumentException.class, () -> new SkillMeta(" ", "PDF"));
         assertThrows(IllegalArgumentException.class, () -> new SkillDefinition(meta, " "));
+    }
+
+    /** Skill正文和资源内容支持一次性延迟缓存，资源索引保持不可变 */
+    @Test
+    void lazilyCachesSkillInstructionsAndResourceContent() {
+        SkillMeta meta = new SkillMeta("pdf", "PDF");
+        SkillResource resource =
+                new SkillResource("references/guide.md", "guide.md", "text/markdown");
+        SkillDefinition definition = new SkillDefinition(meta, Map.of(resource.path(), resource));
+
+        assertNull(definition.instructions());
+        assertNull(resource.content());
+        assertSame(resource, definition.resources().get("references/guide.md"));
+
+        definition.cacheInstructions("首次正文");
+        definition.cacheInstructions("后续正文");
+        resource.cacheContent("首次内容");
+        resource.cacheContent("后续内容");
+
+        assertEquals("首次正文", definition.instructions());
+        assertEquals("首次内容", resource.content());
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> definition.resources().put("other.txt", resource));
     }
 
     private static <T> T roundTrip(T value, Class<T> type) {

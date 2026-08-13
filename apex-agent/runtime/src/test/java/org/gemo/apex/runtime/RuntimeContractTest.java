@@ -389,7 +389,7 @@ class RuntimeContractTest {
                 () -> r.newAgent(new AgentRequest("closed", "default", "u", "q")));
     }
 
-    /** 文件Provider只预载元信息，正文与嵌套资源在调用时读取 */
+    /** 文件Provider预载Skill及资源元信息，并分别缓存按需读取的正文与资源内容 */
     @Test
     void lazilyLoadsFileSkillsAndRestrictsResourceToolToEnabledSkills() throws Exception {
         Path root = Files.createTempDirectory(Path.of("target"), "skills"),
@@ -397,13 +397,28 @@ class RuntimeContractTest {
         Files.writeString(dir.resolve("SKILL.md"), "---\nname: pdf\ndescription: PDF\n---\n使用说明");
         Path references = Files.createDirectory(dir.resolve("references"));
         Files.writeString(references.resolve("guide.txt"), "资源");
-        var registry = new RuntimeSkillRegistry(List.of(new FileSkillProvider(root)));
+        var provider = new FileSkillProvider(root);
+        var registry = new RuntimeSkillRegistry(List.of(provider));
         assertEquals(List.of("pdf"), registry.loadSkills().stream().map(SkillMeta::name).toList());
 
+        Files.writeString(references.resolve("late.txt"), "发现后新增资源");
         Files.writeString(
                 dir.resolve("SKILL.md"), "---\nname: pdf\ndescription: PDF\n---\n更新后的使用说明");
+        SkillDefinition loaded = registry.loadSkill("pdf");
+        assertEquals("更新后的使用说明", loaded.instructions());
+        assertSame(loaded, provider.loadSkill("pdf"));
+        assertEquals(Set.of("references/guide.txt"), loaded.resources().keySet());
+        SkillResource resource = loaded.resources().get("references/guide.txt");
+        assertEquals("references/guide.txt", resource.path());
+        assertEquals("guide.txt", resource.fileName());
+        assertFalse(resource.fileType().isBlank());
+        assertNull(resource.content());
+
+        Files.writeString(dir.resolve("SKILL.md"), "---\nname: pdf\ndescription: PDF\n---\n不应覆盖缓存");
         assertEquals("更新后的使用说明", registry.loadSkill("pdf").instructions());
         assertEquals("资源", registry.loadResource("pdf", "references/guide.txt"));
+        assertEquals("资源", resource.content());
+        Files.writeString(references.resolve("guide.txt"), "不应覆盖资源缓存");
         assertEquals("资源", registry.loadResource("pdf/references/guide.txt"));
         assertThrows(
                 IllegalArgumentException.class,
@@ -456,9 +471,13 @@ class RuntimeContractTest {
         assertEquals(
                 List.of("classpath-skill"),
                 provider.loadSkills().stream().map(SkillMeta::name).toList());
-        assertEquals("类路径使用说明", provider.loadSkill("classpath-skill").instructions());
+        SkillDefinition loaded = provider.loadSkill("classpath-skill");
+        assertEquals("类路径使用说明", loaded.instructions());
+        assertEquals(Set.of("references/guide.txt"), loaded.resources().keySet());
+        assertNull(loaded.resources().get("references/guide.txt").content());
         assertEquals(
                 "类路径资源", provider.loadResource("classpath-skill/references/guide.txt").strip());
+        assertNotNull(loaded.resources().get("references/guide.txt").content());
         assertTrue(new FileSkillProvider("classpath:not-existing-skills").loadSkills().isEmpty());
     }
 
