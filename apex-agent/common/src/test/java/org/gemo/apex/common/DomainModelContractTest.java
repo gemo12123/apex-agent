@@ -17,6 +17,8 @@ import org.gemo.apex.common.json.JsonUtils;
 import org.gemo.apex.common.message.MessageRole;
 import org.gemo.apex.common.model.ModelRequest;
 import org.gemo.apex.common.model.ModelResponse;
+import org.gemo.apex.common.skill.SkillDefinition;
+import org.gemo.apex.common.skill.SkillMeta;
 import org.gemo.apex.common.tool.*;
 import org.junit.jupiter.api.Test;
 
@@ -185,6 +187,27 @@ class DomainModelContractTest {
         assertThrows(
                 RuntimeException.class,
                 () -> new ToolCall("call", "tool", 0, Map.of(), Map.of("bad", new Object())));
+    }
+
+    /** SkillDefinition组合并保留可扩展的SkillMeta实例 */
+    @Test
+    void keepsExtendedSkillMetadataInsideLoadedDefinition() {
+        class ExtendedSkillMeta extends SkillMeta {
+            private final String version;
+
+            ExtendedSkillMeta(String name, String description, String version) {
+                super(name, description);
+                this.version = version;
+            }
+        }
+        ExtendedSkillMeta meta = new ExtendedSkillMeta("pdf", "PDF", "2");
+
+        SkillDefinition definition = new SkillDefinition(meta, "使用说明");
+
+        assertSame(meta, definition.meta());
+        assertEquals("2", ((ExtendedSkillMeta) definition.meta()).version);
+        assertThrows(IllegalArgumentException.class, () -> new SkillMeta(" ", "PDF"));
+        assertThrows(IllegalArgumentException.class, () -> new SkillDefinition(meta, " "));
     }
 
     private static <T> T roundTrip(T value, Class<T> type) {

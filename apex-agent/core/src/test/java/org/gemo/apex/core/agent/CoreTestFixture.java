@@ -15,6 +15,7 @@ import org.gemo.apex.common.model.ModelRequest;
 import org.gemo.apex.common.model.ModelResponse;
 import org.gemo.apex.common.model.ModelStreamChunk;
 import org.gemo.apex.common.skill.SkillDefinition;
+import org.gemo.apex.common.skill.SkillMeta;
 import org.gemo.apex.common.snapshot.SessionSnapshot;
 import org.gemo.apex.common.tool.*;
 import org.gemo.apex.extension.definition.AgentDefinitionProvider;
@@ -22,6 +23,7 @@ import org.gemo.apex.extension.hook.LifecycleHook;
 import org.gemo.apex.extension.id.IdGenerator;
 import org.gemo.apex.extension.repository.ConversationRepository;
 import org.gemo.apex.extension.repository.SessionRepository;
+import org.gemo.apex.extension.skill.SkillProvider;
 import org.gemo.apex.extension.tool.AgentTool;
 import org.gemo.apex.extension.tool.ToolExecutionObserver;
 import org.gemo.apex.extension.tool.ToolProvider;
@@ -233,16 +235,30 @@ final class CoreTestFixture {
                     return new ConversationCompactionResult(
                             request.compactionId(), "摘要", request.retainedMessages(), Map.of());
                 },
-                () ->
-                        definition.enabledSkills().stream()
-                                .map(
-                                        name ->
-                                                new SkillDefinition(
-                                                        name,
-                                                        "测试 Skill",
-                                                        "instructions:" + name,
-                                                        Map.of()))
-                                .toList(),
+                new SkillProvider() {
+                    @Override
+                    public List<SkillMeta> loadSkills() {
+                        return definition.enabledSkills().stream()
+                                .map(name -> new SkillMeta(name, "测试 Skill"))
+                                .toList();
+                    }
+
+                    @Override
+                    public SkillDefinition loadSkill(String skillName) {
+                        return new SkillDefinition(
+                                new SkillMeta(skillName, "测试 Skill"), "instructions:" + skillName);
+                    }
+
+                    @Override
+                    public String loadResource(String skillName, String resourcePath) {
+                        return "resource:" + resourcePath;
+                    }
+
+                    @Override
+                    public String loadResource(String path) {
+                        return "resource:" + path;
+                    }
+                },
                 message -> {
                     calls.add("event." + message.getClass().getSimpleName());
                     events.add(message);

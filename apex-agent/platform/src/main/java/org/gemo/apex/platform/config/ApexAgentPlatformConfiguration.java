@@ -1,12 +1,12 @@
 package org.gemo.apex.platform.config;
 
 import java.util.concurrent.Executor;
-import org.gemo.apex.common.skill.SkillDefinition;
 import org.gemo.apex.extension.definition.AgentDefinitionProvider;
 import org.gemo.apex.extension.hook.LifecycleHook;
 import org.gemo.apex.extension.model.ModelGateway;
 import org.gemo.apex.extension.repository.ConversationRepository;
 import org.gemo.apex.extension.repository.SessionRepository;
+import org.gemo.apex.extension.skill.SkillProvider;
 import org.gemo.apex.extension.tool.AgentTool;
 import org.gemo.apex.kit.hook.TodoMiddleware;
 import org.gemo.apex.kit.hook.ToolConfirmHook;
@@ -43,6 +43,7 @@ public class ApexAgentPlatformConfiguration {
     /** 收集平台提供的端口、工具、Hook 与 Skill。模型 Bean 必须唯一，避免运行时隐式选择模型。 */
     @Bean(destroyMethod = "close")
     ApexAgentRuntime apexAgentRuntime(
+            ApexAgentPlatformProperties properties,
             AgentDefinitionProvider definitions,
             SessionRepository sessions,
             ConversationRepository conversations,
@@ -54,13 +55,14 @@ public class ApexAgentPlatformConfiguration {
             ObjectProvider<ToolCallback> toolCallbacks,
             ObjectProvider<ToolCallbackProvider> toolCallbackProviders,
             ObjectProvider<LifecycleHook<?, ?>> hooks,
-            ObjectProvider<SkillDefinition> skills) {
+            ObjectProvider<SkillProvider> skillProviders) {
         var builder =
                 ApexAgentRuntime.builder()
                         .agentDefinitionProvider(definitions)
                         .sessionRepository(sessions)
                         .conversationRepository(conversations)
-                        .defaultEventPublisherFactory(publishers);
+                        .defaultEventPublisherFactory(publishers)
+                        .skillPath(properties.getSkills().getPath());
         ModelGateway gateway = gateways.getIfUnique();
         ChatModel chatModel = chatModels.getIfUnique();
         if (gateway != null) {
@@ -78,7 +80,7 @@ public class ApexAgentPlatformConfiguration {
         toolCallbacks.orderedStream().forEach(builder::registerToolCallback);
         toolCallbackProviders.orderedStream().forEach(builder::registerToolCallbackProvider);
         hooks.orderedStream().forEach(builder::registerHook);
-        skills.orderedStream().forEach(builder::registerSkill);
+        skillProviders.orderedStream().forEach(builder::registerSkillProvider);
         return builder.build();
     }
 

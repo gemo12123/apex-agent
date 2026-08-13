@@ -3,7 +3,6 @@ package org.gemo.apex.runtime.api;
 import java.time.*;
 import java.util.*;
 import org.gemo.apex.common.agent.*;
-import org.gemo.apex.common.skill.SkillDefinition;
 import org.gemo.apex.common.tool.*;
 import org.gemo.apex.core.agent.AgentPorts;
 import org.gemo.apex.extension.definition.AgentDefinitionProvider;
@@ -12,6 +11,7 @@ import org.gemo.apex.extension.hook.*;
 import org.gemo.apex.extension.id.IdGenerator;
 import org.gemo.apex.extension.model.ModelGateway;
 import org.gemo.apex.extension.repository.*;
+import org.gemo.apex.extension.skill.SkillProvider;
 import org.gemo.apex.extension.tool.*;
 import org.gemo.apex.runtime.conversation.*;
 import org.gemo.apex.runtime.definition.*;
@@ -42,7 +42,8 @@ public final class ApexAgentRuntimeBuilder {
     private final List<ToolCallbackProvider> toolCallbackProviders = new ArrayList<>();
     private ToolCallingManager toolCallingManager;
     private final Map<HookRegistry.Key, LifecycleHook<?, ?>> hooks = new LinkedHashMap<>();
-    private final List<SkillDefinition> skills = new ArrayList<>();
+    private String skillPath = FileSkillProvider.DEFAULT_LOCATION;
+    private final List<SkillProvider> skillProviders = new ArrayList<>();
     private final List<AutoCloseable> owned = new ArrayList<>();
     private int max = 30;
 
@@ -119,8 +120,13 @@ public final class ApexAgentRuntimeBuilder {
         return this;
     }
 
-    public ApexAgentRuntimeBuilder registerSkill(SkillDefinition v) {
-        skills.add(v);
+    public ApexAgentRuntimeBuilder skillPath(String v) {
+        skillPath = v;
+        return this;
+    }
+
+    public ApexAgentRuntimeBuilder registerSkillProvider(SkillProvider v) {
+        skillProviders.add(Objects.requireNonNull(v, "skillProvider"));
         return this;
     }
 
@@ -178,7 +184,10 @@ public final class ApexAgentRuntimeBuilder {
         callbackSnapshot.stream()
                 .map(callback -> new SpringAiToolCallbackAgentTool(callback, toolCallingManager))
                 .forEach(ts::add);
-        var skillsRegistry = new RuntimeSkillRegistry(skills);
+        List<SkillProvider> providers = new ArrayList<>();
+        providers.add(new FileSkillProvider(skillPath));
+        providers.addAll(skillProviders);
+        var skillsRegistry = new RuntimeSkillRegistry(providers);
         var tr = new ToolRegistry(ts, skillsRegistry);
         var hr = new HookRegistry(hooks);
         var pf = publishers != null ? publishers : new PrintAgentEventPublisherFactory();

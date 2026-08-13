@@ -8,6 +8,7 @@ import java.util.Set;
 import org.gemo.apex.common.hook.context.PostToolCallContext;
 import org.gemo.apex.common.hook.result.ContinuePostToolCall;
 import org.gemo.apex.common.skill.SkillDefinition;
+import org.gemo.apex.common.skill.SkillMeta;
 import org.gemo.apex.common.tool.ToolCall;
 import org.gemo.apex.common.tool.ToolResult;
 import org.gemo.apex.extension.skill.SkillProvider;
@@ -16,8 +17,7 @@ import org.gemo.apex.kit.tool.ActivateSkillTool;
 import org.junit.jupiter.api.Test;
 
 class SkillActivationContractTest {
-    private final SkillProvider skills =
-            () -> List.of(new SkillDefinition("pdf", "PDF", "使用 PDF 指令", Map.of()));
+    private final SkillProvider skills = provider();
     private final ActivateSkillTool tool = new ActivateSkillTool(skills);
 
     @Test
@@ -113,5 +113,35 @@ class SkillActivationContractTest {
                         Map.of()),
                 call("pdf"),
                 result);
+    }
+
+    private SkillProvider provider() {
+        return new SkillProvider() {
+            private final SkillDefinition skill =
+                    new SkillDefinition(new SkillMeta("pdf", "PDF"), "使用 PDF 指令");
+
+            @Override
+            public List<SkillMeta> loadSkills() {
+                return List.of(skill.meta());
+            }
+
+            @Override
+            public SkillDefinition loadSkill(String skillName) {
+                if (!skill.meta().name().equals(skillName)) {
+                    throw new IllegalArgumentException("Skill 不存在: " + skillName);
+                }
+                return skill;
+            }
+
+            @Override
+            public String loadResource(String skillName, String resourcePath) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public String loadResource(String path) {
+                throw new UnsupportedOperationException();
+            }
+        };
     }
 }

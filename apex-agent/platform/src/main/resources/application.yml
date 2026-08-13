@@ -16,6 +16,8 @@ spring:
 
 apex:
   platform:
+    skills:
+      path: classpath:skills
     agents:
       default_agent:
         name: 通用智能体

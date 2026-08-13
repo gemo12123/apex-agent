@@ -11,6 +11,7 @@ public class ApexAgentPlatformProperties {
     private Map<String, Agent> agents = new LinkedHashMap<>();
     private String definitionResource;
     private long sseTimeoutMillis = 600_000L;
+    private Skills skills = new Skills();
 
     public Map<String, Agent> getAgents() {
         return agents;
@@ -34,6 +35,26 @@ public class ApexAgentPlatformProperties {
 
     public void setSseTimeoutMillis(long sseTimeoutMillis) {
         this.sseTimeoutMillis = sseTimeoutMillis;
+    }
+
+    public Skills getSkills() {
+        return skills;
+    }
+
+    public void setSkills(Skills skills) {
+        this.skills = skills;
+    }
+
+    public static class Skills {
+        private String path = "classpath:skills";
+
+        public String getPath() {
+            return path;
+        }
+
+        public void setPath(String path) {
+            this.path = path;
+        }
     }
 
     public static class Agent {

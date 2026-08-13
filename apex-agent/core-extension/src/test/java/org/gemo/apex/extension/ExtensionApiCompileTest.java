@@ -20,6 +20,8 @@ import org.gemo.apex.common.message.AgentMessageEntry;
 import org.gemo.apex.common.message.MessageRole;
 import org.gemo.apex.common.message.MessageType;
 import org.gemo.apex.common.model.ModelStreamChunk;
+import org.gemo.apex.common.skill.SkillDefinition;
+import org.gemo.apex.common.skill.SkillMeta;
 import org.gemo.apex.common.snapshot.SessionSnapshot;
 import org.gemo.apex.common.tool.CancellationRegistration;
 import org.gemo.apex.common.tool.CancellationToken;
@@ -89,7 +91,7 @@ class ExtensionApiCompileTest {
             (AgentEventPublisherFactory) execution -> message -> {},
             new FakeSessionRepository(),
             new FakeConversationRepository(),
-            (SkillProvider) List::of,
+            new FakeSkillProvider(),
             new FakeIdGenerator(),
             (TimeProvider) () -> Instant.EPOCH,
             new FakeLifecycleHook(),
@@ -190,6 +192,28 @@ class ExtensionApiCompileTest {
         @Override
         public List<AgentTool> loadTools(AgentDefinition definition) {
             return List.of();
+        }
+    }
+
+    private static final class FakeSkillProvider implements SkillProvider {
+        @Override
+        public List<SkillMeta> loadSkills() {
+            return List.of();
+        }
+
+        @Override
+        public SkillDefinition loadSkill(String skillName) {
+            return null;
+        }
+
+        @Override
+        public String loadResource(String skillName, String resourcePath) {
+            return null;
+        }
+
+        @Override
+        public String loadResource(String path) {
+            return null;
         }
     }
 

@@ -1,62 +1,336 @@
 package org.gemo.apex.runtime.skill;
 
-import java.nio.file.*;
-import java.util.*;
-import java.util.stream.*;
-import org.gemo.apex.common.skill.*;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Stream;
+import org.gemo.apex.common.skill.SkillDefinition;
+import org.gemo.apex.common.skill.SkillMeta;
 import org.gemo.apex.extension.skill.SkillProvider;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+import org.yaml.snakeyaml.Yaml;
 
+/** 从 classpath 或文件系统目录发现 Skill，并按需读取正文和子资源。 */
 public final class FileSkillProvider implements SkillProvider {
-    private final List<SkillDefinition> skills;
+    public static final String DEFAULT_LOCATION = "classpath:skills";
+
+    private final String location;
+    private final ClassLoader classLoader;
+    private volatile Map<String, Entry> entries;
+
+    public FileSkillProvider() {
+        this(DEFAULT_LOCATION);
+    }
 
     public FileSkillProvider(Path root) {
-        try (Stream<Path> dirs = Files.list(root)) {
-            skills =
-                    dirs.filter(Files::isDirectory)
-                            .filter(d -> Files.exists(d.resolve("SKILL.md")))
-                            .map(this::load)
-                            .toList();
-        } catch (Exception e) {
-            throw new IllegalArgumentException("加载 Skill 失败: " + root, e);
+        this(Objects.requireNonNull(root, "root").toString());
+    }
+
+    public FileSkillProvider(String location) {
+        this(location, Thread.currentThread().getContextClassLoader());
+    }
+
+    FileSkillProvider(String location, ClassLoader classLoader) {
+        if (location == null || location.isBlank()) {
+            throw new IllegalArgumentException("Skill 加载路径不能为空");
+        }
+        this.location = location.trim();
+        this.classLoader =
+                classLoader != null ? classLoader : FileSkillProvider.class.getClassLoader();
+    }
+
+    @Override
+    public List<SkillMeta> loadSkills() {
+        return List.copyOf(ensureEntries().values().stream().map(Entry::meta).toList());
+    }
+
+    @Override
+    public SkillDefinition loadSkill(String skillName) {
+        Entry entry = entry(skillName);
+        return new SkillDefinition(entry.meta(), readInstructions(entry.source(), skillName));
+    }
+
+    @Override
+    public String loadResource(String skillName, String resourcePath) {
+        String normalized = normalizeResourcePath(resourcePath);
+        try (InputStream input = entry(skillName).source().openResource(normalized)) {
+            return new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new IllegalStateException("读取 Skill 资源失败: " + skillName + "/" + normalized, e);
         }
     }
 
-    private SkillDefinition load(Path dir) {
-        try {
-            String md = Files.readString(dir.resolve("SKILL.md"));
-            String name = value(md, "name");
-            String desc = value(md, "description");
-            int end = md.indexOf("\n---", 3);
-            String body = end < 0 ? md : md.substring(end + 4).trim();
-            Map<String, SkillResourceDescriptor> resources = new LinkedHashMap<>();
-            try (Stream<Path> fs = Files.walk(dir)) {
-                fs.filter(Files::isRegularFile)
-                        .filter(p -> !p.getFileName().toString().equals("SKILL.md"))
-                        .filter(p -> !dir.relativize(p).startsWith("scripts"))
-                        .forEach(
-                                p -> {
-                                    String n = dir.relativize(p).toString().replace('\\', '/');
-                                    resources.put(
-                                            n,
-                                            new SkillResourceDescriptor(
-                                                    n, "text/plain", p.toUri().toString()));
-                                });
+    @Override
+    public String loadResource(String path) {
+        String[] parts = resourcePath(path);
+        return loadResource(parts[0], parts[1]);
+    }
+
+    private Map<String, Entry> ensureEntries() {
+        Map<String, Entry> snapshot = entries;
+        if (snapshot != null) {
+            return snapshot;
+        }
+        synchronized (this) {
+            if (entries == null) {
+                entries = Collections.unmodifiableMap(new LinkedHashMap<>(discover()));
             }
-            return new SkillDefinition(name, desc, body, resources);
-        } catch (Exception e) {
-            throw new IllegalArgumentException("解析 Skill 失败: " + dir, e);
+            return entries;
         }
     }
 
-    private String value(String md, String key) {
-        return md.lines()
-                .filter(l -> l.startsWith(key + ":"))
-                .map(l -> l.substring(key.length() + 1).trim())
-                .findFirst()
-                .orElseThrow();
+    private Map<String, Entry> discover() {
+        try {
+            return location.startsWith("classpath:")
+                    ? discoverClasspath(location.substring("classpath:".length()))
+                    : discoverFileSystem(path(location));
+        } catch (IOException e) {
+            throw new IllegalArgumentException("加载 Skill 失败: " + location, e);
+        }
     }
 
-    public List<SkillDefinition> loadSkills() {
-        return skills;
+    private Map<String, Entry> discoverClasspath(String configuredRoot) throws IOException {
+        String root = trimSlashes(configuredRoot);
+        if (root.isBlank()) {
+            throw new IllegalArgumentException("classpath Skill 路径不能为空");
+        }
+        Resource[] resources =
+                new PathMatchingResourcePatternResolver(classLoader)
+                        .getResources("classpath*:" + root + "/*/SKILL.md");
+        List<Resource> ordered =
+                Stream.of(resources)
+                        .sorted(Comparator.comparing(Resource::getDescription))
+                        .toList();
+        Map<String, Entry> discovered = new LinkedHashMap<>();
+        for (Resource resource : ordered) {
+            SkillSource source = source(resource);
+            add(discovered, source);
+        }
+        return discovered;
+    }
+
+    private Map<String, Entry> discoverFileSystem(Path root) throws IOException {
+        if (!Files.isDirectory(root)) {
+            throw new IllegalArgumentException("Skill 加载路径不是有效目录: " + root);
+        }
+        Map<String, Entry> discovered = new LinkedHashMap<>();
+        try (Stream<Path> children = Files.list(root)) {
+            for (Path directory :
+                    children.filter(Files::isDirectory)
+                            .sorted(Comparator.comparing(Path::toString))
+                            .toList()) {
+                if (Files.isRegularFile(directory.resolve("SKILL.md"))) {
+                    add(discovered, new PathSkillSource(directory));
+                }
+            }
+        }
+        return discovered;
+    }
+
+    private void add(Map<String, Entry> discovered, SkillSource source) {
+        SkillMeta meta = readMeta(source);
+        if (discovered.putIfAbsent(meta.name(), new Entry(meta, source)) != null) {
+            throw new IllegalArgumentException("同一 SkillProvider 内 Skill 重名: " + meta.name());
+        }
+    }
+
+    private SkillSource source(Resource resource) throws IOException {
+        if (resource.isFile()) {
+            return new PathSkillSource(resource.getFile().toPath().getParent());
+        }
+        return new ResourceSkillSource(resource);
+    }
+
+    private SkillMeta readMeta(SkillSource source) {
+        try (BufferedReader reader = reader(source.openSkill())) {
+            Map<String, Object> metadata = new Yaml().load(readFrontMatter(reader));
+            if (metadata == null) {
+                throw new IllegalArgumentException("SKILL.md 元信息不能为空");
+            }
+            return new SkillMeta(text(metadata, "name"), text(metadata, "description"));
+        } catch (IOException e) {
+            throw new IllegalArgumentException("读取 SKILL.md 元信息失败", e);
+        }
+    }
+
+    private String readInstructions(SkillSource source, String skillName) {
+        try (BufferedReader reader = reader(source.openSkill())) {
+            readFrontMatter(reader);
+            StringBuilder body = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (!body.isEmpty()) {
+                    body.append('\n');
+                }
+                body.append(line);
+            }
+            String instructions = body.toString().strip();
+            if (instructions.isBlank()) {
+                throw new IllegalArgumentException("Skill instructions 不能为空: " + skillName);
+            }
+            return instructions;
+        } catch (IOException e) {
+            throw new IllegalArgumentException("读取 Skill 失败: " + skillName, e);
+        }
+    }
+
+    private String readFrontMatter(BufferedReader reader) throws IOException {
+        if (!"---".equals(reader.readLine())) {
+            throw new IllegalArgumentException("SKILL.md 必须以 YAML front matter 开始");
+        }
+        StringBuilder yaml = new StringBuilder();
+        String line;
+        while ((line = reader.readLine()) != null) {
+            if ("---".equals(line)) {
+                return yaml.toString();
+            }
+            yaml.append(line).append('\n');
+        }
+        throw new IllegalArgumentException("SKILL.md 缺少 front matter 结束标记");
+    }
+
+    private Entry entry(String skillName) {
+        if (skillName == null || skillName.isBlank()) {
+            throw new IllegalArgumentException("skillName 不能为空");
+        }
+        Entry entry = ensureEntries().get(skillName);
+        if (entry == null) {
+            throw new IllegalArgumentException("Skill 不存在: " + skillName);
+        }
+        return entry;
+    }
+
+    private String normalizeResourcePath(String resourcePath) {
+        if (resourcePath == null || resourcePath.isBlank()) {
+            throw new IllegalArgumentException("Skill 资源路径不能为空");
+        }
+        String value = resourcePath.trim();
+        if (value.startsWith("/") || value.contains("\\")) {
+            throw new IllegalArgumentException("Skill 资源路径必须是使用 / 的相对路径");
+        }
+        for (String segment : value.split("/", -1)) {
+            if (segment.isBlank() || ".".equals(segment) || "..".equals(segment)) {
+                throw new IllegalArgumentException("Skill 资源路径非法: " + resourcePath);
+            }
+        }
+        return value;
+    }
+
+    private String[] resourcePath(String path) {
+        if (path == null) {
+            throw new IllegalArgumentException("Skill 资源路径不能为空");
+        }
+        int separator = path.indexOf('/');
+        if (separator <= 0 || separator == path.length() - 1) {
+            throw new IllegalArgumentException("Skill 资源路径必须为 skillName/relativePath");
+        }
+        return new String[] {path.substring(0, separator), path.substring(separator + 1)};
+    }
+
+    private Path path(String value) {
+        try {
+            return value.startsWith("file:") ? Path.of(URI.create(value)) : Path.of(value);
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException("Skill 加载路径非法: " + value, e);
+        }
+    }
+
+    private String trimSlashes(String value) {
+        String result = value.trim().replace('\\', '/');
+        while (result.startsWith("/")) {
+            result = result.substring(1);
+        }
+        while (result.endsWith("/")) {
+            result = result.substring(0, result.length() - 1);
+        }
+        return result;
+    }
+
+    private String text(Map<String, Object> values, String key) {
+        Object value = values.get(key);
+        if (!(value instanceof String text) || text.isBlank()) {
+            throw new IllegalArgumentException("SKILL.md " + key + " 不能为空");
+        }
+        return text;
+    }
+
+    private BufferedReader reader(InputStream input) {
+        return new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8));
+    }
+
+    private record Entry(SkillMeta meta, SkillSource source) {}
+
+    private interface SkillSource {
+        InputStream openSkill() throws IOException;
+
+        InputStream openResource(String resourcePath) throws IOException;
+    }
+
+    private static final class PathSkillSource implements SkillSource {
+        private final Path root;
+
+        private PathSkillSource(Path root) throws IOException {
+            this.root = root.toRealPath();
+            Path skillFile = this.root.resolve("SKILL.md");
+            if (!Files.isRegularFile(skillFile) || !skillFile.toRealPath().startsWith(this.root)) {
+                throw new IllegalArgumentException("SKILL.md 必须位于 Skill 目录内: " + root);
+            }
+        }
+
+        @Override
+        public InputStream openSkill() throws IOException {
+            return open("SKILL.md");
+        }
+
+        @Override
+        public InputStream openResource(String resourcePath) throws IOException {
+            return open(resourcePath);
+        }
+
+        private InputStream open(String relativePath) throws IOException {
+            Path candidate = root.resolve(relativePath).normalize();
+            if (!candidate.startsWith(root) || !Files.isRegularFile(candidate)) {
+                throw new IllegalArgumentException("Skill 资源不存在: " + relativePath);
+            }
+            Path real = candidate.toRealPath();
+            if (!real.startsWith(root)) {
+                throw new IllegalArgumentException("Skill 资源越过目录边界: " + relativePath);
+            }
+            return Files.newInputStream(real);
+        }
+    }
+
+    private static final class ResourceSkillSource implements SkillSource {
+        private final Resource skillFile;
+
+        private ResourceSkillSource(Resource skillFile) {
+            this.skillFile = skillFile;
+        }
+
+        @Override
+        public InputStream openSkill() throws IOException {
+            return skillFile.getInputStream();
+        }
+
+        @Override
+        public InputStream openResource(String resourcePath) throws IOException {
+            Resource resource = skillFile.createRelative(resourcePath);
+            if (!resource.exists() || !resource.isReadable()) {
+                throw new IllegalArgumentException("Skill 资源不存在: " + resourcePath);
+            }
+            return resource.getInputStream();
+        }
     }
 }

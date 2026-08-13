@@ -2,6 +2,8 @@ package org.gemo.apex.platform.config;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -10,11 +12,12 @@ import org.gemo.apex.common.execution.AgentRequest;
 import org.gemo.apex.common.hook.HookBinding;
 import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.common.model.ModelResponse;
-import org.gemo.apex.common.skill.SkillDefinition;
+import org.gemo.apex.common.skill.*;
 import org.gemo.apex.core.agent.AgentRunOutcome;
 import org.gemo.apex.extension.definition.AgentDefinitionProvider;
 import org.gemo.apex.extension.hook.LifecycleHook;
 import org.gemo.apex.extension.model.ModelGateway;
+import org.gemo.apex.extension.skill.SkillProvider;
 import org.gemo.apex.kit.hook.SkillActivationStateHook;
 import org.gemo.apex.kit.hook.TodoMiddleware;
 import org.gemo.apex.kit.tool.ActivateSkillTool;
@@ -67,9 +70,10 @@ class ApexAgentPlatformConfigurationTest {
     @Test
     void collectsExplicitKitSkillToolAndHookBeans() {
         DefaultListableBeanFactory beans = beans();
-        SkillDefinition skill = new SkillDefinition("pdf", "PDF", "使用 PDF 指令", Map.of());
-        beans.registerSingleton("pdfSkill", skill);
-        beans.registerSingleton("activateSkillTool", new ActivateSkillTool(() -> List.of(skill)));
+        SkillDefinition skill = new SkillDefinition(new SkillMeta("pdf", "PDF"), "使用 PDF 指令");
+        SkillProvider skillProvider = provider(skill);
+        beans.registerSingleton("pdfSkillProvider", skillProvider);
+        beans.registerSingleton("activateSkillTool", new ActivateSkillTool(skillProvider));
         beans.registerSingleton("skillActivationStateHook", new SkillActivationStateHook());
 
         RequestBoundAgentEventPublisherFactory publishers =
@@ -87,6 +91,39 @@ class ApexAgentPlatformConfigurationTest {
                                     () ->
                                             runtime.newAgent(
                                                     new AgentRequest("skill", "default", "u", "q")))
+                            .run());
+        }
+    }
+
+    @Test
+    void usesConfiguredSkillPathInsteadOfDefaultClasspathLocation() throws Exception {
+        Path root = Files.createTempDirectory(Path.of("target"), "platform-skills");
+        Path skill = Files.createDirectory(root.resolve("pdf"));
+        Files.writeString(
+                skill.resolve("SKILL.md"), "---\nname: pdf\ndescription: PDF\n---\n使用 PDF 指令");
+        ApexAgentPlatformProperties properties = new ApexAgentPlatformProperties();
+        assertEquals("classpath:skills", properties.getSkills().getPath());
+        properties.getSkills().setPath(root.toString());
+
+        RequestBoundAgentEventPublisherFactory publishers =
+                new RequestBoundAgentEventPublisherFactory();
+        try (var runtime = createRuntime(beans(), skillOnlyDefinitions(), publishers, properties)) {
+            var publisher = new SseEmitterAgentEventPublisher(new SseEmitter());
+            assertInstanceOf(
+                    AgentRunOutcome.Completed.class,
+                    publishers
+                            .prepare(
+                                    "configured-skill",
+                                    "default",
+                                    "u",
+                                    publisher,
+                                    () ->
+                                            runtime.newAgent(
+                                                    new AgentRequest(
+                                                            "configured-skill",
+                                                            "default",
+                                                            "u",
+                                                            "q")))
                             .run());
         }
     }
@@ -150,8 +187,17 @@ class ApexAgentPlatformConfigurationTest {
             DefaultListableBeanFactory beans,
             AgentDefinitionProvider definitions,
             RequestBoundAgentEventPublisherFactory publishers) {
+        return createRuntime(beans, definitions, publishers, new ApexAgentPlatformProperties());
+    }
+
+    private static ApexAgentRuntime createRuntime(
+            DefaultListableBeanFactory beans,
+            AgentDefinitionProvider definitions,
+            RequestBoundAgentEventPublisherFactory publishers,
+            ApexAgentPlatformProperties properties) {
         return new ApexAgentPlatformConfiguration()
                 .apexAgentRuntime(
+                        properties,
                         definitions,
                         new InMemorySessionRepository(),
                         new InMemoryConversationRepository(),
@@ -163,7 +209,7 @@ class ApexAgentPlatformConfigurationTest {
                         beans.getBeanProvider(ToolCallback.class),
                         beans.getBeanProvider(ToolCallbackProvider.class),
                         hookBeans(beans),
-                        beans.getBeanProvider(org.gemo.apex.common.skill.SkillDefinition.class));
+                        beans.getBeanProvider(SkillProvider.class));
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -233,6 +279,54 @@ class ApexAgentPlatformConfigurationTest {
             @Override
             public List<AgentMetadata> listAgents() {
                 return List.of(definition.metadata());
+            }
+        };
+    }
+
+    private static AgentDefinitionProvider skillOnlyDefinitions() {
+        AgentDefinition definition =
+                new AgentDefinition(
+                        "1.0.0",
+                        new AgentMetadata("default", "默认", "测试"),
+                        new PromptDefinition("系统", 2),
+                        new MessageCompressionDefinition(false, 10),
+                        new ToolSetDefinition(Set.of(), Set.of()),
+                        Set.of("pdf"),
+                        Map.of(),
+                        Map.of());
+        return new AgentDefinitionProvider() {
+            @Override
+            public AgentDefinition load(String agentKey) {
+                return definition;
+            }
+
+            @Override
+            public List<AgentMetadata> listAgents() {
+                return List.of(definition.metadata());
+            }
+        };
+    }
+
+    private static SkillProvider provider(SkillDefinition skill) {
+        return new SkillProvider() {
+            @Override
+            public List<SkillMeta> loadSkills() {
+                return List.of(skill.meta());
+            }
+
+            @Override
+            public SkillDefinition loadSkill(String skillName) {
+                return skill;
+            }
+
+            @Override
+            public String loadResource(String skillName, String resourcePath) {
+                return resourcePath;
+            }
+
+            @Override
+            public String loadResource(String path) {
+                return path;
             }
         };
     }

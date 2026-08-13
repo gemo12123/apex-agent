@@ -2,7 +2,6 @@ package org.gemo.apex.kit.tool;
 
 import java.util.Map;
 import java.util.Objects;
-import org.gemo.apex.common.skill.SkillDefinition;
 import org.gemo.apex.common.tool.ToolCall;
 import org.gemo.apex.common.tool.ToolDefinition;
 import org.gemo.apex.common.tool.ToolExecutionContext;
@@ -46,11 +45,7 @@ public final class ActivateSkillTool implements AgentTool {
         if (!context.enabledSkills().contains(skillName)) {
             throw new IllegalArgumentException("Skill 未启用: " + skillName);
         }
-        SkillDefinition skill =
-                skills.loadSkills().stream()
-                        .filter(candidate -> candidate.name().equals(skillName))
-                        .findFirst()
-                        .orElseThrow(() -> new IllegalArgumentException("Skill 不存在: " + skillName));
+        var skill = skills.loadSkill(skillName);
         return new ToolResult(
                 call.toolCallId(),
                 call.name(),
