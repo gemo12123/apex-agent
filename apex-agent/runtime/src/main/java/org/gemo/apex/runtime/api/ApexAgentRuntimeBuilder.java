@@ -184,9 +184,10 @@ public final class ApexAgentRuntimeBuilder {
         callbackSnapshot.stream()
                 .map(callback -> new SpringAiToolCallbackAgentTool(callback, toolCallingManager))
                 .forEach(ts::add);
-        List<SkillProvider> providers = new ArrayList<>();
-        providers.add(new FileSkillProvider(skillPath));
-        providers.addAll(skillProviders);
+        List<SkillProvider> providers =
+                skillProviders.isEmpty()
+                        ? List.of(new FileSkillProvider(skillPath))
+                        : List.copyOf(skillProviders);
         var skillsRegistry = new RuntimeSkillRegistry(providers);
         var tr = new ToolRegistry(ts, skillsRegistry);
         var hr = new HookRegistry(hooks);

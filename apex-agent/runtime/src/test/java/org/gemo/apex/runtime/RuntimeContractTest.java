@@ -438,6 +438,26 @@ class RuntimeContractTest {
                                 List.of(new CountingSkillProvider("duplicate", "重复", true))));
     }
 
+    /** 显式注册Provider后完全替换默认文件Provider，skillPath不再参与构建 */
+    @Test
+    void explicitSkillProvidersReplaceDefaultFileProvider() {
+        CountingSkillProvider provider = new CountingSkillProvider("pdf", "使用说明");
+
+        assertDoesNotThrow(
+                () -> {
+                    try (var ignored =
+                            ApexAgentRuntime.builder()
+                                    .modelGateway(
+                                            (request, observer) ->
+                                                    new ModelResponse("完成", List.of(), Map.of()))
+                                    .skillPath("target/not-existing-skills")
+                                    .registerSkillProvider(provider)
+                                    .build()) {
+                        assertEquals(1, provider.metadataLoads.get());
+                    }
+                });
+    }
+
     @Test
     void loadsSkillsFromClasspathAndTreatsMissingClasspathRootAsEmpty() {
         var provider = new FileSkillProvider("classpath:test-skills");
