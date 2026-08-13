@@ -34,7 +34,6 @@ import org.gemo.apex.runtime.execution.*;
 import org.gemo.apex.runtime.model.springai.*;
 import org.gemo.apex.runtime.repository.memory.*;
 import org.gemo.apex.runtime.skill.*;
-import org.gemo.apex.runtime.subagent.*;
 import org.junit.jupiter.api.*;
 import org.springframework.ai.chat.messages.AssistantMessage;
 
@@ -332,15 +331,6 @@ class RuntimeContractTest {
         assertEquals("function", call.type());
         assertEquals("weather", call.name());
         assertEquals("{\"city\":\"上海\"}", call.arguments());
-    }
-
-    /** sse多行与边界 */
-    @Test
-    void decodesMultilineSseEventsAtEventBoundary() {
-        var d = new SseEventDecoder();
-        d.accept("data: {");
-        d.accept("data: }");
-        assertEquals(List.of("{\n}"), d.accept(""));
     }
 
     /** fileProvider初始化缓存且列出元数据 */

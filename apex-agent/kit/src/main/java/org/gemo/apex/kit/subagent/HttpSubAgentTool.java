@@ -1,17 +1,30 @@
-package org.gemo.apex.runtime.subagent;
+package org.gemo.apex.kit.subagent;
 
-import java.net.*;
-import java.net.http.*;
-import java.time.*;
-import java.util.*;
-import java.util.concurrent.*;
-import java.util.stream.*;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Stream;
 import org.gemo.apex.common.exception.CancellationRequestedException;
 import org.gemo.apex.common.json.JsonUtils;
-import org.gemo.apex.common.tool.*;
-import org.gemo.apex.extension.tool.*;
-import org.gemo.apex.protocol.event.*;
-import org.gemo.apex.protocol.request.*;
+import org.gemo.apex.common.tool.ToolCall;
+import org.gemo.apex.common.tool.ToolDefinition;
+import org.gemo.apex.common.tool.ToolExecutionContext;
+import org.gemo.apex.common.tool.ToolResult;
+import org.gemo.apex.extension.tool.AgentTool;
+import org.gemo.apex.extension.tool.ToolExecutionObserver;
+import org.gemo.apex.protocol.event.AgentMessage;
+import org.gemo.apex.protocol.event.HumanInterventionMessage;
+import org.gemo.apex.protocol.event.InvocationChangeMessage;
+import org.gemo.apex.protocol.event.InvocationDeclaredMessage;
+import org.gemo.apex.protocol.event.StreamContentMessage;
+import org.gemo.apex.protocol.request.ChatRequest;
+import org.gemo.apex.protocol.request.RequestType;
 
 public final class HttpSubAgentTool implements AgentTool {
     private final ToolDefinition d;
