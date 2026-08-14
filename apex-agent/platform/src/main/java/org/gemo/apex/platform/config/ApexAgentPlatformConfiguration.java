@@ -1,5 +1,6 @@
 package org.gemo.apex.platform.config;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Executor;
 import org.gemo.apex.extension.definition.AgentDefinitionProvider;
@@ -22,10 +23,12 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
+import org.springframework.beans.factory.ListableBeanFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
@@ -33,6 +36,8 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 @Configuration
 @EnableConfigurationProperties(ApexAgentPlatformProperties.class)
 public class ApexAgentPlatformConfiguration {
+    private static final String RUNTIME_SKILL_REGISTRY_BEAN = "runtimeSkillRegistry";
+
     @Bean
     AgentDefinitionProvider agentDefinitionProvider(
             ApexAgentPlatformProperties properties, ResourceLoader resourceLoader) {
@@ -44,10 +49,31 @@ public class ApexAgentPlatformConfiguration {
         return new RequestBoundAgentEventPublisherFactory();
     }
 
+    /** 聚合所有原始 SkillProvider，并作为 platform 对外提供的最终 SkillProvider。 */
+    @Bean(name = RUNTIME_SKILL_REGISTRY_BEAN)
+    @Primary
+    RuntimeSkillRegistry runtimeSkillRegistry(
+            ApexAgentPlatformProperties properties,
+            ObjectProvider<SkillProvider> skillProviders,
+            ListableBeanFactory beanFactory) {
+        boolean hasSourceProvider =
+                Arrays.stream(beanFactory.getBeanNamesForType(SkillProvider.class))
+                        .anyMatch(name -> !RUNTIME_SKILL_REGISTRY_BEAN.equals(name));
+        List<SkillProvider> providers =
+                hasSourceProvider
+                        ? skillProviders.orderedStream().toList()
+                        : List.of(new FileSkillProvider(properties.getSkills().getPath()));
+        return new RuntimeSkillRegistry(providers);
+    }
+
+    @Bean
+    AvailableSkillsPromptHook availableSkillsPromptHook(RuntimeSkillRegistry skillRegistry) {
+        return new AvailableSkillsPromptHook(skillRegistry);
+    }
+
     /** 收集平台提供的端口、工具、Hook 与 Skill。模型 Bean 必须唯一，避免运行时隐式选择模型。 */
     @Bean(destroyMethod = "close")
     ApexAgentRuntime apexAgentRuntime(
-            ApexAgentPlatformProperties properties,
             AgentDefinitionProvider definitions,
             SessionRepository sessions,
             ConversationRepository conversations,
@@ -59,7 +85,7 @@ public class ApexAgentPlatformConfiguration {
             ObjectProvider<ToolCallback> toolCallbacks,
             ObjectProvider<ToolCallbackProvider> toolCallbackProviders,
             ObjectProvider<LifecycleHook<?, ?>> hooks,
-            ObjectProvider<SkillProvider> skillProviders) {
+            RuntimeSkillRegistry skillRegistry) {
         var builder =
                 ApexAgentRuntime.builder()
                         .agentDefinitionProvider(definitions)
@@ -82,13 +108,7 @@ public class ApexAgentPlatformConfiguration {
         }
         toolCallbacks.orderedStream().forEach(builder::registerToolCallback);
         toolCallbackProviders.orderedStream().forEach(builder::registerToolCallbackProvider);
-        List<SkillProvider> providers = skillProviders.orderedStream().toList();
-        if (providers.isEmpty()) {
-            providers = List.of(new FileSkillProvider(properties.getSkills().getPath()));
-        }
-        RuntimeSkillRegistry skillRegistry = new RuntimeSkillRegistry(providers);
         hooks.orderedStream().forEach(builder::registerHook);
-        builder.registerHook(new AvailableSkillsPromptHook(skillRegistry));
         builder.skillProvider(skillRegistry);
         return builder.build();
     }

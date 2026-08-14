@@ -24,6 +24,7 @@ import org.gemo.apex.kit.hook.TodoMiddleware;
 import org.gemo.apex.kit.tool.ActivateSkillTool;
 import org.gemo.apex.kit.tool.ReadSkillResourceTool;
 import org.gemo.apex.kit.tool.WriteTodosTool;
+import org.gemo.apex.platform.skill.RuntimeSkillRegistry;
 import org.gemo.apex.platform.web.sse.RequestBoundAgentEventPublisherFactory;
 import org.gemo.apex.platform.web.sse.SseEmitterAgentEventPublisher;
 import org.gemo.apex.runtime.api.*;
@@ -35,10 +36,46 @@ import org.springframework.ai.tool.*;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.core.Ordered;
+import org.springframework.test.context.support.TestPropertySourceUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 class ApexAgentPlatformConfigurationTest {
+    @Test
+    void exposesFinalSkillRegistryToSpringConsumersWithoutSelfAggregation() {
+        AtomicInteger metadataLoads = new AtomicInteger();
+        SkillProvider source =
+                new OrderedSkillProvider(
+                        10, "聚合结果", "Skill 指令", metadataLoads, new AtomicInteger());
+
+        try (var context = new AnnotationConfigApplicationContext()) {
+            TestPropertySourceUtils.addInlinedPropertiesToEnvironment(
+                    context,
+                    "apex.platform.agents.test.name=测试 Agent",
+                    "apex.platform.agents.test.description=测试",
+                    "apex.platform.agents.test.prompt.system="
+                            + "classpath:agents/default_agent/REACT_PROMPT.md");
+            context.register(ApexAgentPlatformConfiguration.class);
+            context.registerBean(
+                    ModelGateway.class,
+                    () -> (request, observer) -> new ModelResponse("完成", List.of(), Map.of()));
+            context.registerBean(InMemorySessionRepository.class);
+            context.registerBean(InMemoryConversationRepository.class);
+            context.registerBean("sourceSkillProvider", SkillProvider.class, () -> source);
+            context.registerBean(SkillProviderConsumer.class);
+            context.refresh();
+
+            RuntimeSkillRegistry registry = context.getBean(RuntimeSkillRegistry.class);
+            assertSame(registry, context.getBean(SkillProvider.class));
+            assertSame(registry, context.getBean(SkillProviderConsumer.class).skillProvider());
+            assertEquals(List.of(new SkillMeta("pdf", "聚合结果")), registry.loadSkills());
+            assertEquals(1, metadataLoads.get());
+            assertEquals(1, context.getBeansOfType(AvailableSkillsPromptHook.class).size());
+            assertNotNull(context.getBean(ApexAgentRuntime.class));
+        }
+    }
+
     @Test
     void collectsDirectCallbacksAndSnapshotsProvidersOnce() {
         AtomicInteger providerReads = new AtomicInteger();
@@ -325,21 +362,26 @@ class ApexAgentPlatformConfigurationTest {
             AgentDefinitionProvider definitions,
             RequestBoundAgentEventPublisherFactory publishers,
             ApexAgentPlatformProperties properties) {
-        return new ApexAgentPlatformConfiguration()
-                .apexAgentRuntime(
-                        properties,
-                        definitions,
-                        new InMemorySessionRepository(),
-                        new InMemoryConversationRepository(),
-                        publishers,
-                        beans.getBeanProvider(ModelGateway.class),
-                        beans.getBeanProvider(ChatModel.class),
-                        beans.getBeanProvider(ToolCallingManager.class),
-                        beans.getBeanProvider(org.gemo.apex.extension.tool.AgentTool.class),
-                        beans.getBeanProvider(ToolCallback.class),
-                        beans.getBeanProvider(ToolCallbackProvider.class),
-                        hookBeans(beans),
-                        beans.getBeanProvider(SkillProvider.class));
+        ApexAgentPlatformConfiguration configuration = new ApexAgentPlatformConfiguration();
+        RuntimeSkillRegistry skillRegistry =
+                configuration.runtimeSkillRegistry(
+                        properties, beans.getBeanProvider(SkillProvider.class), beans);
+        beans.registerSingleton(
+                "availableSkillsPromptHook",
+                configuration.availableSkillsPromptHook(skillRegistry));
+        return configuration.apexAgentRuntime(
+                definitions,
+                new InMemorySessionRepository(),
+                new InMemoryConversationRepository(),
+                publishers,
+                beans.getBeanProvider(ModelGateway.class),
+                beans.getBeanProvider(ChatModel.class),
+                beans.getBeanProvider(ToolCallingManager.class),
+                beans.getBeanProvider(org.gemo.apex.extension.tool.AgentTool.class),
+                beans.getBeanProvider(ToolCallback.class),
+                beans.getBeanProvider(ToolCallbackProvider.class),
+                hookBeans(beans),
+                skillRegistry);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -519,6 +561,8 @@ class ApexAgentPlatformConfigurationTest {
             }
         };
     }
+
+    private record SkillProviderConsumer(SkillProvider skillProvider) {}
 
     private static final class OrderedSkillProvider implements SkillProvider, Ordered {
         private final int order;
