@@ -9,6 +9,7 @@ import org.gemo.apex.extension.repository.ConversationRepository;
 import org.gemo.apex.extension.repository.SessionRepository;
 import org.gemo.apex.extension.skill.SkillProvider;
 import org.gemo.apex.extension.tool.AgentTool;
+import org.gemo.apex.kit.hook.AvailableSkillsPromptHook;
 import org.gemo.apex.kit.hook.TodoMiddleware;
 import org.gemo.apex.kit.hook.ToolConfirmHook;
 import org.gemo.apex.kit.tool.WriteTodosTool;
@@ -81,12 +82,14 @@ public class ApexAgentPlatformConfiguration {
         }
         toolCallbacks.orderedStream().forEach(builder::registerToolCallback);
         toolCallbackProviders.orderedStream().forEach(builder::registerToolCallbackProvider);
-        hooks.orderedStream().forEach(builder::registerHook);
         List<SkillProvider> providers = skillProviders.orderedStream().toList();
         if (providers.isEmpty()) {
             providers = List.of(new FileSkillProvider(properties.getSkills().getPath()));
         }
-        builder.skillProvider(new RuntimeSkillRegistry(providers));
+        RuntimeSkillRegistry skillRegistry = new RuntimeSkillRegistry(providers);
+        hooks.orderedStream().forEach(builder::registerHook);
+        builder.registerHook(new AvailableSkillsPromptHook(skillRegistry));
+        builder.skillProvider(skillRegistry);
         return builder.build();
     }
 

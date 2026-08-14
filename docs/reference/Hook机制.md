@@ -389,6 +389,7 @@ TURN_START 提前结束时尚未创建 Iteration，因此不会分发 ITERATION_
 
 | 实现 | 生命周期点 | 能力 |
 | --- | --- | --- |
+| `AvailableSkillsPromptHook` | AGENT_BUILD | 从平台最终 Skill Registry 读取元信息，按 Agent 的 `enabledSkills` 过滤并将系统提示词中的 `{skills}` 替换为 `<available_skills>` XML |
 | `ToolConfirmHook` | PRE_TOOL_CALL | 首次调用请求工具确认；恢复后放行，拒绝和可编辑参数合并由 core 处理 |
 | `AskHumanInterventionHook` | PRE_TOOL_CALL | 把 `ask_human` ToolCall 转换为问题介入；非法问题定义转为 BlockTool |
 | `PlainTextTruncateHook` | POST_TOOL_CALL | 截断过长纯文本 ToolResult，默认上限为 4000 个 Unicode 码点 |
@@ -400,7 +401,7 @@ TURN_START 提前结束时尚未创建 Iteration，因此不会分发 ITERATION_
 
 ## 当前默认启用状态
 
-platform 当前默认注册 `ToolConfirmHook`、`WriteTodosTool` 和 `TodoMiddleware`，但默认 `default_agent` 的配置没有 Todo 工具或 Hook：
+platform 当前默认注册 `AvailableSkillsPromptHook`、`ToolConfirmHook`、`WriteTodosTool` 和 `TodoMiddleware`，但默认 `default_agent` 没有配置任何 Hook：
 
 ```yaml
 tools:
@@ -410,6 +411,17 @@ hooks: {}
 ```
 
 因此默认配置下没有实际执行的 Hook。`AskHumanInterventionHook`、`PlainTextTruncateHook`、`SkillActivationStateHook` 及其相关工具都需要按需显式注册，并在 Agent 定义中绑定。注册实现不等于启用能力。
+
+`AvailableSkillsPromptHook` 的稳定注册名是 `availableSkillsPromptHook`。它由 platform 使用最终聚合的 `RuntimeSkillRegistry` 注册，但仍需 Agent 显式绑定；执行时仅展示该 Agent 的 `enabledSkills`，保留 Registry 顺序并转义 XML 特殊字符。提示词没有 `{skills}` 时不读取 Registry、不修改定义；没有启用 Skill 时占位符替换为空的 `<available_skills>` 容器。示例：
+
+```yaml
+hooks:
+  AGENT_BUILD:
+    - id: available-skills
+      hook: availableSkillsPromptHook
+      order: 0
+      enabled: true
+```
 
 为某个 Agent 启用 Todo 能力时，需要同时暴露工具并绑定 PRE_MODEL_CALL：
 

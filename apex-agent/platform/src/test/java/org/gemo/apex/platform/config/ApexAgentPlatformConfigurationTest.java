@@ -18,6 +18,7 @@ import org.gemo.apex.extension.definition.AgentDefinitionProvider;
 import org.gemo.apex.extension.hook.LifecycleHook;
 import org.gemo.apex.extension.model.ModelGateway;
 import org.gemo.apex.extension.skill.SkillProvider;
+import org.gemo.apex.kit.hook.AvailableSkillsPromptHook;
 import org.gemo.apex.kit.hook.SkillActivationStateHook;
 import org.gemo.apex.kit.hook.TodoMiddleware;
 import org.gemo.apex.kit.tool.ActivateSkillTool;
@@ -195,6 +196,66 @@ class ApexAgentPlatformConfigurationTest {
         assertEquals(1, secondMetadataLoads.get());
         assertEquals(0, firstResourceLoads.get());
         assertEquals(1, secondResourceLoads.get());
+    }
+
+    @Test
+    void registersAvailableSkillsPromptHookAgainstTheFinalSkillRegistry() {
+        AtomicReference<org.gemo.apex.common.model.ModelRequest> seen = new AtomicReference<>();
+        AtomicInteger firstMetadataLoads = new AtomicInteger();
+        AtomicInteger secondMetadataLoads = new AtomicInteger();
+        DefaultListableBeanFactory beans = new DefaultListableBeanFactory();
+        beans.registerSingleton(
+                "modelGateway",
+                (ModelGateway)
+                        (request, observer) -> {
+                            seen.set(request);
+                            return new ModelResponse("完成", List.of(), Map.of());
+                        });
+        beans.registerSingleton(
+                "firstSkillProvider",
+                new OrderedSkillProvider(
+                        10, "第一版", "第一版指令", firstMetadataLoads, new AtomicInteger()));
+        beans.registerSingleton(
+                "secondSkillProvider",
+                new OrderedSkillProvider(
+                        20, "最终 & <PDF>", "第二版指令", secondMetadataLoads, new AtomicInteger()));
+
+        RequestBoundAgentEventPublisherFactory publishers =
+                new RequestBoundAgentEventPublisherFactory();
+        try (var runtime = createRuntime(beans, availableSkillsDefinitions(), publishers)) {
+            var publisher = new SseEmitterAgentEventPublisher(new SseEmitter());
+            assertInstanceOf(
+                    AgentRunOutcome.Completed.class,
+                    publishers
+                            .prepare(
+                                    "available-skills",
+                                    "default",
+                                    "u",
+                                    publisher,
+                                    () ->
+                                            runtime.newAgent(
+                                                    new AgentRequest(
+                                                            "available-skills",
+                                                            "default",
+                                                            "u",
+                                                            "q")))
+                            .run());
+        }
+
+        assertNotNull(seen.get());
+        assertEquals(
+                """
+                系统
+                <available_skills>
+                <skill>
+                <name>pdf</name>
+                <description>最终 &amp; &lt;PDF&gt;</description>
+                </skill>
+                </available_skills>\
+                """,
+                seen.get().systemPrompt());
+        assertEquals(1, firstMetadataLoads.get());
+        assertEquals(1, secondMetadataLoads.get());
     }
 
     @Test
@@ -402,6 +463,39 @@ class ApexAgentPlatformConfigurationTest {
         };
     }
 
+    private static AgentDefinitionProvider availableSkillsDefinitions() {
+        AgentDefinition definition =
+                new AgentDefinition(
+                        "1.0.0",
+                        new AgentMetadata("default", "默认", "测试"),
+                        new PromptDefinition("系统\n{skills}", 2),
+                        new MessageCompressionDefinition(false, 10),
+                        new ToolSetDefinition(Set.of(), Set.of()),
+                        Set.of("pdf"),
+                        Map.of(),
+                        Map.of(
+                                HookPoint.AGENT_BUILD,
+                                List.of(
+                                        new HookBinding(
+                                                "available-skills",
+                                                AvailableSkillsPromptHook.REGISTRATION_NAME,
+                                                0,
+                                                true,
+                                                List.of(),
+                                                Map.of()))));
+        return new AgentDefinitionProvider() {
+            @Override
+            public AgentDefinition load(String agentKey) {
+                return definition;
+            }
+
+            @Override
+            public List<AgentMetadata> listAgents() {
+                return List.of(definition.metadata());
+            }
+        };
+    }
+
     private static SkillProvider provider(SkillDefinition skill) {
         return new SkillProvider() {
             @Override
@@ -437,8 +531,17 @@ class ApexAgentPlatformConfigurationTest {
                 String instructions,
                 AtomicInteger metadataLoads,
                 AtomicInteger resourceLoads) {
+            this(order, "PDF", instructions, metadataLoads, resourceLoads);
+        }
+
+        private OrderedSkillProvider(
+                int order,
+                String description,
+                String instructions,
+                AtomicInteger metadataLoads,
+                AtomicInteger resourceLoads) {
             this.order = order;
-            skill = new SkillDefinition(new SkillMeta("pdf", "PDF"), instructions);
+            skill = new SkillDefinition(new SkillMeta("pdf", description), instructions);
             this.metadataLoads = metadataLoads;
             this.resourceLoads = resourceLoads;
         }
