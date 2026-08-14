@@ -3,6 +3,8 @@ package org.gemo.apex.runtime.api;
 import java.time.*;
 import java.util.*;
 import org.gemo.apex.common.agent.*;
+import org.gemo.apex.common.skill.SkillDefinition;
+import org.gemo.apex.common.skill.SkillMeta;
 import org.gemo.apex.common.tool.*;
 import org.gemo.apex.core.agent.AgentPorts;
 import org.gemo.apex.extension.definition.AgentDefinitionProvider;
@@ -42,8 +44,7 @@ public final class ApexAgentRuntimeBuilder {
     private final List<ToolCallbackProvider> toolCallbackProviders = new ArrayList<>();
     private ToolCallingManager toolCallingManager;
     private final Map<HookRegistry.Key, LifecycleHook<?, ?>> hooks = new LinkedHashMap<>();
-    private String skillPath = FileSkillProvider.DEFAULT_LOCATION;
-    private final List<SkillProvider> skillProviders = new ArrayList<>();
+    private SkillProvider skillProvider;
     private final List<AutoCloseable> owned = new ArrayList<>();
     private int max = 30;
 
@@ -120,13 +121,8 @@ public final class ApexAgentRuntimeBuilder {
         return this;
     }
 
-    public ApexAgentRuntimeBuilder skillPath(String v) {
-        skillPath = v;
-        return this;
-    }
-
-    public ApexAgentRuntimeBuilder registerSkillProvider(SkillProvider v) {
-        skillProviders.add(Objects.requireNonNull(v, "skillProvider"));
+    public ApexAgentRuntimeBuilder skillProvider(SkillProvider v) {
+        skillProvider = Objects.requireNonNull(v, "skillProvider");
         return this;
     }
 
@@ -184,12 +180,8 @@ public final class ApexAgentRuntimeBuilder {
         callbackSnapshot.stream()
                 .map(callback -> new SpringAiToolCallbackAgentTool(callback, toolCallingManager))
                 .forEach(ts::add);
-        List<SkillProvider> providers =
-                skillProviders.isEmpty()
-                        ? List.of(new FileSkillProvider(skillPath))
-                        : List.copyOf(skillProviders);
-        var skillsRegistry = new RuntimeSkillRegistry(providers);
-        var tr = new ToolRegistry(ts, skillsRegistry);
+        SkillProvider skills = skillProvider != null ? skillProvider : EmptySkillProvider.INSTANCE;
+        var tr = new ToolRegistry(ts, skills);
         var hr = new HookRegistry(hooks);
         var pf = publishers != null ? publishers : new PrintAgentEventPublisherFactory();
         var co = coordinator != null ? coordinator : new InMemorySessionExecutionCoordinator();
@@ -237,13 +229,46 @@ public final class ApexAgentRuntimeBuilder {
                                 DefaultConversationServices.window(cr),
                                 DefaultConversationServices.policy(),
                                 DefaultConversationServices.compactor(gateway, c.token()),
-                                skillsRegistry,
+                                skills,
                                 p,
                                 c.token(),
                                 ids,
                                 Instant::now,
                                 "请直接给出最终答案，不再调用工具。");
         return new ApexAgentRuntime(ports, co, pf, active, new RuntimeResources(owned));
+    }
+
+    private enum EmptySkillProvider implements SkillProvider {
+        INSTANCE;
+
+        @Override
+        public List<SkillMeta> loadSkills() {
+            return List.of();
+        }
+
+        @Override
+        public SkillDefinition loadSkill(String skillName) {
+            throw missing(skillName);
+        }
+
+        @Override
+        public String loadResource(String skillName, String resourcePath) {
+            throw missing(skillName);
+        }
+
+        @Override
+        public String loadResource(String path) {
+            if (path == null) {
+                throw new IllegalArgumentException("Skill 资源路径不能为空");
+            }
+            int separator = path.indexOf('/');
+            String skillName = separator < 0 ? path : path.substring(0, separator);
+            throw missing(skillName);
+        }
+
+        private IllegalArgumentException missing(String skillName) {
+            return new IllegalArgumentException("Skill 不存在: " + skillName);
+        }
     }
 
     private AgentDefinition defaults() {

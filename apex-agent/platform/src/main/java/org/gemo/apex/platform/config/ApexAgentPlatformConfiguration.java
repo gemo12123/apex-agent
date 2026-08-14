@@ -1,5 +1,6 @@
 package org.gemo.apex.platform.config;
 
+import java.util.List;
 import java.util.concurrent.Executor;
 import org.gemo.apex.extension.definition.AgentDefinitionProvider;
 import org.gemo.apex.extension.hook.LifecycleHook;
@@ -12,8 +13,10 @@ import org.gemo.apex.kit.hook.TodoMiddleware;
 import org.gemo.apex.kit.hook.ToolConfirmHook;
 import org.gemo.apex.kit.tool.WriteTodosTool;
 import org.gemo.apex.platform.execution.UserContextTaskDecorator;
+import org.gemo.apex.platform.skill.RuntimeSkillRegistry;
 import org.gemo.apex.platform.web.sse.RequestBoundAgentEventPublisherFactory;
 import org.gemo.apex.runtime.api.ApexAgentRuntime;
+import org.gemo.apex.runtime.skill.FileSkillProvider;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.tool.ToolCallback;
@@ -61,8 +64,7 @@ public class ApexAgentPlatformConfiguration {
                         .agentDefinitionProvider(definitions)
                         .sessionRepository(sessions)
                         .conversationRepository(conversations)
-                        .defaultEventPublisherFactory(publishers)
-                        .skillPath(properties.getSkills().getPath());
+                        .defaultEventPublisherFactory(publishers);
         ModelGateway gateway = gateways.getIfUnique();
         ChatModel chatModel = chatModels.getIfUnique();
         if (gateway != null) {
@@ -80,7 +82,11 @@ public class ApexAgentPlatformConfiguration {
         toolCallbacks.orderedStream().forEach(builder::registerToolCallback);
         toolCallbackProviders.orderedStream().forEach(builder::registerToolCallbackProvider);
         hooks.orderedStream().forEach(builder::registerHook);
-        skillProviders.orderedStream().forEach(builder::registerSkillProvider);
+        List<SkillProvider> providers = skillProviders.orderedStream().toList();
+        if (providers.isEmpty()) {
+            providers = List.of(new FileSkillProvider(properties.getSkills().getPath()));
+        }
+        builder.skillProvider(new RuntimeSkillRegistry(providers));
         return builder.build();
     }
 

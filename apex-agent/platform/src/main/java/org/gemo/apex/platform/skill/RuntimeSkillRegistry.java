@@ -1,4 +1,4 @@
-package org.gemo.apex.runtime.skill;
+package org.gemo.apex.platform.skill;
 
 import java.util.Collections;
 import java.util.HashSet;

@@ -26,6 +26,7 @@ import org.gemo.apex.extension.skill.SkillProvider;
 import org.gemo.apex.extension.tool.ToolExecutionObserver;
 import org.gemo.apex.kit.hook.SkillActivationStateHook;
 import org.gemo.apex.kit.tool.ActivateSkillTool;
+import org.gemo.apex.kit.tool.ReadSkillResourceTool;
 import org.gemo.apex.protocol.event.*;
 import org.gemo.apex.runtime.api.*;
 import org.gemo.apex.runtime.conversation.DefaultConversationServices;
@@ -379,85 +380,6 @@ class RuntimeContractTest {
                 () -> r.newAgent(new AgentRequest("closed", "default", "u", "q")));
     }
 
-    /** 文件Provider预载Skill及资源元信息，并分别缓存按需读取的正文与资源内容 */
-    @Test
-    void lazilyLoadsFileSkillsAndRestrictsResourceToolToEnabledSkills() throws Exception {
-        Path root = Files.createTempDirectory(Path.of("target"), "skills"),
-                dir = Files.createDirectory(root.resolve("pdf"));
-        Files.writeString(dir.resolve("SKILL.md"), "---\nname: pdf\ndescription: PDF\n---\n使用说明");
-        Path references = Files.createDirectory(dir.resolve("references"));
-        Files.writeString(references.resolve("guide.txt"), "资源");
-        var provider = new FileSkillProvider(root);
-        var registry = new RuntimeSkillRegistry(List.of(provider));
-        assertEquals(List.of("pdf"), registry.loadSkills().stream().map(SkillMeta::name).toList());
-
-        Files.writeString(references.resolve("late.txt"), "发现后新增资源");
-        Files.writeString(
-                dir.resolve("SKILL.md"), "---\nname: pdf\ndescription: PDF\n---\n更新后的使用说明");
-        SkillDefinition loaded = registry.loadSkill("pdf");
-        assertEquals("更新后的使用说明", loaded.instructions());
-        assertSame(loaded, provider.loadSkill("pdf"));
-        assertEquals(Set.of("references/guide.txt"), loaded.resources().keySet());
-        SkillResource resource = loaded.resources().get("references/guide.txt");
-        assertEquals("references/guide.txt", resource.path());
-        assertEquals("guide.txt", resource.fileName());
-        assertFalse(resource.fileType().isBlank());
-        assertNull(resource.content());
-
-        Files.writeString(dir.resolve("SKILL.md"), "---\nname: pdf\ndescription: PDF\n---\n不应覆盖缓存");
-        assertEquals("更新后的使用说明", registry.loadSkill("pdf").instructions());
-        assertEquals("资源", registry.loadResource("pdf", "references/guide.txt"));
-        assertEquals("资源", resource.content());
-        Files.writeString(references.resolve("guide.txt"), "不应覆盖资源缓存");
-        assertEquals("资源", registry.loadResource("pdf/references/guide.txt"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> registry.loadResource("pdf", "../outside.txt"));
-    }
-
-    /** Registry在构建时读取各Provider元信息，后注册Provider覆盖同名路由 */
-    @Test
-    void snapshotsProviderMetadataAndRoutesLazyLoadsToLastProvider() {
-        var first = new CountingSkillProvider("pdf", "第一版");
-        var second = new CountingSkillProvider("pdf", "第二版");
-
-        var registry = new RuntimeSkillRegistry(List.of(first, second));
-
-        assertEquals(1, first.metadataLoads.get());
-        assertEquals(1, second.metadataLoads.get());
-        assertEquals(0, first.skillLoads.get());
-        assertEquals(0, second.skillLoads.get());
-        assertEquals("第二版", registry.loadSkill("pdf").instructions());
-        assertEquals(0, first.skillLoads.get());
-        assertEquals(1, second.skillLoads.get());
-        assertEquals("second.txt", registry.loadResource("pdf/second.txt"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () ->
-                        new RuntimeSkillRegistry(
-                                List.of(new CountingSkillProvider("duplicate", "重复", true))));
-    }
-
-    /** 显式注册Provider后完全替换默认文件Provider，skillPath不再参与构建 */
-    @Test
-    void explicitSkillProvidersReplaceDefaultFileProvider() {
-        CountingSkillProvider provider = new CountingSkillProvider("pdf", "使用说明");
-
-        assertDoesNotThrow(
-                () -> {
-                    try (var ignored =
-                            ApexAgentRuntime.builder()
-                                    .modelGateway(
-                                            (request, observer) ->
-                                                    new ModelResponse("完成", List.of(), Map.of()))
-                                    .skillPath("target/not-existing-skills")
-                                    .registerSkillProvider(provider)
-                                    .build()) {
-                        assertEquals(1, provider.metadataLoads.get());
-                    }
-                });
-    }
-
     @Test
     void loadsSkillsFromClasspathAndTreatsMissingClasspathRootAsEmpty() {
         var provider = new FileSkillProvider("classpath:test-skills");
@@ -473,6 +395,111 @@ class RuntimeContractTest {
                 "类路径资源", provider.loadResource("classpath-skill/references/guide.txt").strip());
         assertNotNull(loaded.resources().get("references/guide.txt").content());
         assertTrue(new FileSkillProvider("classpath:not-existing-skills").loadSkills().isEmpty());
+    }
+
+    @Test
+    void defaultsToEmptySkillProvider() {
+        AgentDefinition skillDefinition =
+                new AgentDefinition(
+                        "1.0.0",
+                        new AgentMetadata("default", "默认", "测试"),
+                        new PromptDefinition("系统", 2),
+                        new MessageCompressionDefinition(false, 10),
+                        new ToolSetDefinition(Set.of(), Set.of()),
+                        Set.of("pdf"),
+                        Map.of(),
+                        Map.of());
+
+        try (var runtime =
+                ApexAgentRuntime.builder()
+                        .modelGateway(
+                                (request, observer) ->
+                                        new ModelResponse("完成", List.of(), Map.of()))
+                        .agentDefinition(skillDefinition)
+                        .build()) {
+            AgentPreparationException error =
+                    assertThrows(
+                            AgentPreparationException.class,
+                            () ->
+                                    runtime.newAgent(
+                                            new AgentRequest("empty-skills", "default", "u", "q")));
+            assertEquals("enabledSkills 存在无法解析的名称", error.getCause().getMessage());
+        }
+    }
+
+    @Test
+    void usesInjectedSkillProviderForValidationAndResourceTool() {
+        AtomicInteger metadataLoads = new AtomicInteger();
+        AtomicInteger resourceLoads = new AtomicInteger();
+        SkillDefinition skill = new SkillDefinition(new SkillMeta("pdf", "PDF"), "使用 PDF 指令");
+        SkillProvider skillProvider =
+                new SkillProvider() {
+                    @Override
+                    public List<SkillMeta> loadSkills() {
+                        metadataLoads.incrementAndGet();
+                        return List.of(skill.meta());
+                    }
+
+                    @Override
+                    public SkillDefinition loadSkill(String skillName) {
+                        return skill;
+                    }
+
+                    @Override
+                    public String loadResource(String skillName, String resourcePath) {
+                        resourceLoads.incrementAndGet();
+                        return "资源内容";
+                    }
+
+                    @Override
+                    public String loadResource(String path) {
+                        return loadResource("pdf", path);
+                    }
+                };
+        AgentDefinition skillDefinition =
+                new AgentDefinition(
+                        "1.0.0",
+                        new AgentMetadata("default", "默认", "测试"),
+                        new PromptDefinition("系统", 2),
+                        new MessageCompressionDefinition(false, 10),
+                        new ToolSetDefinition(
+                                Set.of(ReadSkillResourceTool.NAME),
+                                Set.of(ReadSkillResourceTool.NAME)),
+                        Set.of("pdf"),
+                        Map.of(),
+                        Map.of());
+        Deque<ModelResponse> responses =
+                new ArrayDeque<>(
+                        List.of(
+                                new ModelResponse(
+                                        "",
+                                        List.of(
+                                                new ToolCall(
+                                                        "read-1",
+                                                        ReadSkillResourceTool.NAME,
+                                                        0,
+                                                        Map.of(
+                                                                "skillName",
+                                                                "pdf",
+                                                                "path",
+                                                                "references/guide.txt"),
+                                                        Map.of())),
+                                        Map.of()),
+                                new ModelResponse("完成", List.of(), Map.of())));
+
+        try (var runtime =
+                ApexAgentRuntime.builder()
+                        .modelGateway((request, observer) -> responses.removeFirst())
+                        .agentDefinition(skillDefinition)
+                        .skillProvider(skillProvider)
+                        .build()) {
+            assertInstanceOf(
+                    AgentRunOutcome.Completed.class,
+                    runtime.newAgent(new AgentRequest("skill-provider", "default", "u", "q")).run());
+        }
+
+        assertEquals(1, metadataLoads.get());
+        assertEquals(1, resourceLoads.get());
     }
 
     /** Skill激活工具不再隐式注册，显式组合Kit工具和Hook后才更新会话状态 */
@@ -505,7 +532,7 @@ class RuntimeContractTest {
                 ApexAgentRuntime.builder()
                         .modelGateway((request, observer) -> null)
                         .agentDefinition(activationDefinition)
-                        .registerSkillProvider(skillProvider)
+                        .skillProvider(skillProvider)
                         .build()) {
             assertThrows(
                     AgentPreparationException.class,
@@ -534,7 +561,7 @@ class RuntimeContractTest {
                         .modelGateway((request, observer) -> responses.removeFirst())
                         .agentDefinition(activationDefinition)
                         .sessionRepository(sessions)
-                        .registerSkillProvider(skillProvider)
+                        .skillProvider(skillProvider)
                         .registerTool(new ActivateSkillTool(skillProvider))
                         .registerHook(new SkillActivationStateHook())
                         .build()) {
@@ -583,46 +610,6 @@ class RuntimeContractTest {
                 return path;
             }
         };
-    }
-
-    private static final class CountingSkillProvider implements SkillProvider {
-        private final SkillMeta meta;
-        private final String instructions;
-        private final boolean duplicateMetadata;
-        private final AtomicInteger metadataLoads = new AtomicInteger();
-        private final AtomicInteger skillLoads = new AtomicInteger();
-
-        private CountingSkillProvider(String name, String instructions) {
-            this(name, instructions, false);
-        }
-
-        private CountingSkillProvider(String name, String instructions, boolean duplicateMetadata) {
-            this.meta = new SkillMeta(name, instructions);
-            this.instructions = instructions;
-            this.duplicateMetadata = duplicateMetadata;
-        }
-
-        @Override
-        public List<SkillMeta> loadSkills() {
-            metadataLoads.incrementAndGet();
-            return duplicateMetadata ? List.of(meta, meta) : List.of(meta);
-        }
-
-        @Override
-        public SkillDefinition loadSkill(String skillName) {
-            skillLoads.incrementAndGet();
-            return new SkillDefinition(meta, instructions);
-        }
-
-        @Override
-        public String loadResource(String skillName, String resourcePath) {
-            return resourcePath;
-        }
-
-        @Override
-        public String loadResource(String path) {
-            return path;
-        }
     }
 
     private static LifecycleHook<HookContextView, LifecycleHookResult> hook(

@@ -21,6 +21,7 @@ import org.gemo.apex.extension.skill.SkillProvider;
 import org.gemo.apex.kit.hook.SkillActivationStateHook;
 import org.gemo.apex.kit.hook.TodoMiddleware;
 import org.gemo.apex.kit.tool.ActivateSkillTool;
+import org.gemo.apex.kit.tool.ReadSkillResourceTool;
 import org.gemo.apex.kit.tool.WriteTodosTool;
 import org.gemo.apex.platform.web.sse.RequestBoundAgentEventPublisherFactory;
 import org.gemo.apex.platform.web.sse.SseEmitterAgentEventPublisher;
@@ -33,6 +34,7 @@ import org.springframework.ai.tool.*;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
+import org.springframework.core.Ordered;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 class ApexAgentPlatformConfigurationTest {
@@ -78,7 +80,9 @@ class ApexAgentPlatformConfigurationTest {
 
         RequestBoundAgentEventPublisherFactory publishers =
                 new RequestBoundAgentEventPublisherFactory();
-        try (var runtime = createRuntime(beans, skillDefinitions(), publishers)) {
+        ApexAgentPlatformProperties properties = new ApexAgentPlatformProperties();
+        properties.getSkills().setPath(" ");
+        try (var runtime = createRuntime(beans, skillDefinitions(), publishers, properties)) {
             var publisher = new SseEmitterAgentEventPublisher(new SseEmitter());
             assertInstanceOf(
                     AgentRunOutcome.Completed.class,
@@ -126,6 +130,71 @@ class ApexAgentPlatformConfigurationTest {
                                                             "q")))
                             .run());
         }
+    }
+
+    @Test
+    void aggregatesSkillProvidersInSpringOrderAndRoutesToLastDuplicate() {
+        AtomicInteger firstMetadataLoads = new AtomicInteger();
+        AtomicInteger firstResourceLoads = new AtomicInteger();
+        AtomicInteger secondMetadataLoads = new AtomicInteger();
+        AtomicInteger secondResourceLoads = new AtomicInteger();
+        DefaultListableBeanFactory beans = new DefaultListableBeanFactory();
+        Deque<ModelResponse> responses =
+                new ArrayDeque<>(
+                        List.of(
+                                new ModelResponse(
+                                        "",
+                                        List.of(
+                                                new org.gemo.apex.common.tool.ToolCall(
+                                                        "read-1",
+                                                        ReadSkillResourceTool.NAME,
+                                                        0,
+                                                        Map.of(
+                                                                "skillName",
+                                                                "pdf",
+                                                                "path",
+                                                                "references/guide.txt"),
+                                                        Map.of())),
+                                        Map.of()),
+                                new ModelResponse("完成", List.of(), Map.of())));
+        beans.registerSingleton(
+                "modelGateway",
+                (ModelGateway) (request, observer) -> responses.removeFirst());
+        beans.registerSingleton(
+                "firstSkillProvider",
+                new OrderedSkillProvider(
+                        10, "第一版", firstMetadataLoads, firstResourceLoads));
+        beans.registerSingleton(
+                "secondSkillProvider",
+                new OrderedSkillProvider(
+                        20, "第二版", secondMetadataLoads, secondResourceLoads));
+
+        RequestBoundAgentEventPublisherFactory publishers =
+                new RequestBoundAgentEventPublisherFactory();
+        try (var runtime = createRuntime(beans, resourceSkillDefinitions(), publishers)) {
+            var publisher = new SseEmitterAgentEventPublisher(new SseEmitter());
+            assertInstanceOf(
+                    AgentRunOutcome.Completed.class,
+                    publishers
+                            .prepare(
+                                    "ordered-skills",
+                                    "default",
+                                    "u",
+                                    publisher,
+                                    () ->
+                                            runtime.newAgent(
+                                                    new AgentRequest(
+                                                            "ordered-skills",
+                                                            "default",
+                                                            "u",
+                                                            "q")))
+                            .run());
+        }
+
+        assertEquals(1, firstMetadataLoads.get());
+        assertEquals(1, secondMetadataLoads.get());
+        assertEquals(0, firstResourceLoads.get());
+        assertEquals(1, secondResourceLoads.get());
     }
 
     @Test
@@ -307,6 +376,32 @@ class ApexAgentPlatformConfigurationTest {
         };
     }
 
+    private static AgentDefinitionProvider resourceSkillDefinitions() {
+        AgentDefinition definition =
+                new AgentDefinition(
+                        "1.0.0",
+                        new AgentMetadata("default", "默认", "测试"),
+                        new PromptDefinition("系统", 2),
+                        new MessageCompressionDefinition(false, 10),
+                        new ToolSetDefinition(
+                                Set.of(ReadSkillResourceTool.NAME),
+                                Set.of(ReadSkillResourceTool.NAME)),
+                        Set.of("pdf"),
+                        Map.of(),
+                        Map.of());
+        return new AgentDefinitionProvider() {
+            @Override
+            public AgentDefinition load(String agentKey) {
+                return definition;
+            }
+
+            @Override
+            public List<AgentMetadata> listAgents() {
+                return List.of(definition.metadata());
+            }
+        };
+    }
+
     private static SkillProvider provider(SkillDefinition skill) {
         return new SkillProvider() {
             @Override
@@ -329,6 +424,51 @@ class ApexAgentPlatformConfigurationTest {
                 return path;
             }
         };
+    }
+
+    private static final class OrderedSkillProvider implements SkillProvider, Ordered {
+        private final int order;
+        private final SkillDefinition skill;
+        private final AtomicInteger metadataLoads;
+        private final AtomicInteger resourceLoads;
+
+        private OrderedSkillProvider(
+                int order,
+                String instructions,
+                AtomicInteger metadataLoads,
+                AtomicInteger resourceLoads) {
+            this.order = order;
+            skill = new SkillDefinition(new SkillMeta("pdf", "PDF"), instructions);
+            this.metadataLoads = metadataLoads;
+            this.resourceLoads = resourceLoads;
+        }
+
+        @Override
+        public int getOrder() {
+            return order;
+        }
+
+        @Override
+        public List<SkillMeta> loadSkills() {
+            metadataLoads.incrementAndGet();
+            return List.of(skill.meta());
+        }
+
+        @Override
+        public SkillDefinition loadSkill(String skillName) {
+            return skill;
+        }
+
+        @Override
+        public String loadResource(String skillName, String resourcePath) {
+            resourceLoads.incrementAndGet();
+            return skill.instructions();
+        }
+
+        @Override
+        public String loadResource(String path) {
+            return loadResource("pdf", path);
+        }
     }
 
     private static ToolCallback callback(String name) {

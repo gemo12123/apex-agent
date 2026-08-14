@@ -2,15 +2,15 @@ package org.gemo.apex.runtime.registry;
 
 import java.util.*;
 import org.gemo.apex.common.agent.*;
+import org.gemo.apex.extension.skill.SkillProvider;
 import org.gemo.apex.extension.tool.*;
 import org.gemo.apex.kit.tool.ReadSkillResourceTool;
-import org.gemo.apex.runtime.skill.*;
 
 public final class ToolRegistry implements ToolProvider {
     private final Map<String, AgentTool> tools;
-    private final RuntimeSkillRegistry skills;
+    private final SkillProvider skills;
 
-    public ToolRegistry(List<AgentTool> input, RuntimeSkillRegistry skills) {
+    public ToolRegistry(List<AgentTool> input, SkillProvider skills) {
         this.skills = skills;
         Map<String, AgentTool> m = new LinkedHashMap<>();
         for (var t : List.copyOf(input)) {
