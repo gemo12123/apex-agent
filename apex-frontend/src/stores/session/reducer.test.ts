@@ -53,26 +53,13 @@ describe('session reducer', () => {
     expect(state.currentMode).toBe('react')
   })
 
-  it('creates and updates stages, invocations, and stage artifacts using message IDs', () => {
+  it('creates stages lazily for invocation and stage artifact events', () => {
     let state = createSessionViewModel()
     state = startAssistantMessage(state)
 
     state = applyEnvelope(state, {
-      event_type: 'PLAN_DECLARED',
-      context: { mode: 'plan-executor' },
-      messages: [
-        {
-          stage_id: 'stage-1',
-          stage_name: 'Collect context',
-          description: 'Inspect backend contracts',
-          status: 'PENDING',
-        },
-      ],
-    } satisfies SseEnvelope)
-
-    state = applyEnvelope(state, {
       event_type: 'INVOCATION_DECLARED',
-      context: { mode: 'plan-executor', stage_id: 'stage-1', executor: 'meeting_tool' },
+      context: { mode: 'react', stage_id: 'stage-1', executor: 'meeting_tool' },
       messages: [
         {
           invocation_id: 'invoke-42',
@@ -88,7 +75,7 @@ describe('session reducer', () => {
 
     state = applyEnvelope(state, {
       event_type: 'INVOCATION_CHANGE',
-      context: { mode: 'plan-executor', stage_id: 'stage-1', executor: 'meeting_tool' },
+      context: { mode: 'react', stage_id: 'stage-1', executor: 'meeting_tool' },
       messages: [
         {
           invocation_id: 'invoke-42',
@@ -106,7 +93,7 @@ describe('session reducer', () => {
 
     state = applyEnvelope(state, {
       event_type: 'ARTIFACT_DECLARED',
-      context: { mode: 'plan-executor', stage_id: 'stage-1' },
+      context: { mode: 'react', stage_id: 'stage-1' },
       messages: [
         {
           scope: 'STAGE',
@@ -123,7 +110,7 @@ describe('session reducer', () => {
 
     state = applyEnvelope(state, {
       event_type: 'ARTIFACT_CHANGE',
-      context: { mode: 'plan-executor', stage_id: 'stage-1' },
+      context: { mode: 'react', stage_id: 'stage-1' },
       messages: [
         {
           scope: 'STAGE',
@@ -140,9 +127,9 @@ describe('session reducer', () => {
     const stage = state.stages[0]
     expect(stage).toMatchObject({
       id: 'stage-1',
-      name: 'Collect context',
-      description: 'Inspect backend contracts',
-      status: 'PENDING',
+      name: '执行阶段',
+      description: '',
+      status: 'RUNNING',
     })
     expect(stage.invocations).toEqual([
       {

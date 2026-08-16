@@ -10,7 +10,6 @@ import type {
   InvocationRecord,
   MessageRecord,
   PendingInterventionRecord,
-  PlanChangeMessage,
   StageRecord,
   SessionViewModel,
   SseEnvelope,
@@ -173,24 +172,6 @@ export function applyEnvelope(state: SessionViewModel, envelope: SseEnvelope): S
         }
       })
       return nextState
-    case 'PLAN_DECLARED':
-      nextState.status = 'streaming'
-      nextState.stages = envelope.messages.map((message) => {
-        const existingStage = nextState.stages.find((stage) => stage.id === message.stage_id)
-        return {
-          id: message.stage_id,
-          name: message.stage_name,
-          description: message.description,
-          status: message.status,
-          invocations: existingStage?.invocations ?? [],
-          artifacts: existingStage?.artifacts ?? [],
-        }
-      })
-      return nextState
-    case 'PLAN_CHANGE':
-      nextState.status = 'streaming'
-      envelope.messages.forEach((message) => applyPlanChange(nextState, message))
-      return nextState
     case 'INVOCATION_DECLARED':
       nextState.status = 'streaming'
       envelope.messages.forEach((message) => {
@@ -349,53 +330,6 @@ function ensureStage(state: SessionViewModel, stageId?: string): StageRecord {
 
   state.stages.push(stage)
   return stage
-}
-
-function applyPlanChange(state: SessionViewModel, message: PlanChangeMessage): void {
-  if (message.change_type === 'STATUS_CHANGE' && message.stage_id) {
-    const stage = ensureStage(state, message.stage_id)
-    if (message.status) {
-      stage.status = message.status
-    }
-    return
-  }
-
-  if (message.change_type === 'PLAN_CHANGE') {
-    if (message.operation === 'ADD_STAGE' && message.new_stage_id) {
-      const nextStage: StageRecord = {
-        id: message.new_stage_id,
-        name: message.stage_name ?? message.new_stage_id,
-        description: message.description ?? '',
-        status: message.status ?? 'PENDING',
-        invocations: [],
-        artifacts: [],
-      }
-
-      const targetIndex = state.stages.findIndex((stage) => stage.id === message.stage_id)
-      if (targetIndex >= 0) {
-        state.stages.splice(targetIndex + 1, 0, nextStage)
-      } else {
-        state.stages.push(nextStage)
-      }
-    }
-
-    if (message.operation === 'DELETE_STAGE' && message.stage_id) {
-      state.stages = state.stages.filter((stage) => stage.id !== message.stage_id)
-    }
-
-    if (message.operation === 'UPDATE_STAGE' && message.stage_id) {
-      const stage = ensureStage(state, message.stage_id)
-      if (message.stage_name) {
-        stage.name = message.stage_name
-      }
-      if (message.description) {
-        stage.description = message.description
-      }
-      if (message.status) {
-        stage.status = message.status
-      }
-    }
-  }
 }
 
 function createInvocationRecord(

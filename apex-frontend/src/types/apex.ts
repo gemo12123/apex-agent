@@ -39,23 +39,6 @@ export interface TaskErrorDetail {
   message: string
 }
 
-export interface PlanMessage {
-  stage_id: string
-  stage_name: string
-  description: string
-  status: string
-}
-
-export interface PlanChangeMessage {
-  change_type: 'STATUS_CHANGE' | 'PLAN_CHANGE' | 'TRY_REPLAN'
-  stage_id?: string
-  status?: string
-  operation?: 'ADD_STAGE' | 'DELETE_STAGE' | 'UPDATE_STAGE'
-  stage_name?: string
-  description?: string
-  new_stage_id?: string
-}
-
 export interface InvocationDeclaredDetail {
   invocation_id: string
   name: string
@@ -156,8 +139,6 @@ export interface SseEnvelopeBase<TType extends string, TMessages> {
 
 export type StreamThinkEnvelope = SseEnvelopeBase<'STREAM_THINK', StreamMessage>
 export type StreamContentEnvelope = SseEnvelopeBase<'STREAM_CONTENT', StreamMessage>
-export type PlanDeclaredEnvelope = SseEnvelopeBase<'PLAN_DECLARED', PlanMessage>
-export type PlanChangeEnvelope = SseEnvelopeBase<'PLAN_CHANGE', PlanChangeMessage>
 export type InvocationDeclaredEnvelope = SseEnvelopeBase<'INVOCATION_DECLARED', InvocationDeclaredDetail>
 export type InvocationChangeEnvelope = SseEnvelopeBase<'INVOCATION_CHANGE', InvocationChangeDetail>
 export type ArtifactDeclaredEnvelope = SseEnvelopeBase<'ARTIFACT_DECLARED', ArtifactDeclaredDetail>
@@ -173,8 +154,6 @@ export type EndEnvelope = SseEnvelopeBase<'END', never>
 export type SseEnvelope =
   | StreamThinkEnvelope
   | StreamContentEnvelope
-  | PlanDeclaredEnvelope
-  | PlanChangeEnvelope
   | InvocationDeclaredEnvelope
   | InvocationChangeEnvelope
   | ArtifactDeclaredEnvelope

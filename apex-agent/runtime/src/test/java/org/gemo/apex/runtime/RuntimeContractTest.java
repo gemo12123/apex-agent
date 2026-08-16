@@ -70,14 +70,6 @@ class RuntimeContractTest {
                     AgentRunOutcome.Completed.class,
                     runtime.newAgent(new AgentRequest("s", "default", "u", "q")).run());
             assertEquals(1, events.stream().filter(EndMessage.class::isInstance).count());
-            assertTrue(
-                    events.stream()
-                            .noneMatch(
-                                    event ->
-                                            event instanceof PlanDeclaredMessage
-                                                    || event instanceof PlanChangeMessage
-                                                    || event instanceof TaskThinkDeclaredMessage
-                                                    || event instanceof TaskThinkChangeMessage));
             assertEquals(0, runtime.activeExecutionCount());
         }
     }

@@ -17,7 +17,7 @@ describe('useSessionStore', () => {
     setApexApiClientForTesting(createApexApiClient())
   })
 
-  it('builds a plan-executor session from streamed envelopes', async () => {
+  it('builds a session from invocation and artifact envelopes', async () => {
     const requests: ChatRequest[] = []
     const mockClient: ApexApiClient = {
       async fetchAgents() {
@@ -28,20 +28,8 @@ describe('useSessionStore', () => {
 
         const envelopes: SseEnvelope[] = [
           {
-            event_type: 'PLAN_DECLARED',
-            context: { mode: 'plan-executor' },
-            messages: [
-              {
-                stage_id: 'stage-1',
-                stage_name: 'Collect context',
-                description: 'Read docs',
-                status: 'PENDING',
-              },
-            ],
-          },
-          {
             event_type: 'INVOCATION_DECLARED',
-            context: { mode: 'plan-executor', stage_id: 'stage-1', executor: 'contacts_tool' },
+            context: { mode: 'react', stage_id: 'stage-1', executor: 'contacts_tool' },
             messages: [
               {
                 invocation_id: 'invoke-1',
@@ -56,7 +44,7 @@ describe('useSessionStore', () => {
           },
           {
             event_type: 'INVOCATION_CHANGE',
-            context: { mode: 'plan-executor', stage_id: 'stage-1', executor: 'contacts_tool' },
+            context: { mode: 'react', stage_id: 'stage-1', executor: 'contacts_tool' },
             messages: [
               {
                 invocation_id: 'invoke-1',
@@ -68,7 +56,7 @@ describe('useSessionStore', () => {
           },
           {
             event_type: 'ARTIFACT_DECLARED',
-            context: { mode: 'plan-executor', stage_id: 'stage-1' },
+            context: { mode: 'react', stage_id: 'stage-1' },
             messages: [
               {
                 scope: 'STAGE',
@@ -84,7 +72,7 @@ describe('useSessionStore', () => {
           },
           {
             event_type: 'END',
-            context: { mode: 'plan-executor', stage_id: 'stage-1', execution_status: 'COMPLETED' },
+            context: { mode: 'react', stage_id: 'stage-1', execution_status: 'COMPLETED' },
             messages: [],
           },
         ]

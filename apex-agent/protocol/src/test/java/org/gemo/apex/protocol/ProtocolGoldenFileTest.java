@@ -24,13 +24,9 @@ import org.gemo.apex.protocol.event.EndMessage;
 import org.gemo.apex.protocol.event.HumanInterventionMessage;
 import org.gemo.apex.protocol.event.InvocationChangeMessage;
 import org.gemo.apex.protocol.event.InvocationDeclaredMessage;
-import org.gemo.apex.protocol.event.PlanChangeMessage;
-import org.gemo.apex.protocol.event.PlanDeclaredMessage;
 import org.gemo.apex.protocol.event.StreamContentMessage;
 import org.gemo.apex.protocol.event.StreamThinkMessage;
 import org.gemo.apex.protocol.event.TaskErrorMessage;
-import org.gemo.apex.protocol.event.TaskThinkChangeMessage;
-import org.gemo.apex.protocol.event.TaskThinkDeclaredMessage;
 import org.gemo.apex.protocol.request.SessionStateView;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -125,11 +121,6 @@ class ProtocolGoldenFileTest {
                 Arguments.of("human-intervention.json", HumanInterventionMessage.class, true),
                 Arguments.of("task-error.json", TaskErrorMessage.class, true),
                 Arguments.of("end.json", EndMessage.class, false),
-                Arguments.of("plan-declared.compat.json", PlanDeclaredMessage.class, false),
-                Arguments.of("plan-change.compat.json", PlanChangeMessage.class, false),
-                Arguments.of(
-                        "task-think-declared.compat.json", TaskThinkDeclaredMessage.class, false),
-                Arguments.of("task-think-change.compat.json", TaskThinkChangeMessage.class, false),
                 Arguments.of("stream-think.compat.json", StreamThinkMessage.class, false),
                 Arguments.of("invocation-declared.json", InvocationDeclaredMessage.class, true),
                 Arguments.of("invocation-change.json", InvocationChangeMessage.class, true),
