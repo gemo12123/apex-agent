@@ -184,10 +184,8 @@ public final class ModelRequestPreparer {
             return null;
         }
         List<AgentMessageEntry> retained =
-                retainedTailWithoutSplittingToolGroup(activeMessages, actualRetainCount);
-        if (retained.size() == activeMessages.size()) {
-            return null;
-        }
+                activeMessages.subList(
+                        activeMessages.size() - actualRetainCount, activeMessages.size());
         ConversationCompactionRequest request =
                 new ConversationCompactionRequest(
                         context.snapshot().sessionId(),
@@ -197,44 +195,6 @@ public final class ModelRequestPreparer {
                         context.conversationWindow().summary(),
                         Map.of());
         return new CompressionState(base, activeMessages, check, request);
-    }
-
-    private List<AgentMessageEntry> retainedTailWithoutSplittingToolGroup(
-            List<AgentMessageEntry> messages, int retainCount) {
-        int start = messages.size() - retainCount;
-        while (start > 0 && splitsToolGroup(messages, start)) {
-            start--;
-        }
-        return messages.subList(start, messages.size());
-    }
-
-    private boolean splitsToolGroup(List<AgentMessageEntry> messages, int boundary) {
-        Map<String, Integer> callIndexes = new HashMap<>();
-        Map<String, Integer> resultIndexes = new HashMap<>();
-        for (int index = 0; index < messages.size(); index++) {
-            AgentMessageEntry message = messages.get(index);
-            if (message.messageType() == MessageType.TOOL_CALLS) {
-                Object raw = message.payload().get("toolCalls");
-                if (raw instanceof List<?> calls) {
-                    for (Object value : calls) {
-                        if (value instanceof Map<?, ?> call
-                                && call.get("toolCallId") instanceof String id) {
-                            callIndexes.put(id, index);
-                        }
-                    }
-                }
-            } else if (message.messageType() == MessageType.TOOL_RESULT
-                    && message.payload().get("toolCallId") instanceof String id) {
-                resultIndexes.put(id, index);
-            }
-        }
-        for (Map.Entry<String, Integer> call : callIndexes.entrySet()) {
-            Integer resultIndex = resultIndexes.get(call.getKey());
-            if (resultIndex != null && (call.getValue() < boundary) != (resultIndex < boundary)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private void validatePatchedRequest(

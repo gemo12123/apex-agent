@@ -226,9 +226,7 @@ public final class LifecycleDispatcher {
             HookPoint point, ApexAgentContext context, HookMutations mutations) {
         applyToolActivation(context, mutations.toolActivationDelta());
         if (!mutations.messageOperations().isEmpty()) {
-            context.mutateConversation(
-                    mutations.messageOperations(),
-                    point == HookPoint.PRE_TOOL_CALL || point == HookPoint.POST_TOOL_CALL);
+            context.mutateConversation(mutations.messageOperations());
         }
         if (point == HookPoint.PRE_MODEL_CALL) {
             synchronizePreModelRequest(context);

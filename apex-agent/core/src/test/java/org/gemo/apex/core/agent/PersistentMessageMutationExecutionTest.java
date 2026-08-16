@@ -2,7 +2,6 @@ package org.gemo.apex.core.agent;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -14,13 +13,15 @@ import org.gemo.apex.common.hook.HookTypeDescriptor;
 import org.gemo.apex.common.hook.context.PostModelCallContext;
 import org.gemo.apex.common.hook.context.PreMessageCompressionContext;
 import org.gemo.apex.common.hook.context.PreModelCallContext;
-import org.gemo.apex.common.hook.context.TurnStartContext;
+import org.gemo.apex.common.hook.context.PreToolCallContext;
 import org.gemo.apex.common.hook.operation.*;
 import org.gemo.apex.common.hook.result.*;
 import org.gemo.apex.common.message.AgentMessageEntry;
 import org.gemo.apex.common.message.MessageRole;
 import org.gemo.apex.common.message.MessageType;
 import org.gemo.apex.common.model.ModelResponse;
+import org.gemo.apex.common.tool.ToolCall;
+import org.gemo.apex.common.tool.ToolResult;
 import org.gemo.apex.extension.hook.LifecycleHook;
 import org.junit.jupiter.api.Test;
 
@@ -186,88 +187,59 @@ class PersistentMessageMutationExecutionTest {
     }
 
     @Test
-    void appliesWholeToolGroupRemovalAndRejectsOrphaningBatchAtomically() {
-        CoreTestFixture success = fixtureWithHistoricalToolGroup();
-        success.hooks.put(
-                "remove-group",
-                turnStartHook(
-                        context ->
-                                new ContinueLoop(
-                                        new HookMutations(
-                                                List.of(
-                                                        new RemoveMessage(
-                                                                "remove-call", "historical-call"),
-                                                        new RemoveMessage(
-                                                                "remove-result",
-                                                                "historical-result")),
-                                                ToolActivationDelta.none()))));
-        success.definition =
-                success.definition(
-                        Map.of(HookPoint.TURN_START, List.of(binding("remove-group", 0))),
-                        Set.of(),
-                        Set.of());
-        success.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
-
-        assertInstanceOf(AgentRunOutcome.Completed.class, create(success, "新问题").run());
-        assertTrue(
-                success.conversation.stream()
-                        .noneMatch(message -> message.entryId().startsWith("historical-")));
-
-        CoreTestFixture failure = fixtureWithHistoricalToolGroup();
-        failure.hooks.put(
-                "remove-result-only",
-                turnStartHook(
-                        context ->
-                                new ContinueLoop(
-                                        mutations(
-                                                new RemoveMessage(
-                                                        "remove-result", "historical-result")))));
-        failure.definition =
-                failure.definition(
-                        Map.of(HookPoint.TURN_START, List.of(binding("remove-result-only", 0))),
-                        Set.of(),
-                        Set.of());
-
-        assertInstanceOf(AgentRunOutcome.Failed.class, create(failure, "新问题").run());
-        assertEquals(
-                2,
-                failure.conversation.stream()
-                        .filter(message -> message.entryId().startsWith("historical-"))
-                        .count());
-    }
-
-    private CoreTestFixture fixtureWithHistoricalToolGroup() {
+    void allowsHookToEditCurrentToolGroupWithoutCoreIntegrityValidation() {
         CoreTestFixture fixture = new CoreTestFixture();
-        fixture.modelResponses.add(new ModelResponse("初始化", List.of(), Map.of()));
-        assertInstanceOf(AgentRunOutcome.Completed.class, create(fixture, "初始化").run());
-        fixture.conversation.clear();
-        fixture.modelRequests.clear();
-        fixture.modelCalls = 0;
-        fixture.conversation.add(
-                new AgentMessageEntry(
-                        "historical-call",
-                        "session-1",
-                        1,
-                        0,
-                        MessageRole.ASSISTANT,
-                        MessageType.TOOL_CALLS,
-                        "",
+        fixture.tool(
+                "tool",
+                (call, context, observer) ->
+                        new ToolResult(call.toolCallId(), call.name(), "工具结果", Map.of()));
+        fixture.hooks.put(
+                "remove-current-call",
+                preToolHook(
+                        context -> {
+                            AgentMessageEntry currentCall =
+                                    fixture.conversation.stream()
+                                            .filter(
+                                                    message ->
+                                                            message.messageType()
+                                                                    == MessageType.TOOL_CALLS)
+                                            .findFirst()
+                                            .orElseThrow();
+                            return new ContinuePreToolCall(
+                                    mutations(
+                                            new RemoveMessage(
+                                                    "remove-current-call",
+                                                    currentCall.entryId())),
+                                    new ToolCallPatch(context.toolCall().arguments()));
+                        }));
+        fixture.definition =
+                fixture.definition(
                         Map.of(
-                                "toolCalls",
-                                List.of(Map.of("toolCallId", "old-call", "name", "old-tool"))),
-                        Instant.EPOCH));
-        fixture.conversation.add(
-                new AgentMessageEntry(
-                        "historical-result",
-                        "session-1",
-                        1,
-                        1,
-                        MessageRole.TOOL,
-                        MessageType.TOOL_RESULT,
-                        "旧结果",
-                        Map.of("toolCallId", "old-call", "toolName", "old-tool"),
-                        Instant.EPOCH));
-        return fixture;
+                                HookPoint.PRE_TOOL_CALL,
+                                List.of(binding("remove-current-call", 0))),
+                        Set.of("tool"),
+                        Set.of("tool"));
+        fixture.modelResponses.add(
+                new ModelResponse(
+                        "",
+                        List.of(new ToolCall("call-1", "tool", 0, Map.of(), Map.of())),
+                        Map.of()));
+        fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
+
+        AgentRunOutcome outcome = create(fixture, "执行工具").run();
+
+        assertInstanceOf(AgentRunOutcome.Completed.class, outcome);
+        assertTrue(
+                fixture.conversation.stream()
+                        .noneMatch(message -> message.messageType() == MessageType.TOOL_CALLS));
+        assertTrue(
+                fixture.conversation.stream()
+                        .anyMatch(message -> message.messageType() == MessageType.TOOL_RESULT));
+        assertEquals(
+                List.of(MessageType.TEXT, MessageType.TOOL_RESULT),
+                fixture.modelRequests.getLast().messages().stream()
+                        .map(AgentMessageEntry::messageType)
+                        .toList());
     }
 
     private ApexAgent create(CoreTestFixture fixture, String query) {
@@ -316,13 +288,13 @@ class PersistentMessageMutationExecutionTest {
                 action);
     }
 
-    private LifecycleHook<TurnStartContext, LoopHookResult> turnStartHook(
-            java.util.function.Function<TurnStartContext, LoopHookResult> action) {
+    private LifecycleHook<PreToolCallContext, PreToolCallHookResult> preToolHook(
+            java.util.function.Function<PreToolCallContext, PreToolCallHookResult> action) {
         return hook(
-                "turn-start",
-                HookPoint.TURN_START,
-                TurnStartContext.class,
-                LoopHookResult.class,
+                "pre-tool",
+                HookPoint.PRE_TOOL_CALL,
+                PreToolCallContext.class,
+                PreToolCallHookResult.class,
                 action);
     }
 

@@ -157,8 +157,8 @@ Hook `apply()` 抛出普通 `RuntimeException` 时，core 记录 warning、把 T
 - descriptor、Context 或 Result 类型不匹配。
 - 返回 `null` 或错误的结果族。
 - 启用 `availableTools` 之外的工具。
-- 消息操作目标不存在、已压缩、属于 `SUMMARY` 或破坏工具消息配对。
-- ToolCall 与 ToolResult 的 ID 或工具名不关联。
+- 消息操作目标不存在、已压缩或属于 `SUMMARY`。
+- 专用 `ToolCallPatch` / `ToolResultPatch` 修改后的 ID 或工具名不关联。
 - POST_MODEL_CALL 改变 ToolCall 数量、ID 或工具名。
 - TURN_END 返回 Continue 以外的结果。
 
@@ -178,7 +178,8 @@ Hook `apply()` 抛出普通 `RuntimeException` 时，core 记录 warning、把 T
 - 每个 Hook 结果中的操作按声明顺序组成一个原子 `ConversationWriteBatch`；任一目标非法时整个批次失败。
 - Append 由 core 分配 `entryId/sessionId/turnNo/sortNo/createdTime`。Replace 只替换 role、messageType、content、payload，保留目标身份与顺序字段。Remove 物理删除，不重排或复用 `sortNo`。
 - `operationId` 只在单个 Hook 结果中唯一，用于契约校验和错误定位，不提供跨 execution 幂等。
-- `SUMMARY`、已被摘要覆盖的原始消息和当前正在执行或挂起的工具组不可编辑。工具协议消息可以编辑，但批次结束后必须保持 ToolCall/ToolResult 一一配对。
+- `SUMMARY` 和已被摘要覆盖的原始消息不可编辑。当前正在执行或挂起的工具消息与普通活动消息遵循相同规则，可以按 entryId Replace 或 Remove。
+- Core 不解析 Hook 编辑后的 ToolCall/ToolResult 消息关系，也不锁定当前工具组；是否保持工具协议完整性由声明操作的 Hook 自己负责。
 - TURN_START、ITERATION_START 及模型/工具调用后的节点所做编辑会立即写入仓储和 Context 窗口，下一次模型调用自然可见。
 - PRE_MODEL_CALL 的每个 Binding 提交后都从最新窗口重建 `ModelRequest.messages`，并按最新启用工具重建 `tools`；后续 Binding 因而看到前序持久化结果。
 - 调用 ModelGateway 前，core 校验 `ModelRequest.messages` 与当前 `ConversationWindow.messages` 完全一致，工具定义与当前启用工具完全一致。
@@ -456,7 +457,7 @@ hooks:
 3. 是否同时完成 runtime/platform 注册与 Agent Binding。
 4. `order`、Binding ID 和 tools 匹配是否明确且稳定。
 5. Continue Patch 是否保留 ToolCall/ToolResult 关联不变量。
-6. MessageOperation 的目标 entryId 是否仍在活动窗口，整个批次是否保持工具消息一一配对。
+6. MessageOperation 的目标 entryId 是否仍在活动窗口；若编辑工具消息，Hook 是否自行维持其所需的协议语义。
 7. EndTurn 前后哪些模型消息、压缩结果或工具结果已经提交。
 8. PRE_TOOL_CALL 是否覆盖多工具批次、Block、直接结果、人工挂起、恢复和再次介入。
 9. POST_TOOL_CALL Skill 状态是否只在工具结果提交成功后生效。

@@ -64,8 +64,8 @@ class LifecycleCoverageTest {
         assertEquals(1, counts.get(HookPoint.AGENT_BUILD));
         assertEquals(1, counts.get(HookPoint.TURN_START));
         assertEquals(2, counts.get(HookPoint.ITERATION_START));
-        assertEquals(1, counts.get(HookPoint.PRE_MESSAGE_COMPRESSION));
-        assertEquals(1, counts.get(HookPoint.POST_MESSAGE_COMPRESSION));
+        assertEquals(2, counts.get(HookPoint.PRE_MESSAGE_COMPRESSION));
+        assertEquals(2, counts.get(HookPoint.POST_MESSAGE_COMPRESSION));
         assertEquals(2, counts.get(HookPoint.PRE_MODEL_CALL));
         assertEquals(2, counts.get(HookPoint.POST_MODEL_CALL));
         assertEquals(1, counts.get(HookPoint.PRE_TOOL_CALL));

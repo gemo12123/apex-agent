@@ -19,30 +19,24 @@ class ApexAgentContextConversationTest {
     void keepsWindowEqualToFreshDatabaseProjectionAfterAppendAndCompaction() {
         ContextScenario scenario = context();
         ApexAgentContext context = scenario.context();
-        AgentMessageEntry toolCall =
-                toolCall(
-                        "stable-call",
-                        context.allocateSortNo(),
-                        Instant.parse("2026-08-01T00:00:30Z"));
         AgentMessageEntry toolResult =
                 message(
                         "stable-result",
                         context.allocateSortNo(),
                         Instant.parse("2026-08-01T00:01:00Z"));
 
-        context.appendConversation(List.of(toolCall, toolResult));
+        context.appendConversation(List.of(toolResult));
 
         assertEquals(loadWindow(scenario), context.conversationWindow());
         ConversationSummary summary =
                 new ConversationSummary(
                         "compaction-1", "累计摘要", 0, 0, 1, Instant.parse("2026-08-01T00:02:00Z"));
         context.compactConversation(
-                new ConversationCompactionCommit(
-                        "session-1", summary, List.of(toolCall, toolResult)));
+                new ConversationCompactionCommit("session-1", summary, List.of(toolResult)));
 
         assertEquals(loadWindow(scenario), context.conversationWindow());
         assertEquals(
-                List.of(MessageType.SUMMARY, MessageType.TOOL_CALLS, MessageType.TOOL_RESULT),
+                List.of(MessageType.SUMMARY, MessageType.TOOL_RESULT),
                 context.conversationWindow().messages().stream()
                         .map(AgentMessageEntry::messageType)
                         .toList());
@@ -113,19 +107,6 @@ class ApexAgentContextConversationTest {
                 MessageType.TOOL_RESULT,
                 "结果",
                 Map.of("toolCallId", "call-1", "toolName", "tool"),
-                createdTime);
-    }
-
-    private AgentMessageEntry toolCall(String entryId, long sortNo, Instant createdTime) {
-        return new AgentMessageEntry(
-                entryId,
-                "session-1",
-                1,
-                sortNo,
-                MessageRole.ASSISTANT,
-                MessageType.TOOL_CALLS,
-                "",
-                Map.of("toolCalls", List.of(Map.of("toolCallId", "call-1", "name", "tool"))),
                 createdTime);
     }
 

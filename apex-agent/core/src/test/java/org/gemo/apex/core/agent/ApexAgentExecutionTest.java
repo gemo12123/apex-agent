@@ -358,7 +358,7 @@ class ApexAgentExecutionTest {
         assertInstanceOf(AgentRunOutcome.Completed.class, outcome);
         assertEquals(1, fixture.windowLoads);
         assertEquals(
-                List.of(MessageType.SUMMARY, MessageType.TOOL_CALLS, MessageType.TOOL_RESULT),
+                List.of(MessageType.SUMMARY, MessageType.TOOL_RESULT),
                 fixture.modelRequests.getLast().messages().stream()
                         .map(message -> message.messageType())
                         .toList());
