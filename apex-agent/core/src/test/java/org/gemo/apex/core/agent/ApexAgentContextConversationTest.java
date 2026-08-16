@@ -33,7 +33,7 @@ class ApexAgentContextConversationTest {
                         "compaction-1", "累计摘要", 0, 0, 1, Instant.parse("2026-08-01T00:02:00Z"));
         context.compactConversation(
                 new ConversationCompactionCommit(
-                        "session-1", summary, List.of(toolResult.entryId()), List.of(toolResult)));
+                        "session-1", summary, List.of(toolResult)));
 
         assertEquals(loadWindow(scenario), context.conversationWindow());
         assertEquals(

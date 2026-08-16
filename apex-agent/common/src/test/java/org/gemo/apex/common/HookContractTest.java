@@ -14,6 +14,8 @@ import org.gemo.apex.common.hook.context.PreToolCallContext;
 import org.gemo.apex.common.hook.operation.*;
 import org.gemo.apex.common.hook.result.*;
 import org.gemo.apex.common.intervention.QuestionSubmission;
+import org.gemo.apex.common.message.MessageRole;
+import org.gemo.apex.common.message.MessageType;
 import org.gemo.apex.common.shared.SharedDataStores;
 import org.gemo.apex.common.tool.ToolResult;
 import org.junit.jupiter.api.Test;
@@ -111,6 +113,46 @@ class HookContractTest {
         assertThrows(IllegalArgumentException.class, () -> new RemoveMessage("remove", -1));
         assertThrows(IllegalArgumentException.class, () -> new BlockTool(" "));
         assertThrows(IllegalArgumentException.class, () -> new ReturnToolResult(null));
+    }
+
+    /** 压缩后持久化追加拒绝SUMMARY与重复操作ID */
+    @Test
+    void postCompressionConversationAppendsRejectSummaryAndDuplicateOperationIds() {
+        List<AppendConversationMessage> allowed =
+                Stream.of(MessageType.values())
+                        .filter(type -> type != MessageType.SUMMARY)
+                        .map(
+                                type ->
+                                        new AppendConversationMessage(
+                                                type.name(),
+                                                MessageRole.SYSTEM,
+                                                type,
+                                                "补充",
+                                                Map.of()))
+                        .toList();
+        assertEquals(3, allowed.size());
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new AppendConversationMessage(
+                                "summary",
+                                MessageRole.SYSTEM,
+                                MessageType.SUMMARY,
+                                "非法摘要",
+                                Map.of()));
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new ContinuePostMessageCompression(
+                                HookMutations.none(),
+                                new ConversationCompactionResultPatch(
+                                        new org.gemo.apex.common.conversation
+                                                .ConversationCompactionResult(
+                                                "compaction",
+                                                "摘要",
+                                                List.of(),
+                                                Map.of())),
+                                List.of(allowed.getFirst(), allowed.getFirst())));
     }
 
     /** 工具调用上下文应暴露当前Binding与人工提交 */

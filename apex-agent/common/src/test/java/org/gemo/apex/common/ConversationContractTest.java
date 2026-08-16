@@ -135,7 +135,6 @@ class ConversationContractTest {
                         "session-1",
                         new ConversationSummary(
                                 "compaction-1", "summary", 0, 0, 1, CommonFixtures.NOW),
-                        List.of(source.getLast().entryId()),
                         List.of(source.getLast()));
 
         ConversationCompactionRequest requestCopy =
@@ -185,8 +184,34 @@ class ConversationContractTest {
                                 "session-1",
                                 new ConversationSummary(
                                         "compaction-1", "summary", 0, 0, 1, CommonFixtures.NOW),
-                                List.of("missing"),
-                                List.of(source.getLast())));
+                                List.of(foreign)));
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new ConversationCompactionCommit(
+                                "session-1",
+                                new ConversationSummary(
+                                        "compaction-1", "summary", 0, 0, 1, CommonFixtures.NOW),
+                                List.of(source.getFirst())));
+        AgentMessageEntry summaryMessage =
+                new AgentMessageEntry(
+                        "summary-entry",
+                        "session-1",
+                        1,
+                        1,
+                        MessageRole.SYSTEM,
+                        MessageType.SUMMARY,
+                        "summary",
+                        Map.of(),
+                        CommonFixtures.NOW);
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new ConversationCompactionCommit(
+                                "session-1",
+                                new ConversationSummary(
+                                        "compaction-1", "summary", 0, 0, 1, CommonFixtures.NOW),
+                                List.of(summaryMessage)));
     }
 
     private static List<AgentMessageEntry> messages() {

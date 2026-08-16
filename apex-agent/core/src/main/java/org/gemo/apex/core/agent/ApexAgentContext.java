@@ -13,6 +13,7 @@ import org.gemo.apex.common.execution.IterationStatus;
 import org.gemo.apex.common.execution.SessionStatus;
 import org.gemo.apex.common.execution.TurnStatus;
 import org.gemo.apex.common.hook.HookPoint;
+import org.gemo.apex.common.hook.operation.AppendConversationMessage;
 import org.gemo.apex.common.hook.operation.SkillActivationDelta;
 import org.gemo.apex.common.intervention.HumanSubmission;
 import org.gemo.apex.common.message.AgentMessageEntry;
@@ -43,6 +44,8 @@ public final class ApexAgentContext {
     private ToolResult toolResult;
     private ConversationCompactionRequest compactionRequest;
     private ConversationCompactionResult compactionResult;
+    private final List<AppendConversationMessage> pendingPostCompressionAppends =
+            new ArrayList<>();
     private Set<String> pendingActivatedSkills;
     private final Map<String, Object> humanResponses;
     private final SharedDataStore sharedData;
@@ -164,6 +167,20 @@ public final class ApexAgentContext {
 
     public void compactionResult(ConversationCompactionResult value) {
         compactionResult = value;
+    }
+
+    public void resetPostCompressionAppends() {
+        pendingPostCompressionAppends.clear();
+    }
+
+    public void stagePostCompressionAppends(List<AppendConversationMessage> appends) {
+        pendingPostCompressionAppends.addAll(List.copyOf(appends));
+    }
+
+    public List<AppendConversationMessage> drainPostCompressionAppends() {
+        List<AppendConversationMessage> appends = List.copyOf(pendingPostCompressionAppends);
+        pendingPostCompressionAppends.clear();
+        return appends;
     }
 
     public boolean resumedRequest() {
@@ -553,7 +570,7 @@ public final class ApexAgentContext {
         }
         List<AgentMessageEntry> messages = new ArrayList<>();
         messages.add(summaryMessage(commit.summary()));
-        messages.addAll(commit.finalMessages());
+        messages.addAll(commit.retainedMessages());
         messages.sort(Comparator.comparingLong(AgentMessageEntry::sortNo));
         return window(commit.summary(), messages);
     }

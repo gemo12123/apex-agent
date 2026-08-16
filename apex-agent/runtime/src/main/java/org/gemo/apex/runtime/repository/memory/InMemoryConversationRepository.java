@@ -36,7 +36,10 @@ public final class InMemoryConversationRepository implements ConversationReposit
                 : new ConversationHistory(
                         q.sessionId(),
                         Optional.ofNullable(s.summary),
-                        s.items.stream().map(this::copy).toList());
+                        s.items.stream()
+                                .filter(item -> !s.compactedEntryIds.contains(item.entryId()))
+                                .map(this::copy)
+                                .toList());
     }
 
     public void compact(ConversationCompactionCommit c) {
@@ -51,12 +54,51 @@ public final class InMemoryConversationRepository implements ConversationReposit
                                 "compactionId 内容冲突: " + c.summary().compactionId());
                     }
                     if (existing == null) {
+                        validateRetainedMessages(s, c);
                         s.compactions.put(c.summary().compactionId(), c);
                         s.summary = c.summary();
-                        c.finalMessages().stream().map(this::copy).forEach(s::add);
+                        s.items.stream()
+                                .filter(
+                                        item ->
+                                                item.sortNo()
+                                                                >= c.summary()
+                                                                        .sourceStartSortNo()
+                                                        && item.sortNo()
+                                                                <= c.summary()
+                                                                        .sourceEndSortNo())
+                                .map(AgentMessageEntry::entryId)
+                                .forEach(s.compactedEntryIds::add);
                     }
                     return s;
                 });
+    }
+
+    private void validateRetainedMessages(State state, ConversationCompactionCommit commit) {
+        Map<String, AgentMessageEntry> existing =
+                state.items.stream()
+                        .collect(
+                                java.util.stream.Collectors.toMap(
+                                        AgentMessageEntry::entryId, item -> item));
+        for (AgentMessageEntry retained : commit.retainedMessages()) {
+            AgentMessageEntry stored = existing.get(retained.entryId());
+            if (stored == null || !samePersistentMessage(stored, retained)) {
+                throw new IllegalStateException("保留消息不存在或内容冲突: " + retained.entryId());
+            }
+            if (state.compactedEntryIds.contains(retained.entryId())) {
+                throw new IllegalStateException("保留消息已经被压缩: " + retained.entryId());
+            }
+        }
+    }
+
+    private boolean samePersistentMessage(AgentMessageEntry left, AgentMessageEntry right) {
+        return left.entryId().equals(right.entryId())
+                && left.sessionId().equals(right.sessionId())
+                && left.turnNo() == right.turnNo()
+                && left.sortNo() == right.sortNo()
+                && left.role() == right.role()
+                && left.messageType() == right.messageType()
+                && Objects.equals(left.content(), right.content())
+                && left.payload().equals(right.payload());
     }
 
     private AgentMessageEntry copy(AgentMessageEntry e) {
@@ -66,12 +108,14 @@ public final class InMemoryConversationRepository implements ConversationReposit
     private static final class State {
         final List<AgentMessageEntry> items = new ArrayList<>();
         final Map<String, ConversationCompactionCommit> compactions = new HashMap<>();
+        final Set<String> compactedEntryIds = new HashSet<>();
         ConversationSummary summary;
 
         State copy() {
             var s = new State();
             s.items.addAll(items);
             s.compactions.putAll(compactions);
+            s.compactedEntryIds.addAll(compactedEntryIds);
             s.summary = summary;
             return s;
         }

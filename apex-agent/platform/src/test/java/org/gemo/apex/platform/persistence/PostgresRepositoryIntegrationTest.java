@@ -114,6 +114,30 @@ class PostgresRepositoryIntegrationTest {
                         Instant.now());
         conversationsA.append(List.of(entry));
         conversationsA.append(List.of(entry));
+        AgentMessageEntry retained =
+                new AgentMessageEntry(
+                        "retained-entry",
+                        "session-1",
+                        1,
+                        1,
+                        MessageRole.ASSISTANT,
+                        MessageType.TEXT,
+                        "保留消息",
+                        Map.of(),
+                        Instant.parse("2026-08-01T00:00:00.123456789Z"));
+        conversationsA.append(List.of(retained));
+        conversationsA.append(
+                List.of(
+                        new AgentMessageEntry(
+                                retained.entryId(),
+                                retained.sessionId(),
+                                retained.turnNo(),
+                                retained.sortNo(),
+                                retained.role(),
+                                retained.messageType(),
+                                retained.content(),
+                                retained.payload(),
+                                retained.createdTime().plusNanos(1))));
         assertEquals(
                 longText,
                 conversationsA
@@ -124,16 +148,75 @@ class PostgresRepositoryIntegrationTest {
         ConversationSummary summary =
                 new ConversationSummary("compaction-1", "累计摘要", 0, 0, 1, Instant.now());
         conversationsA.compact(
-                new ConversationCompactionCommit("session-1", summary, List.of(), List.of()));
+                new ConversationCompactionCommit("session-1", summary, List.of(retained)));
+        AgentMessageEntry hookAppend =
+                new AgentMessageEntry(
+                        "hook-entry",
+                        "session-1",
+                        1,
+                        2,
+                        MessageRole.SYSTEM,
+                        MessageType.TEXT,
+                        "Hook补充",
+                        Map.of(),
+                        Instant.now());
+        conversationsA.append(List.of(hookAppend));
         ConversationHistory history = conversationsA.load(new ConversationQuery("session-1"));
         assertEquals(summary.content(), history.summary().orElseThrow().content());
         assertEquals(
-                List.of("long-entry"),
+                List.of("retained-entry", "hook-entry"),
                 history.messages().stream().map(AgentMessageEntry::entryId).toList());
+        assertEquals(
+                3,
+                jdbc.queryForObject(
+                        "SELECT count(*) FROM apex_agent_dialogue_message WHERE session_id='session-1'",
+                        Integer.class));
         assertTrue(
                 jdbc.queryForObject(
                         "SELECT compacted FROM apex_agent_dialogue_message WHERE id='long-entry'",
                         Boolean.class));
+        assertFalse(
+                jdbc.queryForObject(
+                        "SELECT compacted FROM apex_agent_dialogue_message WHERE id='retained-entry'",
+                        Boolean.class));
+        assertFalse(
+                jdbc.queryForObject(
+                        "SELECT compacted FROM apex_agent_dialogue_message WHERE id='hook-entry'",
+                        Boolean.class));
+        IllegalStateException entryIdConflict =
+                assertThrows(
+                        IllegalStateException.class,
+                        () ->
+                                conversationsA.append(
+                                        List.of(
+                                                new AgentMessageEntry(
+                                                        retained.entryId(),
+                                                        retained.sessionId(),
+                                                        retained.turnNo(),
+                                                        retained.sortNo(),
+                                                        retained.role(),
+                                                        retained.messageType(),
+                                                        "冲突内容",
+                                                        retained.payload(),
+                                                        retained.createdTime()))));
+        assertTrue(entryIdConflict.getMessage().contains("entryId 冲突"));
+        IllegalStateException sortNoConflict =
+                assertThrows(
+                        IllegalStateException.class,
+                        () ->
+                                conversationsA.append(
+                                        List.of(
+                                                new AgentMessageEntry(
+                                                        "different-entry",
+                                                        retained.sessionId(),
+                                                        retained.turnNo(),
+                                                        retained.sortNo(),
+                                                        retained.role(),
+                                                        retained.messageType(),
+                                                        retained.content(),
+                                                        retained.payload(),
+                                                        retained.createdTime()))));
+        assertTrue(sortNoConflict.getMessage().contains("sortNo 冲突"));
 
         try (var processA = runtime(sessionsA, conversationsA, new CopyOnWriteArrayList<>())) {
             assertEquals(0, processA.activeExecutionCount());

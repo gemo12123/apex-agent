@@ -172,14 +172,17 @@ public final class LifecycleDispatcher {
             }
             case EndTurnPostToolCall value -> end(value.reason());
             case ContinuePreMessageCompression value -> {
+                validateCompressionMutations(value.mutations());
                 applyMutations(context, value.mutations());
                 context.compactionRequest(value.patch().replacement());
                 yield continued();
             }
             case EndTurnPreMessageCompression value -> end(value.reason());
             case ContinuePostMessageCompression value -> {
+                validateCompressionMutations(value.mutations());
                 applyMutations(context, value.mutations());
                 context.compactionResult(value.patch().replacement());
+                context.stagePostCompressionAppends(value.conversationAppends());
                 yield continued();
             }
             case EndTurnPostMessageCompression value -> end(value.reason());
@@ -187,6 +190,13 @@ public final class LifecycleDispatcher {
             default ->
                     throw new HookContractException("生命周期结果族不受支持: " + result.getClass().getName());
         };
+    }
+
+    private void validateCompressionMutations(HookMutations mutations) {
+        if (!mutations.messageOperations().isEmpty()) {
+            throw new HookContractException(
+                    "消息压缩 Hook 不支持通用 MessageOperation，请使用压缩专用契约");
+        }
     }
 
     /** 将消息、模型请求、工具调用和激活工具等补丁按既定顺序应用。 */

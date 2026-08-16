@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.Optional;
 import org.gemo.apex.common.message.AgentMessageEntry;
 
-/** Repository 返回的原始对话消息与当前累计摘要。 */
+/** Repository 返回的未压缩对话消息与当前累计摘要。 */
 public record ConversationHistory(
         String sessionId, Optional<ConversationSummary> summary, List<AgentMessageEntry> messages) {
     public ConversationHistory {

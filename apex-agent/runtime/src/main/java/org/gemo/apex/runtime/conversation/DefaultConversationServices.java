@@ -28,9 +28,19 @@ public final class DefaultConversationServices {
         return q -> {
             ConversationHistory history = r.load(q.query());
             List<AgentMessageEntry> messages = new ArrayList<>();
-            history.messages().stream()
-                    .filter(message -> !coveredBy(history.summary(), message.sortNo()))
-                    .forEach(messages::add);
+            history.summary()
+                    .ifPresent(
+                            summary -> {
+                                if (history.messages().stream()
+                                        .anyMatch(
+                                                message ->
+                                                        message.sortNo()
+                                                                <= summary.sourceEndSortNo())) {
+                                    throw new IllegalStateException(
+                                            "Repository 返回了摘要覆盖范围内的未压缩消息");
+                                }
+                            });
+            messages.addAll(history.messages());
             history.summary()
                     .map(summary -> summaryMessage(history.sessionId(), summary))
                     .ifPresent(messages::add);
@@ -122,12 +132,6 @@ public final class DefaultConversationServices {
         value.put("content", Objects.toString(message.content(), ""));
         value.put("payload", message.payload());
         return value;
-    }
-
-    private static boolean coveredBy(Optional<ConversationSummary> summary, long sortNo) {
-        return summary.isPresent()
-                && sortNo >= summary.get().sourceStartSortNo()
-                && sortNo <= summary.get().sourceEndSortNo();
     }
 
     private static AgentMessageEntry summaryMessage(String sessionId, ConversationSummary summary) {

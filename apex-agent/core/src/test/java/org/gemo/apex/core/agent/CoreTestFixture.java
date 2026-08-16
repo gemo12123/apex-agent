@@ -56,6 +56,7 @@ final class CoreTestFixture {
     boolean failSuspensionSave;
     int remainingSessionSaveFailures;
     boolean failToolResultAppend;
+    boolean failPostCompressionAppend;
 
     CoreTestFixture() {
         definition = definition(Map.of(), Set.of(), Set.of());
@@ -149,6 +150,11 @@ final class CoreTestFixture {
                 new ConversationRepository() {
                     @Override
                     public void append(List<AgentMessageEntry> entries) {
+                        if (failPostCompressionAppend
+                                && entries.stream()
+                                        .anyMatch(entry -> "Hook补充".equals(entry.content()))) {
+                            throw new IllegalStateException("post compression append failed");
+                        }
                         if (failToolResultAppend
                                 && entries.stream()
                                         .anyMatch(

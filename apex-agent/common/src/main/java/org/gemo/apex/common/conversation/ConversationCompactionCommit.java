@@ -11,35 +11,30 @@ import org.gemo.apex.common.message.AgentMessageEntry;
 public record ConversationCompactionCommit(
         String sessionId,
         ConversationSummary summary,
-        List<String> retainedEntryIds,
-        List<AgentMessageEntry> finalMessages) {
+        List<AgentMessageEntry> retainedMessages) {
     public ConversationCompactionCommit {
         sessionId = required(sessionId, "sessionId");
         summary = org.gemo.apex.common.support.DomainValues.nonNull(summary, "summary");
-        retainedEntryIds = immutableList(retainedEntryIds, "retainedEntryIds");
-        if (new HashSet<>(retainedEntryIds).size() != retainedEntryIds.size()) {
-            throw new IllegalArgumentException("retainedEntryIds 不能重复");
-        }
-        finalMessages = immutableList(finalMessages, "finalMessages");
-        Set<String> finalIds = new HashSet<>();
+        retainedMessages = immutableList(retainedMessages, "retainedMessages");
+        Set<String> retainedIds = new HashSet<>();
         long previousSortNo = -1;
-        for (AgentMessageEntry message : finalMessages) {
+        for (AgentMessageEntry message : retainedMessages) {
             if (!sessionId.equals(message.sessionId())) {
-                throw new IllegalArgumentException("finalMessages 必须属于 sessionId");
+                throw new IllegalArgumentException("retainedMessages 必须属于 sessionId");
             }
             if (message.sortNo() <= summary.sourceEndSortNo()) {
-                throw new IllegalArgumentException("finalMessages 必须位于摘要覆盖范围之后");
+                throw new IllegalArgumentException("retainedMessages 必须位于摘要覆盖范围之后");
             }
-            if (!finalIds.add(message.entryId())) {
-                throw new IllegalArgumentException("finalMessages.entryId 不能重复");
+            if (message.messageType() == org.gemo.apex.common.message.MessageType.SUMMARY) {
+                throw new IllegalArgumentException("retainedMessages 不能包含 SUMMARY");
+            }
+            if (!retainedIds.add(message.entryId())) {
+                throw new IllegalArgumentException("retainedMessages.entryId 不能重复");
             }
             if (message.sortNo() <= previousSortNo) {
-                throw new IllegalArgumentException("finalMessages 必须按 sortNo 严格递增");
+                throw new IllegalArgumentException("retainedMessages 必须按 sortNo 严格递增");
             }
             previousSortNo = message.sortNo();
-        }
-        if (!finalIds.containsAll(retainedEntryIds)) {
-            throw new IllegalArgumentException("retainedEntryIds 必须存在于 finalMessages");
         }
     }
 }

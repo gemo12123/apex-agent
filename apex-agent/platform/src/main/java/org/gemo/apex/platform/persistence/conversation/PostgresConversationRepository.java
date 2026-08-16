@@ -43,7 +43,8 @@ public class PostgresConversationRepository implements ConversationRepository {
                 jdbc.query(
                         """
                 SELECT id,session_id,turn_no,sort_no,role,message_type,content,payload,created_time
-                FROM apex_agent_dialogue_message WHERE session_id=? ORDER BY sort_no
+                 FROM apex_agent_dialogue_message
+                 WHERE session_id=? AND compacted=FALSE ORDER BY sort_no
                 """,
                         (rs, row) ->
                                 new AgentMessageEntry(
@@ -67,36 +68,47 @@ public class PostgresConversationRepository implements ConversationRepository {
     public void compact(ConversationCompactionCommit commit) {
         List<Summary> existing =
                 jdbc.query(
-                        "SELECT compaction_id,content,payload FROM apex_agent_dialogue_summary WHERE session_id=?",
-                        (rs, row) -> new Summary(rs.getString(1), rs.getString(2), rs.getString(3)),
+                        """
+                        SELECT compaction_id,content,payload,compacted_to_sort_no,source_turn_no
+                        FROM apex_agent_dialogue_summary WHERE session_id=?
+                        """,
+                        (rs, row) ->
+                                new Summary(
+                                        rs.getString(1),
+                                        rs.getString(2),
+                                        rs.getString(3),
+                                        rs.getLong(4),
+                                        rs.getLong(5)),
                         commit.sessionId());
         String payload =
                 JsonUtils.toJson(
                         new SummaryPayload(
                                 commit.summary().sourceStartSortNo(),
                                 commit.summary().sourceEndSortNo(),
-                                commit.retainedEntryIds(),
-                                commit.finalMessages()));
+                                commit.retainedMessages().stream()
+                                        .map(AgentMessageEntry::entryId)
+                                        .toList()));
         if (!existing.isEmpty()
                 && existing.getFirst().compactionId().equals(commit.summary().compactionId())) {
             if (!existing.getFirst().content().equals(commit.summary().content())
-                    || !existing.getFirst().payload().equals(payload)) {
+                    || !existing.getFirst().payload().equals(payload)
+                    || existing.getFirst().compactedToSortNo()
+                            != commit.summary().sourceEndSortNo()
+                    || existing.getFirst().sourceTurnNo() != commit.summary().sourceTurnNo()) {
                 throw new IllegalStateException(
                         "compactionId 内容冲突: " + commit.summary().compactionId());
             }
             return;
         }
+        validateRetainedMessages(commit);
         jdbc.update(
-                "UPDATE apex_agent_dialogue_message SET compacted=TRUE WHERE session_id=? AND sort_no BETWEEN ? AND ?",
+                """
+                UPDATE apex_agent_dialogue_message SET compacted=TRUE
+                WHERE session_id=? AND compacted=FALSE AND sort_no BETWEEN ? AND ?
+                """,
                 commit.sessionId(),
                 commit.summary().sourceStartSortNo(),
                 commit.summary().sourceEndSortNo());
-        for (AgentMessageEntry entry : commit.finalMessages()) {
-            store(entry);
-            jdbc.update(
-                    "UPDATE apex_agent_dialogue_message SET compacted=FALSE WHERE id=?",
-                    entry.entryId());
-        }
         Instant now = commit.summary().updatedTime();
         jdbc.update(
                 """
@@ -162,13 +174,63 @@ public class PostgresConversationRepository implements ConversationRepository {
         if (changed == 1) {
             return;
         }
-        List<AgentMessageEntry> existing =
-                jdbc.query(
-                        """
-                SELECT id,session_id,turn_no,sort_no,role,message_type,content,payload,created_time
-                FROM apex_agent_dialogue_message WHERE id=?
-                """,
-                        (rs, row) ->
+        List<StoredMessage> sameId = loadStoredMessages("id=?", entry.entryId());
+        if (!sameId.isEmpty()) {
+            if (samePersistentMessage(sameId.getFirst().entry(), entry)) {
+                return;
+            }
+            throw new IllegalStateException("消息 entryId 冲突: " + entry.entryId());
+        }
+        List<StoredMessage> sameSort =
+                loadStoredMessages(
+                        "session_id=? AND sort_no=?", entry.sessionId(), entry.sortNo());
+        if (!sameSort.isEmpty()) {
+            throw new IllegalStateException("消息 sortNo 冲突: " + entry.sortNo());
+        }
+        throw new IllegalStateException("消息写入冲突: " + entry.entryId());
+    }
+
+    private void validateRetainedMessages(ConversationCompactionCommit commit) {
+        if (commit.retainedMessages().isEmpty()) {
+            return;
+        }
+        String placeholders =
+                String.join(",", java.util.Collections.nCopies(commit.retainedMessages().size(), "?"));
+        List<Object> arguments = new java.util.ArrayList<>();
+        arguments.add(commit.sessionId());
+        commit.retainedMessages().stream()
+                .map(AgentMessageEntry::entryId)
+                .forEach(arguments::add);
+        List<StoredMessage> stored =
+                loadStoredMessages(
+                        "session_id=? AND id IN (" + placeholders + ")", arguments.toArray());
+        Map<String, StoredMessage> byId =
+                stored.stream()
+                        .collect(
+                                java.util.stream.Collectors.toMap(
+                                        item -> item.entry().entryId(), item -> item));
+        for (AgentMessageEntry retained : commit.retainedMessages()) {
+            StoredMessage existing = byId.get(retained.entryId());
+            if (existing == null || !samePersistentMessage(existing.entry(), retained)) {
+                throw new IllegalStateException(
+                        "保留消息不存在或内容冲突: " + retained.entryId());
+            }
+            if (existing.compacted()) {
+                throw new IllegalStateException("保留消息已经被压缩: " + retained.entryId());
+            }
+        }
+    }
+
+    private List<StoredMessage> loadStoredMessages(String condition, Object... arguments) {
+        return jdbc.query(
+                """
+                SELECT id,session_id,turn_no,sort_no,role,message_type,content,payload,
+                    compacted,created_time
+                FROM apex_agent_dialogue_message WHERE
+                """
+                        + condition,
+                (rs, row) ->
+                        new StoredMessage(
                                 new AgentMessageEntry(
                                         rs.getString("id"),
                                         rs.getString("session_id"),
@@ -181,17 +243,30 @@ public class PostgresConversationRepository implements ConversationRepository {
                                                 rs.getString("payload"),
                                                 new TypeReference<Map<String, Object>>() {}),
                                         rs.getTimestamp("created_time").toInstant()),
-                        entry.entryId());
-        if (existing.isEmpty() || !existing.getFirst().equals(entry)) {
-            throw new IllegalStateException("消息 entryId 或 sortNo 冲突: " + entry.entryId());
-        }
+                                rs.getBoolean("compacted")),
+                arguments);
     }
 
-    private record Summary(String compactionId, String content, String payload) {}
+    private boolean samePersistentMessage(AgentMessageEntry left, AgentMessageEntry right) {
+        return left.entryId().equals(right.entryId())
+                && left.sessionId().equals(right.sessionId())
+                && left.turnNo() == right.turnNo()
+                && left.sortNo() == right.sortNo()
+                && left.role() == right.role()
+                && left.messageType() == right.messageType()
+                && java.util.Objects.equals(left.content(), right.content())
+                && left.payload().equals(right.payload());
+    }
+
+    private record StoredMessage(AgentMessageEntry entry, boolean compacted) {}
+
+    private record Summary(
+            String compactionId,
+            String content,
+            String payload,
+            long compactedToSortNo,
+            long sourceTurnNo) {}
 
     private record SummaryPayload(
-            long sourceStartSortNo,
-            long sourceEndSortNo,
-            List<String> retainedEntryIds,
-            List<AgentMessageEntry> finalMessages) {}
+            long sourceStartSortNo, long sourceEndSortNo, List<String> retainedEntryIds) {}
 }

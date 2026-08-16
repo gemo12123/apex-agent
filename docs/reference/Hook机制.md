@@ -178,6 +178,7 @@ Hook `apply()` 抛出普通 `RuntimeException` 时，core 记录 warning、把 T
 - 它只修改请求级 `ApexAgentContext.modelRequest`。
 - 它不会直接追加、删除或替换 `ConversationRepository` 中的历史消息。
 - 当前点位还没有 ModelRequest 时，非空消息操作会触发契约错误；典型点位包括 TURN_START 和 ITERATION_START。
+- PRE/POST_MESSAGE_COMPRESSION 不接受通用 `MessageOperation`；需要在压缩后写入对话历史时，POST Hook 使用专用 `AppendConversationMessage`。
 - PRE_MODEL_CALL 会在应用通用 Mutation 后使用 `ModelRequestPatch.replacement` 替换整个请求，因此需要把最终消息变更合并进 replacement，不能只依赖通用消息操作。
 
 各专用 Patch 的边界：
@@ -265,7 +266,11 @@ Context 包含：
 
 Context 包含原始压缩消息和 `ConversationCompactionResult`。
 
-可以改写摘要、保留消息和 metadata。当前实现会在 POST Hook 后根据最终结果构造摘要并提交压缩；即使 Hook 返回 `EndTurnPostMessageCompression`，本次压缩仍先提交，然后才进入 Turn 收尾。
+可以改写摘要、保留消息选择和 metadata。最终保留消息必须是压缩来源中未经修改的连续尾部；Hook 不能借此重写已有消息。
+
+`ContinuePostMessageCompression.conversationAppends` 可声明压缩后持久化追加：除 `SUMMARY` 外允许现有消息类型。多个 Binding 的追加按 `(order, id)` 及各自列表顺序累积；core 在压缩成功后分配消息身份和顺序，并通过普通 Conversation `append()` 写穿。压缩与追加不是同一事务，追加失败时已提交的摘要和压缩标记不回滚。
+
+即使后续 POST Hook 返回 `EndTurnPostMessageCompression`，本次压缩及此前 Continue Hook 已声明的追加仍先提交，然后才进入 Turn 收尾。
 
 默认 Compactor 的内部摘要模型调用不进入主 ReAct 循环，也不会触发 PRE/POST_MODEL_CALL。
 
@@ -381,7 +386,7 @@ TURN_START 提前结束时尚未创建 Iteration，因此不会分发 ITERATION_
 - PRE_MODEL_CALL：不调用模型。
 - POST_MODEL_CALL：不提交当前助手消息。
 - PRE_MESSAGE_COMPRESSION：不执行压缩。
-- POST_MESSAGE_COMPRESSION：先提交压缩结果。
+- POST_MESSAGE_COMPRESSION：先提交压缩结果和此前声明的持久化追加。
 - PRE_TOOL_CALL：整批写固定结束结果。
 - POST_TOOL_CALL：先提交当前结果，再为剩余调用写固定结束结果。
 

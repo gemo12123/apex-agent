@@ -13,8 +13,11 @@ import org.gemo.apex.common.execution.SessionStatus;
 import org.gemo.apex.common.execution.TurnStatus;
 import org.gemo.apex.common.hook.*;
 import org.gemo.apex.common.hook.context.AgentBuildContext;
+import org.gemo.apex.common.hook.context.PostMessageCompressionContext;
 import org.gemo.apex.common.hook.context.PostToolCallContext;
 import org.gemo.apex.common.hook.context.PreToolCallContext;
+import org.gemo.apex.common.hook.operation.AppendConversationMessage;
+import org.gemo.apex.common.hook.operation.ConversationCompactionResultPatch;
 import org.gemo.apex.common.hook.operation.HookMutations;
 import org.gemo.apex.common.hook.operation.SkillActivationDelta;
 import org.gemo.apex.common.hook.operation.ToolActivationDelta;
@@ -22,9 +25,12 @@ import org.gemo.apex.common.hook.operation.ToolCallPatch;
 import org.gemo.apex.common.hook.operation.ToolResultPatch;
 import org.gemo.apex.common.hook.result.AgentBuildHookResult;
 import org.gemo.apex.common.hook.result.ContinueAgentBuild;
+import org.gemo.apex.common.hook.result.ContinuePostMessageCompression;
 import org.gemo.apex.common.hook.result.ContinuePostToolCall;
 import org.gemo.apex.common.hook.result.ContinuePreToolCall;
+import org.gemo.apex.common.hook.result.EndTurnPostMessageCompression;
 import org.gemo.apex.common.hook.result.PostToolCallHookResult;
+import org.gemo.apex.common.hook.result.PostMessageCompressionHookResult;
 import org.gemo.apex.common.hook.result.PreToolCallHookResult;
 import org.gemo.apex.common.message.MessageRole;
 import org.gemo.apex.common.message.MessageType;
@@ -356,6 +362,192 @@ class ApexAgentExecutionTest {
                 fixture.modelRequests.getLast().messages().stream()
                         .map(message -> message.messageType())
                         .toList());
+    }
+
+    /** POST压缩Hook按Binding顺序持久化追加并进入本次模型请求 */
+    @Test
+    void persistsPostCompressionHookAppendsInBindingOrderBeforeModelCall() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        fixture.compact = true;
+        fixture.hooks.put("append-a", postCompressionAppendHook("a", "第一条"));
+        fixture.hooks.put("append-b", postCompressionAppendHook("b", "第二条"));
+        fixture.definition =
+                fixture.definition(
+                        Map.of(
+                                HookPoint.POST_MESSAGE_COMPRESSION,
+                                List.of(
+                                        new HookBinding(
+                                                "b", "append-b", 20, true, List.of(), Map.of()),
+                                        new HookBinding(
+                                                "a", "append-a", 10, true, List.of(), Map.of()))),
+                        Set.of(),
+                        Set.of());
+        fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
+
+        AgentRunOutcome outcome = create(fixture).run();
+
+        assertInstanceOf(AgentRunOutcome.Completed.class, outcome);
+        assertEquals(
+                List.of("摘要", "第一条", "第二条"),
+                fixture.modelRequests.getFirst().messages().stream()
+                        .map(message -> message.content())
+                        .toList());
+        assertEquals(
+                List.of("你好", "第一条", "第二条", "完成"),
+                fixture.conversation.stream().map(message -> message.content()).toList());
+        assertTrue(
+                fixture.calls.indexOf("conversation.compact")
+                        < fixture.calls.lastIndexOf("conversation.append"));
+    }
+
+    /** 压缩后Hook追加失败不回滚已经提交的压缩 */
+    @Test
+    void keepsCommittedCompactionWhenPostCompressionAppendFails() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        fixture.compact = true;
+        fixture.hooks.put("append", postCompressionAppendHook("append", "Hook补充"));
+        fixture.definition =
+                fixture.definition(
+                        Map.of(
+                                HookPoint.POST_MESSAGE_COMPRESSION,
+                                List.of(
+                                        new HookBinding(
+                                                "append",
+                                                "append",
+                                                0,
+                                                true,
+                                                List.of(),
+                                                Map.of()))),
+                        Set.of(),
+                        Set.of());
+        fixture.modelResponses.add(new ModelResponse("不会调用", List.of(), Map.of()));
+        ApexAgent agent = create(fixture);
+        fixture.failPostCompressionAppend = true;
+
+        AgentRunOutcome outcome = agent.run();
+
+        assertInstanceOf(AgentRunOutcome.Failed.class, outcome);
+        assertNotNull(fixture.compactionCommit);
+        assertNotNull(fixture.summary);
+        assertTrue(
+                fixture.conversation.stream()
+                        .noneMatch(message -> "Hook补充".equals(message.content())));
+        assertEquals(SessionStatus.FAILED, agent.snapshot().status());
+        assertEquals(0, fixture.modelCalls);
+    }
+
+    /** 后续POST压缩Hook结束Turn时保留此前Hook声明的持久化追加 */
+    @Test
+    void persistsEarlierPostCompressionAppendsBeforeLaterHookEndsTurn() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        fixture.compact = true;
+        fixture.hooks.put("append", postCompressionAppendHook("append", "Hook补充"));
+        fixture.hooks.put(
+                "end",
+                new LifecycleHook<
+                        PostMessageCompressionContext, PostMessageCompressionHookResult>() {
+                    @Override
+                    public String name() {
+                        return "postCompressionEnd";
+                    }
+
+                    @Override
+                    public HookTypeDescriptor descriptor() {
+                        return new HookTypeDescriptor(
+                                HookPoint.POST_MESSAGE_COMPRESSION,
+                                PostMessageCompressionContext.class,
+                                PostMessageCompressionHookResult.class);
+                    }
+
+                    @Override
+                    public PostMessageCompressionHookResult apply(
+                            PostMessageCompressionContext context) {
+                        return new EndTurnPostMessageCompression("结束");
+                    }
+                });
+        fixture.definition =
+                fixture.definition(
+                        Map.of(
+                                HookPoint.POST_MESSAGE_COMPRESSION,
+                                List.of(
+                                        new HookBinding(
+                                                "append",
+                                                "append",
+                                                0,
+                                                true,
+                                                List.of(),
+                                                Map.of()),
+                                        new HookBinding(
+                                                "end", "end", 10, true, List.of(), Map.of()))),
+                        Set.of(),
+                        Set.of());
+
+        AgentRunOutcome outcome = create(fixture).run();
+
+        assertInstanceOf(AgentRunOutcome.EndedByHook.class, outcome);
+        assertNotNull(fixture.compactionCommit);
+        assertTrue(
+                fixture.conversation.stream()
+                        .anyMatch(message -> "Hook补充".equals(message.content())));
+        assertEquals(0, fixture.modelCalls);
+    }
+
+    /** POST压缩Hook不能替换为其他压缩请求的结果 */
+    @Test
+    void rejectsPostCompressionResultWithDifferentCompactionId() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        fixture.compact = true;
+        fixture.hooks.put(
+                "replace-result",
+                new LifecycleHook<
+                        PostMessageCompressionContext, PostMessageCompressionHookResult>() {
+                    @Override
+                    public String name() {
+                        return "replaceCompressionResult";
+                    }
+
+                    @Override
+                    public HookTypeDescriptor descriptor() {
+                        return new HookTypeDescriptor(
+                                HookPoint.POST_MESSAGE_COMPRESSION,
+                                PostMessageCompressionContext.class,
+                                PostMessageCompressionHookResult.class);
+                    }
+
+                    @Override
+                    public PostMessageCompressionHookResult apply(
+                            PostMessageCompressionContext context) {
+                        return new ContinuePostMessageCompression(
+                                HookMutations.none(),
+                                new ConversationCompactionResultPatch(
+                                        new org.gemo.apex.common.conversation
+                                                .ConversationCompactionResult(
+                                                "other-compaction",
+                                                context.result().summary(),
+                                                context.result().retainedMessages(),
+                                                context.result().metadata())));
+                    }
+                });
+        fixture.definition =
+                fixture.definition(
+                        Map.of(
+                                HookPoint.POST_MESSAGE_COMPRESSION,
+                                List.of(
+                                        new HookBinding(
+                                                "replace-result",
+                                                "replace-result",
+                                                0,
+                                                true,
+                                                List.of(),
+                                                Map.of()))),
+                        Set.of(),
+                        Set.of());
+
+        AgentRunOutcome outcome = create(fixture).run();
+
+        assertInstanceOf(AgentRunOutcome.Failed.class, outcome);
+        assertNull(fixture.compactionCommit);
+        assertEquals(0, fixture.modelCalls);
     }
 
     /** 关闭压缩时跳过策略Hook执行和持久化 */
@@ -705,6 +897,38 @@ class ApexAgentExecutionTest {
                         new ToolResultPatch(
                                 context.toolResult().content(), context.toolResult().metadata()),
                         new SkillActivationDelta(Set.of(skillName), Set.of()));
+            }
+        };
+    }
+
+    private LifecycleHook<PostMessageCompressionContext, PostMessageCompressionHookResult>
+            postCompressionAppendHook(String operationId, String content) {
+        return new LifecycleHook<>() {
+            @Override
+            public String name() {
+                return "postCompressionAppend";
+            }
+
+            @Override
+            public HookTypeDescriptor descriptor() {
+                return new HookTypeDescriptor(
+                        HookPoint.POST_MESSAGE_COMPRESSION,
+                        PostMessageCompressionContext.class,
+                        PostMessageCompressionHookResult.class);
+            }
+
+            @Override
+            public PostMessageCompressionHookResult apply(PostMessageCompressionContext context) {
+                return new ContinuePostMessageCompression(
+                        HookMutations.none(),
+                        new ConversationCompactionResultPatch(context.result()),
+                        List.of(
+                                new AppendConversationMessage(
+                                        operationId,
+                                        MessageRole.SYSTEM,
+                                        MessageType.TEXT,
+                                        content,
+                                        Map.of())));
             }
         };
     }

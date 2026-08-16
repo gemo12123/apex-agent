@@ -150,7 +150,6 @@ class ExtensionApiCompileTest {
                 new ConversationCompactionCommit(
                         "session",
                         new ConversationSummary("compaction-1", "摘要", 0, 0, 1, Instant.EPOCH),
-                        List.of("entry-1"),
                         List.of(entry));
 
         repository.append(List.of(entry));

@@ -6,6 +6,7 @@ import org.gemo.apex.common.conversation.ConversationCompactionResult;
 import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.common.hook.context.PostMessageCompressionContext;
 import org.gemo.apex.common.hook.context.PreMessageCompressionContext;
+import org.gemo.apex.common.hook.operation.AppendConversationMessage;
 import org.gemo.apex.common.message.AgentMessageEntry;
 import org.gemo.apex.common.message.MessageType;
 import org.gemo.apex.common.model.ModelRequest;
@@ -113,8 +114,10 @@ public final class ModelRequestPreparer {
         if (pre instanceof LifecycleDispatchOutcome.EndTurn end) {
             return new PreparationOutcome.EndTurn(end.reason());
         }
+        validateCompactionRequest(context, activeMessages, compactionId, window.summary());
         context.ports().cancellationToken().throwIfCancellationRequested();
         context.compactionResult(context.ports().compactor().compact(context.compactionRequest()));
+        context.resetPostCompressionAppends();
         LifecycleDispatchOutcome post =
                 dispatcher.dispatch(
                         HookPoint.POST_MESSAGE_COMPRESSION,
@@ -127,8 +130,13 @@ public final class ModelRequestPreparer {
                                         current.compactionResult(),
                                         current.sharedData()),
                         Set.of());
+        validateCompactionResult(context.compactionRequest(), context.compactionResult());
         ConversationSummary summary = buildSummary(context, context.compactionResult());
-        commit(context, context.compactionResult(), summary);
+        commit(
+                context,
+                context.compactionResult(),
+                summary,
+                context.drainPostCompressionAppends());
         if (post instanceof LifecycleDispatchOutcome.EndTurn end) {
             return new PreparationOutcome.EndTurn(end.reason());
         }
@@ -146,13 +154,76 @@ public final class ModelRequestPreparer {
     private void commit(
             ApexAgentContext context,
             ConversationCompactionResult result,
-            ConversationSummary summary) {
-        List<String> ids =
-                result.retainedMessages().stream().map(AgentMessageEntry::entryId).toList();
+            ConversationSummary summary,
+            List<AppendConversationMessage> appends) {
         context.compactConversation(
                 new ConversationCompactionCommit(
-                        context.snapshot().sessionId(), summary, ids, result.retainedMessages()));
+                        context.snapshot().sessionId(), summary, result.retainedMessages()));
+        appendPostCompressionMessages(context, appends);
         context.save();
+    }
+
+    private void appendPostCompressionMessages(
+            ApexAgentContext context, List<AppendConversationMessage> appends) {
+        if (appends.isEmpty()) {
+            return;
+        }
+        List<AgentMessageEntry> entries = new ArrayList<>();
+        for (AppendConversationMessage append : appends) {
+            entries.add(
+                    new AgentMessageEntry(
+                            context.ports().idGenerator().newEntryId(),
+                            context.snapshot().sessionId(),
+                            context.snapshot().currentTurnNo(),
+                            context.allocateSortNo(),
+                            append.role(),
+                            append.messageType(),
+                            append.content(),
+                            append.payload(),
+                            context.ports().timeProvider().now()));
+        }
+        context.appendConversation(entries);
+    }
+
+    private void validateCompactionRequest(
+            ApexAgentContext context,
+            List<AgentMessageEntry> activeMessages,
+            String compactionId,
+            ConversationSummary previousSummary) {
+        ConversationCompactionRequest request = context.compactionRequest();
+        if (!context.snapshot().sessionId().equals(request.sessionId())
+                || !compactionId.equals(request.compactionId())
+                || !Objects.equals(previousSummary, request.previousSummary())) {
+            throw new IllegalStateException("压缩 Hook 不能改变请求关联信息");
+        }
+        if (!activeMessages.equals(request.sourceMessages())) {
+            throw new IllegalStateException("压缩 Hook 不能改变来源消息");
+        }
+        validateRetainedTail(
+                request.sourceMessages(), request.retainedMessages(), "压缩请求 retainedMessages");
+    }
+
+    private void validateCompactionResult(
+            ConversationCompactionRequest request, ConversationCompactionResult result) {
+        if (!request.compactionId().equals(result.compactionId())) {
+            throw new IllegalStateException("压缩结果 compactionId 与请求不一致");
+        }
+        validateRetainedTail(
+                request.sourceMessages(), result.retainedMessages(), "压缩结果 retainedMessages");
+    }
+
+    private void validateRetainedTail(
+            List<AgentMessageEntry> source,
+            List<AgentMessageEntry> retained,
+            String fieldName) {
+        if (retained.size() >= source.size()) {
+            throw new IllegalStateException(fieldName + " 必须至少淘汰一条消息");
+        }
+        List<AgentMessageEntry> expected =
+                source.subList(source.size() - retained.size(), source.size());
+        if (!expected.equals(retained)) {
+            throw new IllegalStateException(fieldName + " 必须是未经修改的连续尾部");
+        }
     }
 
     private ConversationSummary buildSummary(

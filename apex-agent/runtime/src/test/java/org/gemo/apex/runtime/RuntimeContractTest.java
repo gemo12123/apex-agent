@@ -22,6 +22,7 @@ import org.gemo.apex.common.tool.*;
 import org.gemo.apex.core.agent.AgentRunOutcome;
 import org.gemo.apex.extension.definition.AgentDefinitionProvider;
 import org.gemo.apex.extension.hook.LifecycleHook;
+import org.gemo.apex.extension.repository.ConversationRepository;
 import org.gemo.apex.extension.skill.SkillProvider;
 import org.gemo.apex.extension.tool.ToolExecutionObserver;
 import org.gemo.apex.kit.hook.SkillActivationStateHook;
@@ -141,14 +142,13 @@ class RuntimeContractTest {
                 new ConversationCompactionCommit(
                         "s",
                         new ConversationSummary("c", "sum", 0, 0, 1, Instant.EPOCH),
-                        List.of(),
                         List.of());
         r.compact(c);
         r.compact(c);
         assertEquals("sum", r.load(new ConversationQuery("s")).summary().orElseThrow().content());
     }
 
-    /** 窗口按摘要范围替换原始消息且不预截断尾部 */
+    /** Repository只返回未压缩消息且窗口装配摘要与保留尾部 */
     @Test
     void assemblesSummaryMessageAndMessagesOutsideCoveredRange() {
         var repository = new InMemoryConversationRepository();
@@ -160,7 +160,6 @@ class RuntimeContractTest {
                 new ConversationCompactionCommit(
                         "s",
                         new ConversationSummary("c", "累计摘要", 0, 1, 1, Instant.EPOCH),
-                        List.of("e3"),
                         List.of(retained)));
 
         ConversationWindow window =
@@ -173,7 +172,34 @@ class RuntimeContractTest {
         assertEquals(
                 List.of("累计摘要", retained.content()),
                 window.messages().stream().map(AgentMessageEntry::content).toList());
-        assertEquals(3, repository.load(new ConversationQuery("s")).messages().size());
+        assertEquals(1, repository.load(new ConversationQuery("s")).messages().size());
+    }
+
+    /** 窗口拒绝Repository把摘要覆盖消息伪装成未压缩消息 */
+    @Test
+    void rejectsRepositoryHistoryInsideSummaryCoverage() {
+        AgentMessageEntry covered = entry("covered", 0);
+        ConversationSummary summary =
+                new ConversationSummary("c", "摘要", 0, 0, 1, Instant.EPOCH);
+        ConversationRepository repository =
+                new ConversationRepository() {
+                    public void append(List<AgentMessageEntry> entries) {}
+
+                    public ConversationHistory load(ConversationQuery query) {
+                        return new ConversationHistory(
+                                query.sessionId(), Optional.of(summary), List.of(covered));
+                    }
+
+                    public void compact(ConversationCompactionCommit commit) {}
+                };
+
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                        DefaultConversationServices.window(repository)
+                                .prepare(
+                                        new ConversationWindowRequest(
+                                                new ConversationQuery("s"))));
     }
 
     /** 默认策略对消息数及两个可选容量阈值执行OR判断 */
