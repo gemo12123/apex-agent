@@ -10,12 +10,18 @@ import org.gemo.apex.extension.repository.ConversationRepository;
 import org.gemo.apex.extension.repository.SessionRepository;
 import org.gemo.apex.extension.skill.SkillProvider;
 import org.gemo.apex.extension.tool.AgentTool;
+import org.gemo.apex.kit.hook.AskHumanInterventionHook;
 import org.gemo.apex.kit.hook.AvailableSkillsPromptHook;
+import org.gemo.apex.kit.hook.PlainTextTruncateHook;
+import org.gemo.apex.kit.hook.SkillActivationStateHook;
 import org.gemo.apex.kit.hook.TodoMiddleware;
 import org.gemo.apex.kit.hook.ToolConfirmHook;
+import org.gemo.apex.kit.tool.ActivateSkillTool;
+import org.gemo.apex.kit.tool.AskHumanTool;
 import org.gemo.apex.kit.tool.WriteTodosTool;
 import org.gemo.apex.platform.execution.UserContextTaskDecorator;
 import org.gemo.apex.platform.skill.RuntimeSkillRegistry;
+import org.gemo.apex.platform.tool.QueryWeatherTool;
 import org.gemo.apex.platform.web.sse.RequestBoundAgentEventPublisherFactory;
 import org.gemo.apex.runtime.api.ApexAgentRuntime;
 import org.gemo.apex.runtime.skill.FileSkillProvider;
@@ -131,6 +137,18 @@ public class ApexAgentPlatformConfiguration {
         return new ToolConfirmHook();
     }
 
+    /** 内置工具：激活 Skill 并返回其指令，路由到最终 Skill 注册表。 */
+    @Bean
+    ActivateSkillTool activateSkillTool(RuntimeSkillRegistry skillRegistry) {
+        return new ActivateSkillTool(skillRegistry);
+    }
+
+    /** 内置工具：挂起任务并向用户提问。 */
+    @Bean
+    AskHumanTool askHumanTool() {
+        return new AskHumanTool();
+    }
+
     @Bean
     WriteTodosTool writeTodosTool() {
         return new WriteTodosTool();
@@ -140,4 +158,23 @@ public class ApexAgentPlatformConfiguration {
     TodoMiddleware todoMiddleware() {
         return new TodoMiddleware();
     }
+
+    /** 内置交互 Hook：ask_human 预调用时挂起并请求用户输入。 */
+    @Bean
+    AskHumanInterventionHook askHumanInterventionHook() {
+        return new AskHumanInterventionHook();
+    }
+
+    /** 内置 Hook：截断过长文本工具结果。 */
+    @Bean
+    PlainTextTruncateHook plainTextTruncateHook() {
+        return new PlainTextTruncateHook();
+    }
+
+    /** 内置 Hook：从 activate_skill 结果提取 Skill 激活状态增量。 */
+    @Bean
+    SkillActivationStateHook skillActivationStateHook() {
+        return new SkillActivationStateHook();
+    }
+
 }
