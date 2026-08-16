@@ -38,6 +38,84 @@ class PostgresRepositoryIntegrationTest {
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
 
+    /** PostgreSQL批次在单事务中应用Replace/Remove，失败时不暴露部分更新。 */
+    @Test
+    void atomicallyCommitsPersistentConversationEdits() {
+        var dataSource =
+                new DriverManagerDataSource(
+                        POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        Flyway.configure()
+                .dataSource(dataSource)
+                .locations("classpath:db/migration")
+                .load()
+                .migrate();
+        var repository = new PostgresConversationRepository(new JdbcTemplate(dataSource));
+        AgentMessageEntry first =
+                new AgentMessageEntry(
+                        "batch-entry-1",
+                        "batch-session",
+                        1,
+                        0,
+                        MessageRole.USER,
+                        MessageType.TEXT,
+                        "原始内容",
+                        Map.of(),
+                        Instant.EPOCH);
+        AgentMessageEntry second =
+                new AgentMessageEntry(
+                        "batch-entry-2",
+                        "batch-session",
+                        1,
+                        2,
+                        MessageRole.ASSISTANT,
+                        MessageType.TEXT,
+                        "待删除",
+                        Map.of(),
+                        Instant.EPOCH);
+        append(repository, List.of(first, second));
+
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                        repository.commit(
+                                new ConversationWriteBatch(
+                                        "batch-session",
+                                        List.of(
+                                                new ReplaceConversationWrite(
+                                                        first.entryId(),
+                                                        MessageRole.SYSTEM,
+                                                        MessageType.TEXT,
+                                                        "不应提交",
+                                                        Map.of()),
+                                                new RemoveConversationWrite("missing")))));
+        assertEquals(
+                "原始内容",
+                repository
+                        .load(new ConversationQuery("batch-session"))
+                        .messages()
+                        .getFirst()
+                        .content());
+
+        repository.commit(
+                new ConversationWriteBatch(
+                        "batch-session",
+                        List.of(
+                                new ReplaceConversationWrite(
+                                        first.entryId(),
+                                        MessageRole.SYSTEM,
+                                        MessageType.TEXT,
+                                        "最终内容",
+                                        Map.of("source", "hook")),
+                                new RemoveConversationWrite(second.entryId()))));
+
+        AgentMessageEntry retained =
+                repository.load(new ConversationQuery("batch-session")).messages().getFirst();
+        assertEquals(first.entryId(), retained.entryId());
+        assertEquals(first.sortNo(), retained.sortNo());
+        assertEquals(first.createdTime(), retained.createdTime());
+        assertEquals("最终内容", retained.content());
+    }
+
     /** 空库迁移长Text幂等持久化并在进程重建后恢复HumanResponse */
     @Test
     void
@@ -112,8 +190,8 @@ class PostgresRepositoryIntegrationTest {
                         longText,
                         Map.of("nested", List.of(longText)),
                         Instant.now());
-        conversationsA.append(List.of(entry));
-        conversationsA.append(List.of(entry));
+        append(conversationsA, List.of(entry));
+        append(conversationsA, List.of(entry));
         AgentMessageEntry retained =
                 new AgentMessageEntry(
                         "retained-entry",
@@ -125,8 +203,9 @@ class PostgresRepositoryIntegrationTest {
                         "保留消息",
                         Map.of(),
                         Instant.parse("2026-08-01T00:00:00.123456789Z"));
-        conversationsA.append(List.of(retained));
-        conversationsA.append(
+        append(conversationsA, List.of(retained));
+        append(
+                conversationsA,
                 List.of(
                         new AgentMessageEntry(
                                 retained.entryId(),
@@ -147,8 +226,13 @@ class PostgresRepositoryIntegrationTest {
                         .content());
         ConversationSummary summary =
                 new ConversationSummary("compaction-1", "累计摘要", 0, 0, 1, Instant.now());
-        conversationsA.compact(
-                new ConversationCompactionCommit("session-1", summary, List.of(retained)));
+        conversationsA.commit(
+                new ConversationWriteBatch(
+                        "session-1",
+                        List.of(
+                                new CompactConversationWrite(
+                                        new ConversationCompactionCommit(
+                                                "session-1", summary, List.of(retained))))));
         AgentMessageEntry hookAppend =
                 new AgentMessageEntry(
                         "hook-entry",
@@ -160,7 +244,7 @@ class PostgresRepositoryIntegrationTest {
                         "Hook补充",
                         Map.of(),
                         Instant.now());
-        conversationsA.append(List.of(hookAppend));
+        append(conversationsA, List.of(hookAppend));
         ConversationHistory history = conversationsA.load(new ConversationQuery("session-1"));
         assertEquals(summary.content(), history.summary().orElseThrow().content());
         assertEquals(
@@ -187,7 +271,8 @@ class PostgresRepositoryIntegrationTest {
                 assertThrows(
                         IllegalStateException.class,
                         () ->
-                                conversationsA.append(
+                                append(
+                                        conversationsA,
                                         List.of(
                                                 new AgentMessageEntry(
                                                         retained.entryId(),
@@ -204,7 +289,8 @@ class PostgresRepositoryIntegrationTest {
                 assertThrows(
                         IllegalStateException.class,
                         () ->
-                                conversationsA.append(
+                                append(
+                                        conversationsA,
                                         List.of(
                                                 new AgentMessageEntry(
                                                         "different-entry",
@@ -276,5 +362,18 @@ class PostgresRepositoryIntegrationTest {
                 .registerTool(search)
                 .defaultEventPublisherFactory(descriptor -> events::add)
                 .build();
+    }
+
+    private void append(
+            PostgresConversationRepository repository, List<AgentMessageEntry> entries) {
+        repository.commit(
+                new ConversationWriteBatch(
+                        entries.getFirst().sessionId(),
+                        entries.stream()
+                                .map(
+                                        entry ->
+                                                (ConversationWrite)
+                                                        new AppendConversationWrite(entry))
+                                .toList()));
     }
 }

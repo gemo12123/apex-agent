@@ -6,7 +6,8 @@ import org.gemo.apex.common.conversation.ConversationCompactionResult;
 import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.common.hook.context.PostMessageCompressionContext;
 import org.gemo.apex.common.hook.context.PreMessageCompressionContext;
-import org.gemo.apex.common.hook.operation.AppendConversationMessage;
+import org.gemo.apex.common.hook.operation.ToolActivationDelta;
+import org.gemo.apex.common.hook.result.ContinuePreMessageCompression;
 import org.gemo.apex.common.message.AgentMessageEntry;
 import org.gemo.apex.common.message.MessageType;
 import org.gemo.apex.common.model.ModelRequest;
@@ -27,77 +28,18 @@ public final class ModelRequestPreparer {
     public PreparationOutcome prepare(ApexAgentContext context, boolean finalIteration) {
         context.ports().cancellationToken().throwIfCancellationRequested();
         var compression = context.definition().definition().messageCompression();
-        int maxMessages = compression.maxMessages();
-        ConversationWindow window = context.conversationWindow();
-        List<ToolDefinition> tools =
-                context.toolCatalog().ordered().stream()
-                        .filter(
-                                tool ->
-                                        context.snapshot()
-                                                .enabledTools()
-                                                .contains(tool.definition().name()))
-                        .map(tool -> tool.definition())
-                        .toList();
-        String systemPrompt =
-                context.definition().definition().prompt().systemPrompt()
-                        + (finalIteration
-                                ? "\n" + context.ports().finalIterationInstruction()
-                                : "");
-        ModelRequest base =
-                new ModelRequest(
-                        systemPrompt,
-                        context.definition().prefixDeveloperMessages(),
-                        window.messages(),
-                        tools,
-                        Map.of());
+        ModelRequest base = buildModelRequest(context, finalIteration);
         context.modelRequest(base);
         if (!compression.enabled()) {
             return new PreparationOutcome.Prepared(base);
         }
-        List<AgentMessageEntry> activeMessages =
-                window.messages().stream()
-                        .filter(message -> message.messageType() != MessageType.SUMMARY)
-                        .toList();
-        if (activeMessages.isEmpty()) {
-            return new PreparationOutcome.Prepared(base);
-        }
-        int actualRetainCount = Math.min(maxMessages / 2, Math.max(0, activeMessages.size() - 1));
-        ModelRequestSizeEstimator.Size size = sizeEstimator.estimate(base);
-        ConversationCompactionCheck check =
-                new ConversationCompactionCheck(
-                        activeMessages,
-                        size.messageTokens(),
-                        size.messageCharacters(),
-                        size.systemTokens(),
-                        size.systemCharacters(),
-                        size.toolTokens(),
-                        size.toolCharacters(),
-                        size.totalTokens(),
-                        size.totalCharacters(),
-                        maxMessages,
-                        compression.tokenThreshold(),
-                        compression.characterHardLimit(),
-                        actualRetainCount,
-                        new ConversationCompactionTrigger(
-                                context.snapshot().sessionId(),
-                                context.snapshot().currentTurnNo(),
-                                context.snapshot().activeTurn().currentIteration().iterationNo(),
-                                "MODEL_CALL"));
-        if (!context.ports().compactionPolicy().shouldCompact(check)) {
-            return new PreparationOutcome.Prepared(base);
-        }
         String compactionId = context.ports().idGenerator().newCompactionId();
-        List<AgentMessageEntry> retained =
-                activeMessages.subList(
-                        activeMessages.size() - actualRetainCount, activeMessages.size());
-        context.compactionRequest(
-                new ConversationCompactionRequest(
-                        context.snapshot().sessionId(),
-                        compactionId,
-                        activeMessages,
-                        retained,
-                        window.summary(),
-                        Map.of()));
+        CompressionState initial = compressionState(context, base, compactionId);
+        if (initial == null) {
+            return new PreparationOutcome.Prepared(base);
+        }
+        var state = new java.util.concurrent.atomic.AtomicReference<>(initial);
+        context.compactionRequest(initial.request());
         LifecycleDispatchOutcome pre =
                 dispatcher.dispatch(
                         HookPoint.PRE_MESSAGE_COMPRESSION,
@@ -107,17 +49,50 @@ public final class ModelRequestPreparer {
                                         current.snapshot().sessionId(),
                                         binding,
                                         current.modelRequest(),
-                                        check,
+                                        state.get().check(),
                                         current.compactionRequest(),
                                         current.sharedData()),
-                        Set.of());
+                        Set.of(),
+                        (binding, result) -> {
+                            if (!(result instanceof ContinuePreMessageCompression continued)
+                                    || (continued.mutations().messageOperations().isEmpty()
+                                            && empty(
+                                                    continued.mutations().toolActivationDelta()))) {
+                                return new LifecycleDispatchOutcome.Continued();
+                            }
+                            ConversationCompactionRequest patched = context.compactionRequest();
+                            ModelRequest rebuilt = buildModelRequest(context, finalIteration);
+                            context.modelRequest(rebuilt);
+                            CompressionState next =
+                                    compressionState(context, rebuilt, compactionId);
+                            if (next == null) {
+                                state.set(null);
+                                return new LifecycleDispatchOutcome.Bypassed();
+                            }
+                            state.set(next);
+                            if (continued.mutations().messageOperations().isEmpty()) {
+                                validatePatchedRequest(patched, next);
+                                context.compactionRequest(patched);
+                            } else {
+                                context.compactionRequest(next.request());
+                            }
+                            return new LifecycleDispatchOutcome.Continued();
+                        });
         if (pre instanceof LifecycleDispatchOutcome.EndTurn end) {
             return new PreparationOutcome.EndTurn(end.reason());
         }
-        validateCompactionRequest(context, activeMessages, compactionId, window.summary());
+        if (pre instanceof LifecycleDispatchOutcome.Bypassed) {
+            return new PreparationOutcome.Prepared(context.modelRequest());
+        }
+        CompressionState effective = state.get();
+        validateCompactionRequest(
+                context,
+                effective.activeMessages(),
+                compactionId,
+                context.conversationWindow().summary());
         context.ports().cancellationToken().throwIfCancellationRequested();
         context.compactionResult(context.ports().compactor().compact(context.compactionRequest()));
-        context.resetPostCompressionAppends();
+        context.resetPostCompressionOperations();
         LifecycleDispatchOutcome post =
                 dispatcher.dispatch(
                         HookPoint.POST_MESSAGE_COMPRESSION,
@@ -136,53 +111,152 @@ public final class ModelRequestPreparer {
                 context,
                 context.compactionResult(),
                 summary,
-                context.drainPostCompressionAppends());
+                context.drainPostCompressionOperations());
         if (post instanceof LifecycleDispatchOutcome.EndTurn end) {
             return new PreparationOutcome.EndTurn(end.reason());
         }
-        ModelRequest compacted =
-                new ModelRequest(
-                        systemPrompt,
-                        base.prefixDeveloperMessages(),
-                        context.conversationWindow().messages(),
-                        tools,
-                        base.options());
+        ModelRequest compacted = buildModelRequest(context, finalIteration);
         context.modelRequest(compacted);
         return new PreparationOutcome.Prepared(compacted);
+    }
+
+    private boolean empty(ToolActivationDelta delta) {
+        return delta.enable().isEmpty() && delta.disable().isEmpty();
+    }
+
+    private ModelRequest buildModelRequest(ApexAgentContext context, boolean finalIteration) {
+        List<ToolDefinition> tools =
+                context.toolCatalog().ordered().stream()
+                        .filter(
+                                tool ->
+                                        context.snapshot()
+                                                .enabledTools()
+                                                .contains(tool.definition().name()))
+                        .map(tool -> tool.definition())
+                        .toList();
+        String systemPrompt =
+                context.definition().definition().prompt().systemPrompt()
+                        + (finalIteration
+                                ? "\n" + context.ports().finalIterationInstruction()
+                                : "");
+        return new ModelRequest(
+                systemPrompt,
+                context.definition().prefixDeveloperMessages(),
+                context.conversationWindow().messages(),
+                tools,
+                Map.of());
+    }
+
+    private CompressionState compressionState(
+            ApexAgentContext context, ModelRequest base, String compactionId) {
+        var compression = context.definition().definition().messageCompression();
+        List<AgentMessageEntry> activeMessages =
+                context.conversationWindow().messages().stream()
+                        .filter(message -> message.messageType() != MessageType.SUMMARY)
+                        .toList();
+        if (activeMessages.isEmpty()) {
+            return null;
+        }
+        int actualRetainCount =
+                Math.min(compression.maxMessages() / 2, Math.max(0, activeMessages.size() - 1));
+        ModelRequestSizeEstimator.Size size = sizeEstimator.estimate(base);
+        ConversationCompactionCheck check =
+                new ConversationCompactionCheck(
+                        activeMessages,
+                        size.messageTokens(),
+                        size.messageCharacters(),
+                        size.systemTokens(),
+                        size.systemCharacters(),
+                        size.toolTokens(),
+                        size.toolCharacters(),
+                        size.totalTokens(),
+                        size.totalCharacters(),
+                        compression.maxMessages(),
+                        compression.tokenThreshold(),
+                        compression.characterHardLimit(),
+                        actualRetainCount,
+                        new ConversationCompactionTrigger(
+                                context.snapshot().sessionId(),
+                                context.snapshot().currentTurnNo(),
+                                context.snapshot().activeTurn().currentIteration().iterationNo(),
+                                "MODEL_CALL"));
+        if (!context.ports().compactionPolicy().shouldCompact(check)) {
+            return null;
+        }
+        List<AgentMessageEntry> retained =
+                retainedTailWithoutSplittingToolGroup(activeMessages, actualRetainCount);
+        if (retained.size() == activeMessages.size()) {
+            return null;
+        }
+        ConversationCompactionRequest request =
+                new ConversationCompactionRequest(
+                        context.snapshot().sessionId(),
+                        compactionId,
+                        activeMessages,
+                        retained,
+                        context.conversationWindow().summary(),
+                        Map.of());
+        return new CompressionState(base, activeMessages, check, request);
+    }
+
+    private List<AgentMessageEntry> retainedTailWithoutSplittingToolGroup(
+            List<AgentMessageEntry> messages, int retainCount) {
+        int start = messages.size() - retainCount;
+        while (start > 0 && splitsToolGroup(messages, start)) {
+            start--;
+        }
+        return messages.subList(start, messages.size());
+    }
+
+    private boolean splitsToolGroup(List<AgentMessageEntry> messages, int boundary) {
+        Map<String, Integer> callIndexes = new HashMap<>();
+        Map<String, Integer> resultIndexes = new HashMap<>();
+        for (int index = 0; index < messages.size(); index++) {
+            AgentMessageEntry message = messages.get(index);
+            if (message.messageType() == MessageType.TOOL_CALLS) {
+                Object raw = message.payload().get("toolCalls");
+                if (raw instanceof List<?> calls) {
+                    for (Object value : calls) {
+                        if (value instanceof Map<?, ?> call
+                                && call.get("toolCallId") instanceof String id) {
+                            callIndexes.put(id, index);
+                        }
+                    }
+                }
+            } else if (message.messageType() == MessageType.TOOL_RESULT
+                    && message.payload().get("toolCallId") instanceof String id) {
+                resultIndexes.put(id, index);
+            }
+        }
+        for (Map.Entry<String, Integer> call : callIndexes.entrySet()) {
+            Integer resultIndex = resultIndexes.get(call.getKey());
+            if (resultIndex != null && (call.getValue() < boundary) != (resultIndex < boundary)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void validatePatchedRequest(
+            ConversationCompactionRequest patched, CompressionState state) {
+        if (!patched.sessionId().equals(state.request().sessionId())
+                || !patched.compactionId().equals(state.request().compactionId())
+                || !patched.sourceMessages().equals(state.activeMessages())
+                || !Objects.equals(patched.previousSummary(), state.request().previousSummary())) {
+            throw new IllegalStateException("工具启停后压缩 Patch 与当前消息窗口不一致");
+        }
     }
 
     private void commit(
             ApexAgentContext context,
             ConversationCompactionResult result,
             ConversationSummary summary,
-            List<AppendConversationMessage> appends) {
+            List<org.gemo.apex.common.hook.operation.MessageOperation> operations) {
         context.compactConversation(
                 new ConversationCompactionCommit(
-                        context.snapshot().sessionId(), summary, result.retainedMessages()));
-        appendPostCompressionMessages(context, appends);
+                        context.snapshot().sessionId(), summary, result.retainedMessages()),
+                operations);
         context.save();
-    }
-
-    private void appendPostCompressionMessages(
-            ApexAgentContext context, List<AppendConversationMessage> appends) {
-        if (appends.isEmpty()) {
-            return;
-        }
-        List<AgentMessageEntry> entries = new ArrayList<>();
-        for (AppendConversationMessage append : appends) {
-            entries.add(
-                    new AgentMessageEntry(
-                            context.ports().idGenerator().newEntryId(),
-                            context.snapshot().sessionId(),
-                            context.snapshot().currentTurnNo(),
-                            context.allocateSortNo(),
-                            append.role(),
-                            append.messageType(),
-                            append.content(),
-                            append.payload(),
-                            context.ports().timeProvider().now()));
-        }
-        context.appendConversation(entries);
     }
 
     private void validateCompactionRequest(
@@ -213,9 +287,7 @@ public final class ModelRequestPreparer {
     }
 
     private void validateRetainedTail(
-            List<AgentMessageEntry> source,
-            List<AgentMessageEntry> retained,
-            String fieldName) {
+            List<AgentMessageEntry> source, List<AgentMessageEntry> retained, String fieldName) {
         if (retained.size() >= source.size()) {
             throw new IllegalStateException(fieldName + " 必须至少淘汰一条消息");
         }
@@ -254,4 +326,10 @@ public final class ModelRequestPreparer {
 
         record EndTurn(String reason) implements PreparationOutcome {}
     }
+
+    private record CompressionState(
+            ModelRequest base,
+            List<AgentMessageEntry> activeMessages,
+            ConversationCompactionCheck check,
+            ConversationCompactionRequest request) {}
 }

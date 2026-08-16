@@ -4,16 +4,15 @@ import java.time.Instant;
 import java.util.*;
 import org.gemo.apex.common.agent.AgentDefinitionRecoverySnapshot;
 import org.gemo.apex.common.agent.AgentDefinitionSnapshot;
-import org.gemo.apex.common.conversation.ConversationCompactionCommit;
-import org.gemo.apex.common.conversation.ConversationCompactionRequest;
-import org.gemo.apex.common.conversation.ConversationCompactionResult;
-import org.gemo.apex.common.conversation.ConversationSummary;
-import org.gemo.apex.common.conversation.ConversationWindow;
+import org.gemo.apex.common.conversation.*;
 import org.gemo.apex.common.execution.IterationStatus;
 import org.gemo.apex.common.execution.SessionStatus;
 import org.gemo.apex.common.execution.TurnStatus;
 import org.gemo.apex.common.hook.HookPoint;
-import org.gemo.apex.common.hook.operation.AppendConversationMessage;
+import org.gemo.apex.common.hook.operation.AppendMessage;
+import org.gemo.apex.common.hook.operation.MessageOperation;
+import org.gemo.apex.common.hook.operation.RemoveMessage;
+import org.gemo.apex.common.hook.operation.ReplaceMessage;
 import org.gemo.apex.common.hook.operation.SkillActivationDelta;
 import org.gemo.apex.common.intervention.HumanSubmission;
 import org.gemo.apex.common.message.AgentMessageEntry;
@@ -44,8 +43,7 @@ public final class ApexAgentContext {
     private ToolResult toolResult;
     private ConversationCompactionRequest compactionRequest;
     private ConversationCompactionResult compactionResult;
-    private final List<AppendConversationMessage> pendingPostCompressionAppends =
-            new ArrayList<>();
+    private final List<MessageOperation> pendingPostCompressionOperations = new ArrayList<>();
     private Set<String> pendingActivatedSkills;
     private final Map<String, Object> humanResponses;
     private final SharedDataStore sharedData;
@@ -110,15 +108,52 @@ public final class ApexAgentContext {
         if (append.newEntries().isEmpty()) {
             return;
         }
-        ports.conversationRepository().append(append.newEntries());
+        ports.conversationRepository()
+                .commit(
+                        new ConversationWriteBatch(
+                                snapshot.sessionId(),
+                                append.newEntries().stream()
+                                        .map(AppendConversationWrite::new)
+                                        .map(ConversationWrite.class::cast)
+                                        .toList()));
         conversationWindow = append.window();
     }
 
     /** 压缩提交成功后，将有效窗口同步切换为累计摘要与保留尾部。 */
     public void compactConversation(ConversationCompactionCommit commit) {
         ConversationWindow next = prepareCompactedWindow(commit);
-        ports.conversationRepository().compact(commit);
+        ports.conversationRepository()
+                .commit(
+                        new ConversationWriteBatch(
+                                snapshot.sessionId(),
+                                List.of(new CompactConversationWrite(commit))));
         conversationWindow = next;
+    }
+
+    /** 原子应用 Hook 声明的持久化消息操作，Repository 成功后才替换内存窗口。 */
+    public void mutateConversation(
+            List<MessageOperation> operations, boolean lockCurrentToolGroup) {
+        if (operations.isEmpty()) {
+            return;
+        }
+        ConversationMutation mutation =
+                prepareMutation(conversationWindow, operations, lockCurrentToolGroup);
+        ports.conversationRepository()
+                .commit(new ConversationWriteBatch(snapshot.sessionId(), mutation.writes()));
+        conversationWindow = mutation.window();
+    }
+
+    /** 将压缩与 POST_MESSAGE_COMPRESSION 声明的消息操作放入同一原子提交。 */
+    public void compactConversation(
+            ConversationCompactionCommit commit, List<MessageOperation> operations) {
+        ConversationWindow compacted = prepareCompactedWindow(commit);
+        ConversationMutation mutation = prepareMutation(compacted, operations, false);
+        List<ConversationWrite> writes = new ArrayList<>();
+        writes.add(new CompactConversationWrite(commit));
+        writes.addAll(mutation.writes());
+        ports.conversationRepository()
+                .commit(new ConversationWriteBatch(snapshot.sessionId(), writes));
+        conversationWindow = mutation.window();
     }
 
     public ModelRequest modelRequest() {
@@ -169,18 +204,18 @@ public final class ApexAgentContext {
         compactionResult = value;
     }
 
-    public void resetPostCompressionAppends() {
-        pendingPostCompressionAppends.clear();
+    public void resetPostCompressionOperations() {
+        pendingPostCompressionOperations.clear();
     }
 
-    public void stagePostCompressionAppends(List<AppendConversationMessage> appends) {
-        pendingPostCompressionAppends.addAll(List.copyOf(appends));
+    public void stagePostCompressionOperations(List<MessageOperation> operations) {
+        pendingPostCompressionOperations.addAll(List.copyOf(operations));
     }
 
-    public List<AppendConversationMessage> drainPostCompressionAppends() {
-        List<AppendConversationMessage> appends = List.copyOf(pendingPostCompressionAppends);
-        pendingPostCompressionAppends.clear();
-        return appends;
+    public List<MessageOperation> drainPostCompressionOperations() {
+        List<MessageOperation> operations = List.copyOf(pendingPostCompressionOperations);
+        pendingPostCompressionOperations.clear();
+        return operations;
     }
 
     public boolean resumedRequest() {
@@ -564,6 +599,170 @@ public final class ApexAgentContext {
         return new ConversationAppend(window(conversationWindow.summary(), messages), additions);
     }
 
+    private ConversationMutation prepareMutation(
+            ConversationWindow source,
+            List<MessageOperation> operations,
+            boolean lockCurrentToolGroup) {
+        Objects.requireNonNull(operations, "operations");
+        List<AgentMessageEntry> messages = new ArrayList<>(source.messages());
+        List<ConversationWrite> writes = new ArrayList<>();
+        Set<String> lockedToolCallIds = lockCurrentToolGroup ? currentToolCallIds() : Set.of();
+        for (MessageOperation operation : List.copyOf(operations)) {
+            switch (operation) {
+                case AppendMessage append -> {
+                    AgentMessageEntry entry =
+                            new AgentMessageEntry(
+                                    ports.idGenerator().newEntryId(),
+                                    snapshot.sessionId(),
+                                    snapshot.currentTurnNo(),
+                                    allocateSortNo(),
+                                    append.role(),
+                                    append.messageType(),
+                                    append.content(),
+                                    append.payload(),
+                                    ports.timeProvider().now());
+                    messages.add(entry);
+                    writes.add(new AppendConversationWrite(entry));
+                }
+                case ReplaceMessage replace -> {
+                    int index = editableMessageIndex(messages, replace.targetEntryId());
+                    AgentMessageEntry old = messages.get(index);
+                    ensureUnlocked(old, lockedToolCallIds);
+                    AgentMessageEntry replacement =
+                            new AgentMessageEntry(
+                                    old.entryId(),
+                                    old.sessionId(),
+                                    old.turnNo(),
+                                    old.sortNo(),
+                                    replace.role(),
+                                    replace.messageType(),
+                                    replace.content(),
+                                    replace.payload(),
+                                    old.createdTime());
+                    messages.set(index, replacement);
+                    writes.add(
+                            new ReplaceConversationWrite(
+                                    replace.targetEntryId(),
+                                    replace.role(),
+                                    replace.messageType(),
+                                    replace.content(),
+                                    replace.payload()));
+                }
+                case RemoveMessage remove -> {
+                    int index = editableMessageIndex(messages, remove.targetEntryId());
+                    ensureUnlocked(messages.get(index), lockedToolCallIds);
+                    messages.remove(index);
+                    writes.add(new RemoveConversationWrite(remove.targetEntryId()));
+                }
+            }
+        }
+        messages.sort(Comparator.comparingLong(AgentMessageEntry::sortNo));
+        validateToolProtocol(messages, lockedToolCallIds);
+        return new ConversationMutation(window(source.summary(), messages), List.copyOf(writes));
+    }
+
+    private void ensureUnlocked(AgentMessageEntry message, Set<String> lockedToolCallIds) {
+        if (lockedToolCallIds.isEmpty()) {
+            return;
+        }
+        if (message.messageType() == MessageType.TOOL_CALLS) {
+            Object raw = message.payload().get("toolCalls");
+            if (raw instanceof List<?> calls
+                    && calls.stream()
+                            .filter(Map.class::isInstance)
+                            .map(Map.class::cast)
+                            .map(call -> call.get("toolCallId"))
+                            .anyMatch(lockedToolCallIds::contains)) {
+                throw new IllegalArgumentException("当前执行中的 TOOL_CALLS 消息不可编辑");
+            }
+        }
+        if (message.messageType() == MessageType.TOOL_RESULT
+                && lockedToolCallIds.contains(message.payload().get("toolCallId"))) {
+            throw new IllegalArgumentException("当前执行中的 TOOL_RESULT 消息不可编辑");
+        }
+    }
+
+    private int editableMessageIndex(List<AgentMessageEntry> messages, String entryId) {
+        for (int index = 0; index < messages.size(); index++) {
+            AgentMessageEntry message = messages.get(index);
+            if (message.entryId().equals(entryId)) {
+                if (message.messageType() == MessageType.SUMMARY) {
+                    throw new IllegalArgumentException("SUMMARY 不可编辑: " + entryId);
+                }
+                return index;
+            }
+        }
+        throw new IllegalArgumentException("消息不存在或已被压缩: " + entryId);
+    }
+
+    private Set<String> currentToolCallIds() {
+        if (modelResponse == null) {
+            return Set.of();
+        }
+        return modelResponse.toolCalls().stream()
+                .map(ToolCall::toolCallId)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
+    private void validateToolProtocol(
+            List<AgentMessageEntry> messages, Set<String> lockedToolCallIds) {
+        Map<String, ToolMessageLink> calls = new LinkedHashMap<>();
+        Set<String> results = new HashSet<>();
+        for (AgentMessageEntry message : messages) {
+            if (message.messageType() == MessageType.TOOL_CALLS) {
+                if (message.role() != MessageRole.ASSISTANT) {
+                    throw new IllegalArgumentException("TOOL_CALLS 消息角色必须是 ASSISTANT");
+                }
+                Object raw = message.payload().get("toolCalls");
+                if (!(raw instanceof List<?> values) || values.isEmpty()) {
+                    throw new IllegalArgumentException("TOOL_CALLS.payload.toolCalls 必须是非空数组");
+                }
+                for (Object value : values) {
+                    if (!(value instanceof Map<?, ?> call)
+                            || !(call.get("toolCallId") instanceof String id)
+                            || id.isBlank()
+                            || !(call.get("name") instanceof String name)
+                            || name.isBlank()) {
+                        throw new IllegalArgumentException("TOOL_CALLS payload 非法");
+                    }
+                    if (calls.putIfAbsent(id, new ToolMessageLink(name, message.sortNo()))
+                            != null) {
+                        throw new IllegalArgumentException("ToolCall ID 重复: " + id);
+                    }
+                }
+            } else if (message.messageType() == MessageType.TOOL_RESULT) {
+                if (message.role() != MessageRole.TOOL) {
+                    throw new IllegalArgumentException("TOOL_RESULT 消息角色必须是 TOOL");
+                }
+                Object rawId = message.payload().get("toolCallId");
+                Object rawName = message.payload().get("toolName");
+                if (!(rawId instanceof String id)
+                        || id.isBlank()
+                        || !(rawName instanceof String name)
+                        || name.isBlank()) {
+                    throw new IllegalArgumentException("TOOL_RESULT payload 非法");
+                }
+                ToolMessageLink call = calls.get(id);
+                if (call == null
+                        || !call.toolName().equals(name)
+                        || call.sortNo() >= message.sortNo()
+                        || !results.add(id)) {
+                    throw new IllegalArgumentException("ToolResult 与 ToolCall 不完整关联: " + id);
+                }
+            }
+        }
+        for (String id : calls.keySet()) {
+            if (!results.contains(id) && !lockedToolCallIds.contains(id)) {
+                throw new IllegalArgumentException("ToolCall 缺少 ToolResult: " + id);
+            }
+        }
+        for (String locked : lockedToolCallIds) {
+            if (!calls.containsKey(locked)) {
+                throw new IllegalArgumentException("当前执行中的 ToolCall 消息不可编辑: " + locked);
+            }
+        }
+    }
+
     private ConversationWindow prepareCompactedWindow(ConversationCompactionCommit commit) {
         if (!snapshot.sessionId().equals(commit.sessionId())) {
             throw new IllegalArgumentException("压缩提交必须属于当前 Session");
@@ -572,6 +771,7 @@ public final class ApexAgentContext {
         messages.add(summaryMessage(commit.summary()));
         messages.addAll(commit.retainedMessages());
         messages.sort(Comparator.comparingLong(AgentMessageEntry::sortNo));
+        validateToolProtocol(messages, Set.of());
         return window(commit.summary(), messages);
     }
 
@@ -617,6 +817,11 @@ public final class ApexAgentContext {
             newEntries = List.copyOf(newEntries);
         }
     }
+
+    private record ConversationMutation(
+            ConversationWindow window, List<ConversationWrite> writes) {}
+
+    private record ToolMessageLink(String toolName, long sortNo) {}
 
     private void replaceSnapshot(
             SessionStatus status,

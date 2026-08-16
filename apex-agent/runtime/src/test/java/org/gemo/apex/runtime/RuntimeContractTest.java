@@ -134,18 +134,96 @@ class RuntimeContractTest {
     void makesInMemoryConversationOperationsIdempotentAndDetectsConflicts() {
         var r = new InMemoryConversationRepository();
         var e = entry("e1", 0);
-        r.append(List.of(e));
-        r.append(List.of(e));
+        r.commit(new ConversationWriteBatch("s", List.of(new AppendConversationWrite(e))));
+        r.commit(new ConversationWriteBatch("s", List.of(new AppendConversationWrite(e))));
         assertEquals(1, r.load(new ConversationQuery("s")).messages().size());
-        assertThrows(IllegalStateException.class, () -> r.append(List.of(entry("e2", 0))));
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                        r.commit(
+                                new ConversationWriteBatch(
+                                        "s",
+                                        List.of(new AppendConversationWrite(entry("e2", 0))))));
         var c =
                 new ConversationCompactionCommit(
                         "s",
                         new ConversationSummary("c", "sum", 0, 0, 1, Instant.EPOCH),
                         List.of());
-        r.compact(c);
-        r.compact(c);
+        r.commit(new ConversationWriteBatch("s", List.of(new CompactConversationWrite(c))));
+        r.commit(new ConversationWriteBatch("s", List.of(new CompactConversationWrite(c))));
         assertEquals("sum", r.load(new ConversationQuery("s")).summary().orElseThrow().content());
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                        r.commit(
+                                new ConversationWriteBatch(
+                                        "s",
+                                        List.of(
+                                                new ReplaceConversationWrite(
+                                                        "e1",
+                                                        MessageRole.SYSTEM,
+                                                        MessageType.TEXT,
+                                                        "非法替换",
+                                                        Map.of())))));
+    }
+
+    /** 内存批次先在副本预演，任一操作失败时不暴露部分写入。 */
+    @Test
+    void rollsBackEntireInMemoryConversationBatchOnFailure() {
+        var repository = new InMemoryConversationRepository();
+        AgentMessageEntry original = entry("e1", 0);
+        repository.commit(
+                new ConversationWriteBatch("s", List.of(new AppendConversationWrite(original))));
+
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                        repository.commit(
+                                new ConversationWriteBatch(
+                                        "s",
+                                        List.of(
+                                                new ReplaceConversationWrite(
+                                                        "e1",
+                                                        MessageRole.SYSTEM,
+                                                        MessageType.TEXT,
+                                                        "已替换",
+                                                        Map.of("source", "hook")),
+                                                new RemoveConversationWrite("missing")))));
+
+        assertEquals(original, repository.load(new ConversationQuery("s")).messages().getFirst());
+    }
+
+    /** Replace保持存储身份字段，Remove物理删除且不改变其他消息sortNo。 */
+    @Test
+    void replacesLogicalContentAndPhysicallyRemovesWithoutRenumbering() {
+        var repository = new InMemoryConversationRepository();
+        AgentMessageEntry first = entry("e1", 0);
+        AgentMessageEntry second = entry("e2", 2);
+        repository.commit(
+                new ConversationWriteBatch(
+                        "s",
+                        List.of(
+                                new AppendConversationWrite(first),
+                                new AppendConversationWrite(second))));
+
+        repository.commit(
+                new ConversationWriteBatch(
+                        "s",
+                        List.of(
+                                new ReplaceConversationWrite(
+                                        "e2",
+                                        MessageRole.SYSTEM,
+                                        MessageType.TEXT,
+                                        "替换后",
+                                        Map.of("source", "hook")),
+                                new RemoveConversationWrite("e1"))));
+
+        AgentMessageEntry retained =
+                repository.load(new ConversationQuery("s")).messages().getFirst();
+        assertEquals("e2", retained.entryId());
+        assertEquals(2, retained.sortNo());
+        assertEquals(second.createdTime(), retained.createdTime());
+        assertEquals("替换后", retained.content());
     }
 
     /** Repository只返回未压缩消息且窗口装配摘要与保留尾部 */
@@ -155,12 +233,19 @@ class RuntimeContractTest {
         AgentMessageEntry first = entry("e1", 0);
         AgentMessageEntry second = entry("e2", 1);
         AgentMessageEntry retained = entry("e3", 2);
-        repository.append(List.of(first, second, retained));
-        repository.compact(
-                new ConversationCompactionCommit(
+        repository.commit(
+                new ConversationWriteBatch(
                         "s",
-                        new ConversationSummary("c", "累计摘要", 0, 1, 1, Instant.EPOCH),
-                        List.of(retained)));
+                        List.of(
+                                new AppendConversationWrite(first),
+                                new AppendConversationWrite(second),
+                                new AppendConversationWrite(retained),
+                                new CompactConversationWrite(
+                                        new ConversationCompactionCommit(
+                                                "s",
+                                                new ConversationSummary(
+                                                        "c", "累计摘要", 0, 1, 1, Instant.EPOCH),
+                                                List.of(retained))))));
 
         ConversationWindow window =
                 DefaultConversationServices.window(repository)
@@ -179,18 +264,15 @@ class RuntimeContractTest {
     @Test
     void rejectsRepositoryHistoryInsideSummaryCoverage() {
         AgentMessageEntry covered = entry("covered", 0);
-        ConversationSummary summary =
-                new ConversationSummary("c", "摘要", 0, 0, 1, Instant.EPOCH);
+        ConversationSummary summary = new ConversationSummary("c", "摘要", 0, 0, 1, Instant.EPOCH);
         ConversationRepository repository =
                 new ConversationRepository() {
-                    public void append(List<AgentMessageEntry> entries) {}
+                    public void commit(ConversationWriteBatch batch) {}
 
                     public ConversationHistory load(ConversationQuery query) {
                         return new ConversationHistory(
                                 query.sessionId(), Optional.of(summary), List.of(covered));
                     }
-
-                    public void compact(ConversationCompactionCommit commit) {}
                 };
 
         assertThrows(
@@ -198,8 +280,7 @@ class RuntimeContractTest {
                 () ->
                         DefaultConversationServices.window(repository)
                                 .prepare(
-                                        new ConversationWindowRequest(
-                                                new ConversationQuery("s"))));
+                                        new ConversationWindowRequest(new ConversationQuery("s"))));
     }
 
     /** 默认策略对消息数及两个可选容量阈值执行OR判断 */
@@ -439,8 +520,7 @@ class RuntimeContractTest {
         try (var runtime =
                 ApexAgentRuntime.builder()
                         .modelGateway(
-                                (request, observer) ->
-                                        new ModelResponse("完成", List.of(), Map.of()))
+                                (request, observer) -> new ModelResponse("完成", List.of(), Map.of()))
                         .agentDefinition(skillDefinition)
                         .build()) {
             AgentPreparationException error =
@@ -521,7 +601,8 @@ class RuntimeContractTest {
                         .build()) {
             assertInstanceOf(
                     AgentRunOutcome.Completed.class,
-                    runtime.newAgent(new AgentRequest("skill-provider", "default", "u", "q")).run());
+                    runtime.newAgent(new AgentRequest("skill-provider", "default", "u", "q"))
+                            .run());
         }
 
         assertEquals(1, metadataLoads.get());

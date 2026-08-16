@@ -52,6 +52,7 @@ public final class ModelStepExecutor {
         if (pre instanceof LifecycleDispatchOutcome.EndTurn end) {
             return new ModelStepOutcome.EndTurn(end.reason());
         }
+        validateRequestConsistency(context);
         String contentId = context.ports().idGenerator().newInvocationId();
         context.ports().cancellationToken().throwIfCancellationRequested();
         // 流式分片只向客户端转发；完整响应仍由 gateway 返回后一次性进入快照。
@@ -116,6 +117,24 @@ public final class ModelStepExecutor {
             }
         }
         throw new IllegalStateException("模型重试循环未正常收口");
+    }
+
+    private void validateRequestConsistency(ApexAgentContext context) {
+        if (!context.modelRequest().messages().equals(context.conversationWindow().messages())) {
+            throw new IllegalStateException("ModelRequest.messages 与持久化 ConversationWindow 不一致");
+        }
+        var expectedTools =
+                context.toolCatalog().ordered().stream()
+                        .filter(
+                                tool ->
+                                        context.snapshot()
+                                                .enabledTools()
+                                                .contains(tool.definition().name()))
+                        .map(tool -> tool.definition())
+                        .toList();
+        if (!context.modelRequest().tools().equals(expectedTools)) {
+            throw new IllegalStateException("ModelRequest.tools 与当前启用工具不一致");
+        }
     }
 
     /** 将模型文本和 ToolCall 一并写为一条助手消息，以维持会话顺序。 */

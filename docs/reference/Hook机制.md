@@ -157,35 +157,38 @@ Hook `apply()` 抛出普通 `RuntimeException` 时，core 记录 warning、把 T
 - descriptor、Context 或 Result 类型不匹配。
 - 返回 `null` 或错误的结果族。
 - 启用 `availableTools` 之外的工具。
-- 消息操作下标越界。
+- 消息操作目标不存在、已压缩、属于 `SUMMARY` 或破坏工具消息配对。
 - ToolCall 与 ToolResult 的 ID 或工具名不关联。
 - POST_MODEL_CALL 改变 ToolCall 数量、ID 或工具名。
 - TURN_END 返回 Continue 以外的结果。
 
 契约错误会沿 Agent 失败路径收口并保存失败状态。
 
-## 通用 Mutation 与专用 Patch
+## 持久化 Mutation 与专用 Patch
 
 除 AGENT_BUILD 和 TURN_END 外，多数 Continue 结果包含 `HookMutations`：
 
-- `MessageOperation`：追加、插入、替换或删除当前 `ModelRequest.messages`。
+- `MessageOperation`：通过 `AppendMessage`、`ReplaceMessage`、`RemoveMessage` 持久化追加、替换或删除普通对话消息。
 - `ToolActivationDelta`：启用或禁用 Session 中的工具。
 
 工具启停具有请求内即时效果。例如某个 PRE_TOOL_CALL 禁用后续工具，同一模型响应中尚未消费的 ToolCall 会看到更新后的启用状态。Hook 只能启用最终定义 `availableTools` 中存在的工具。
 
-消息操作不是对话仓储编辑接口：
+消息操作就是对话仓储编辑接口：
 
-- 它只修改请求级 `ApexAgentContext.modelRequest`。
-- 它不会直接追加、删除或替换 `ConversationRepository` 中的历史消息。
-- 当前点位还没有 ModelRequest 时，非空消息操作会触发契约错误；典型点位包括 TURN_START 和 ITERATION_START。
-- PRE/POST_MESSAGE_COMPRESSION 不接受通用 `MessageOperation`；需要在压缩后写入对话历史时，POST Hook 使用专用 `AppendConversationMessage`。
-- PRE_MODEL_CALL 会在应用通用 Mutation 后使用 `ModelRequestPatch.replacement` 替换整个请求，因此需要把最终消息变更合并进 replacement，不能只依赖通用消息操作。
+- 每个 Hook 结果中的操作按声明顺序组成一个原子 `ConversationWriteBatch`；任一目标非法时整个批次失败。
+- Append 由 core 分配 `entryId/sessionId/turnNo/sortNo/createdTime`。Replace 只替换 role、messageType、content、payload，保留目标身份与顺序字段。Remove 物理删除，不重排或复用 `sortNo`。
+- `operationId` 只在单个 Hook 结果中唯一，用于契约校验和错误定位，不提供跨 execution 幂等。
+- `SUMMARY`、已被摘要覆盖的原始消息和当前正在执行或挂起的工具组不可编辑。工具协议消息可以编辑，但批次结束后必须保持 ToolCall/ToolResult 一一配对。
+- TURN_START、ITERATION_START 及模型/工具调用后的节点所做编辑会立即写入仓储和 Context 窗口，下一次模型调用自然可见。
+- PRE_MODEL_CALL 的每个 Binding 提交后都从最新窗口重建 `ModelRequest.messages`，并按最新启用工具重建 `tools`；后续 Binding 因而看到前序持久化结果。
+- 调用 ModelGateway 前，core 校验 `ModelRequest.messages` 与当前 `ConversationWindow.messages` 完全一致，工具定义与当前启用工具完全一致。
+
+普通消息不再存在“本次 Turn 可见、下次 Turn 不可见”的临时形态。唯一例外是 AGENT_BUILD 的 `AppendPrefixDeveloperMessage`：它明确属于请求级上下文，保存在独立 `prefixDeveloperMessages` 字段，不进入 ConversationRepository、压缩源或 Iteration 快照。
 
 各专用 Patch 的边界：
 
 | Patch | 可修改内容 | 不能修改的关联信息 |
 | --- | --- | --- |
-| `ModelRequestPatch` | 完整模型请求 | 由 Hook 自行给出完整替换值 |
 | `ModelResponsePatch` | 文本、metadata、ToolCall 参数等 | ToolCall 数量、ID、工具名 |
 | `ToolCallPatch` | 工具参数 | ToolCall ID、工具名、ordinal、metadata |
 | `ToolResultPatch` | 结果正文、metadata | ToolCall ID、工具名 |
@@ -222,7 +225,7 @@ Context：`AgentBuildContext`，包含 sessionId、当前 Binding 和当前 Agen
 
 Context：`TurnStartContext`，包含当前 `SessionSnapshot`。
 
-能力：返回 `ContinueLoop` 或 `EndTurnLoop`，适合执行 Turn 级策略、工具启停、审计和提前结束。人工介入恢复不重复执行。
+能力：返回 `ContinueLoop` 或 `EndTurnLoop`，适合执行 Turn 级策略、持久化消息编辑、工具启停、审计和提前结束。人工介入恢复不重复执行。
 
 ### ITERATION_START
 
@@ -230,7 +233,7 @@ Context：`TurnStartContext`，包含当前 `SessionSnapshot`。
 
 Context：`IterationStartContext`，包含当前 `TurnSnapshot`。
 
-能力：返回 `ContinueLoop` 或 `EndTurnLoop`，适合迭代预算、策略判断和工具启停。此时通常尚无 ModelRequest，不能依赖通用消息操作。
+能力：返回 `ContinueLoop` 或 `EndTurnLoop`，适合迭代预算、策略判断、持久化消息编辑和工具启停。
 
 ### ITERATION_END
 
@@ -260,7 +263,7 @@ Context 包含：
 - 消息数、token、字符统计和触发位置。
 - 当前 `ConversationCompactionRequest`。
 
-可以替换完整压缩请求，或在调用 Compactor 前返回 `EndTurnPreMessageCompression`。提前结束时不会调用 Compactor，也不会提交本次压缩。
+可以替换压缩请求，或在调用 Compactor 前返回 `EndTurnPreMessageCompression`。包含消息操作时，压缩 Patch 必须保持原值；core 先提交消息编辑，再从最新窗口重算模型请求、容量和压缩请求。若编辑后不再达到阈值，立即终止本次压缩。提前结束时不会调用 Compactor，也不会提交本次压缩。
 
 ### POST_MESSAGE_COMPRESSION
 
@@ -268,7 +271,7 @@ Context 包含原始压缩消息和 `ConversationCompactionResult`。
 
 可以改写摘要、保留消息选择和 metadata。最终保留消息必须是压缩来源中未经修改的连续尾部；Hook 不能借此重写已有消息。
 
-`ContinuePostMessageCompression.conversationAppends` 可声明压缩后持久化追加：除 `SUMMARY` 外允许现有消息类型。多个 Binding 的追加按 `(order, id)` 及各自列表顺序累积；core 在压缩成功后分配消息身份和顺序，并通过普通 Conversation `append()` 写穿。压缩与追加不是同一事务，追加失败时已提交的摘要和压缩标记不回滚。
+POST Hook 使用普通 `HookMutations.messageOperations` 编辑最终保留尾部。不能编辑即将被摘要覆盖的来源消息；所有 Binding 声明的消息操作与摘要、压缩标记在同一个 `ConversationWriteBatch` 中提交，任一写入失败时共同回滚。
 
 即使后续 POST Hook 返回 `EndTurnPostMessageCompression`，本次压缩及此前 Continue Hook 已声明的追加仍先提交，然后才进入 Turn 收尾。
 
@@ -282,7 +285,7 @@ Context 包含原始压缩消息和 `ConversationCompactionResult`。
 
 Context：`PreModelCallContext`，包含当前 ModelRequest。
 
-可以替换完整请求，包括 system prompt、前置消息、对话消息、工具定义和 options。返回 `EndTurnPreModelCall` 时不会调用模型。
+`ContinuePreModelCall` 只包含 `HookMutations`，不能临时替换 system prompt、前置消息、完整请求、工具定义或 options。普通消息通过持久化 MessageOperation 编辑，工具通过 `ToolActivationDelta` 启停；每个 Binding 后请求都会从最新窗口和启用工具重建。返回 `EndTurnPreModelCall` 时不会调用模型。
 
 ### POST_MODEL_CALL
 
@@ -386,7 +389,7 @@ TURN_START 提前结束时尚未创建 Iteration，因此不会分发 ITERATION_
 - PRE_MODEL_CALL：不调用模型。
 - POST_MODEL_CALL：不提交当前助手消息。
 - PRE_MESSAGE_COMPRESSION：不执行压缩。
-- POST_MESSAGE_COMPRESSION：先提交压缩结果和此前声明的持久化追加。
+- POST_MESSAGE_COMPRESSION：原子提交压缩结果和此前声明的持久化消息操作。
 - PRE_TOOL_CALL：整批写固定结束结果。
 - POST_TOOL_CALL：先提交当前结果，再为剩余调用写固定结束结果。
 
@@ -399,7 +402,7 @@ TURN_START 提前结束时尚未创建 Iteration，因此不会分发 ITERATION_
 | `AskHumanInterventionHook` | PRE_TOOL_CALL | 把 `ask_human` ToolCall 转换为问题介入；非法问题定义转为 BlockTool |
 | `PlainTextTruncateHook` | POST_TOOL_CALL | 截断过长纯文本 ToolResult，默认上限为 4000 个 Unicode 码点 |
 | `SkillActivationStateHook` | POST_TOOL_CALL | 从 ToolResult metadata 读取 Skill 名并声明激活状态 |
-| `TodoMiddleware` | PRE_MODEL_CALL | 注入 `write_todos` 使用规则；压缩淘汰原始 ToolCall 后，从共享数据补回当前 Todo 列表 |
+| `TodoMiddleware` | PRE_MODEL_CALL | 维护带稳定 payload 标记的持久化 SYSTEM/TEXT Todo 上下文；状态变化时 Replace、重复时 Remove、压缩淘汰后重新 Append |
 | `CompositeLifecycleHook` | 任意单一结果族 | 顺序调用相同 descriptor 的 Hook，遇到非 Continue 结果立即短路 |
 
 `CompositeLifecycleHook` 不合并多个 Continue 结果。如果所有子 Hook 都返回 Continue，只有最后一个 Continue 结果会交给 core 应用；前面返回的 Mutation 和 Patch 不会自动累积。需要组合修改时，应实现一个明确合并结果的专用 Hook，或使用多个独立 Binding 让 dispatcher 逐项应用。
@@ -453,7 +456,7 @@ hooks:
 3. 是否同时完成 runtime/platform 注册与 Agent Binding。
 4. `order`、Binding ID 和 tools 匹配是否明确且稳定。
 5. Continue Patch 是否保留 ToolCall/ToolResult 关联不变量。
-6. 是否误把 MessageOperation 当成持久化对话编辑。
+6. MessageOperation 的目标 entryId 是否仍在活动窗口，整个批次是否保持工具消息一一配对。
 7. EndTurn 前后哪些模型消息、压缩结果或工具结果已经提交。
 8. PRE_TOOL_CALL 是否覆盖多工具批次、Block、直接结果、人工挂起、恢复和再次介入。
 9. POST_TOOL_CALL Skill 状态是否只在工具结果提交成功后生效。

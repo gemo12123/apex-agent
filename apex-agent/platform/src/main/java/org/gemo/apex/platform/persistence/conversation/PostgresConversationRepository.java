@@ -13,26 +13,40 @@ import org.gemo.apex.common.message.MessageRole;
 import org.gemo.apex.common.message.MessageType;
 import org.gemo.apex.extension.repository.ConversationRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Repository
 public class PostgresConversationRepository implements ConversationRepository {
     private final JdbcTemplate jdbc;
+    private final TransactionTemplate transactions;
 
     public PostgresConversationRepository(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
+        this.transactions =
+                new TransactionTemplate(
+                        new DataSourceTransactionManager(
+                                java.util.Objects.requireNonNull(
+                                        jdbc.getDataSource(), "JdbcTemplate.dataSource")));
     }
 
     @Override
-    @Transactional
-    public void append(List<AgentMessageEntry> entries) {
-        if (entries.stream().anyMatch(entry -> entry.messageType() == MessageType.SUMMARY)) {
-            throw new IllegalArgumentException("SUMMARY 消息不能写入对话消息仓储");
-        }
-        for (AgentMessageEntry entry : entries) {
-            store(entry);
-        }
+    public void commit(ConversationWriteBatch batch) {
+        transactions.executeWithoutResult(
+                ignored -> {
+                    for (ConversationWrite write : batch.writes()) {
+                        switch (write) {
+                            case AppendConversationWrite append -> store(append.entry());
+                            case ReplaceConversationWrite replace ->
+                                    replace(batch.sessionId(), replace);
+                            case RemoveConversationWrite remove ->
+                                    remove(batch.sessionId(), remove);
+                            case CompactConversationWrite compact -> compact(compact.commit());
+                        }
+                    }
+                });
     }
 
     @Override
@@ -63,9 +77,7 @@ public class PostgresConversationRepository implements ConversationRepository {
         return new ConversationHistory(query.sessionId(), summary, messages);
     }
 
-    @Override
-    @Transactional
-    public void compact(ConversationCompactionCommit commit) {
+    private void compact(ConversationCompactionCommit commit) {
         List<Summary> existing =
                 jdbc.query(
                         """
@@ -92,8 +104,7 @@ public class PostgresConversationRepository implements ConversationRepository {
                 && existing.getFirst().compactionId().equals(commit.summary().compactionId())) {
             if (!existing.getFirst().content().equals(commit.summary().content())
                     || !existing.getFirst().payload().equals(payload)
-                    || existing.getFirst().compactedToSortNo()
-                            != commit.summary().sourceEndSortNo()
+                    || existing.getFirst().compactedToSortNo() != commit.summary().sourceEndSortNo()
                     || existing.getFirst().sourceTurnNo() != commit.summary().sourceTurnNo()) {
                 throw new IllegalStateException(
                         "compactionId 内容冲突: " + commit.summary().compactionId());
@@ -127,6 +138,53 @@ public class PostgresConversationRepository implements ConversationRepository {
                 commit.summary().sourceTurnNo(),
                 Timestamp.from(now),
                 Timestamp.from(now));
+    }
+
+    private void replace(String sessionId, ReplaceConversationWrite write) {
+        StoredMessage existing = editableMessage(sessionId, write.targetEntryId());
+        AgentMessageEntry old = existing.entry();
+        int changed =
+                jdbc.update(
+                        """
+                        UPDATE apex_agent_dialogue_message
+                        SET role=?,message_type=?,content=?,payload=?
+                        WHERE id=? AND session_id=? AND compacted=FALSE
+                        """,
+                        write.role().name(),
+                        write.messageType().name(),
+                        write.content(),
+                        JsonUtils.toJson(write.payload()),
+                        old.entryId(),
+                        sessionId);
+        if (changed != 1) {
+            throw new IllegalStateException("消息替换并发冲突: " + write.targetEntryId());
+        }
+    }
+
+    private void remove(String sessionId, RemoveConversationWrite write) {
+        editableMessage(sessionId, write.targetEntryId());
+        int changed =
+                jdbc.update(
+                        """
+                        DELETE FROM apex_agent_dialogue_message
+                        WHERE id=? AND session_id=? AND compacted=FALSE
+                        """,
+                        write.targetEntryId(),
+                        sessionId);
+        if (changed != 1) {
+            throw new IllegalStateException("消息删除并发冲突: " + write.targetEntryId());
+        }
+    }
+
+    private StoredMessage editableMessage(String sessionId, String entryId) {
+        List<StoredMessage> stored = loadStoredMessages("id=?", entryId);
+        if (stored.isEmpty() || !sessionId.equals(stored.getFirst().entry().sessionId())) {
+            throw new IllegalStateException("消息不存在: " + entryId);
+        }
+        if (stored.getFirst().compacted()) {
+            throw new IllegalStateException("已压缩消息不可编辑: " + entryId);
+        }
+        return stored.getFirst();
     }
 
     private Optional<ConversationSummary> loadSummary(String sessionId) {
@@ -182,8 +240,7 @@ public class PostgresConversationRepository implements ConversationRepository {
             throw new IllegalStateException("消息 entryId 冲突: " + entry.entryId());
         }
         List<StoredMessage> sameSort =
-                loadStoredMessages(
-                        "session_id=? AND sort_no=?", entry.sessionId(), entry.sortNo());
+                loadStoredMessages("session_id=? AND sort_no=?", entry.sessionId(), entry.sortNo());
         if (!sameSort.isEmpty()) {
             throw new IllegalStateException("消息 sortNo 冲突: " + entry.sortNo());
         }
@@ -195,12 +252,11 @@ public class PostgresConversationRepository implements ConversationRepository {
             return;
         }
         String placeholders =
-                String.join(",", java.util.Collections.nCopies(commit.retainedMessages().size(), "?"));
+                String.join(
+                        ",", java.util.Collections.nCopies(commit.retainedMessages().size(), "?"));
         List<Object> arguments = new java.util.ArrayList<>();
         arguments.add(commit.sessionId());
-        commit.retainedMessages().stream()
-                .map(AgentMessageEntry::entryId)
-                .forEach(arguments::add);
+        commit.retainedMessages().stream().map(AgentMessageEntry::entryId).forEach(arguments::add);
         List<StoredMessage> stored =
                 loadStoredMessages(
                         "session_id=? AND id IN (" + placeholders + ")", arguments.toArray());
@@ -212,8 +268,7 @@ public class PostgresConversationRepository implements ConversationRepository {
         for (AgentMessageEntry retained : commit.retainedMessages()) {
             StoredMessage existing = byId.get(retained.entryId());
             if (existing == null || !samePersistentMessage(existing.entry(), retained)) {
-                throw new IllegalStateException(
-                        "保留消息不存在或内容冲突: " + retained.entryId());
+                throw new IllegalStateException("保留消息不存在或内容冲突: " + retained.entryId());
             }
             if (existing.compacted()) {
                 throw new IllegalStateException("保留消息已经被压缩: " + retained.entryId());

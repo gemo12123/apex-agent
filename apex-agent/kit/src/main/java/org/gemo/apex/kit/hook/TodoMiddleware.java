@@ -1,19 +1,23 @@
 package org.gemo.apex.kit.hook;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.common.hook.HookTypeDescriptor;
 import org.gemo.apex.common.hook.context.PreModelCallContext;
+import org.gemo.apex.common.hook.operation.AppendMessage;
 import org.gemo.apex.common.hook.operation.HookMutations;
-import org.gemo.apex.common.hook.operation.ModelRequestPatch;
+import org.gemo.apex.common.hook.operation.MessageOperation;
+import org.gemo.apex.common.hook.operation.RemoveMessage;
+import org.gemo.apex.common.hook.operation.ReplaceMessage;
+import org.gemo.apex.common.hook.operation.ToolActivationDelta;
 import org.gemo.apex.common.hook.result.ContinuePreModelCall;
 import org.gemo.apex.common.hook.result.PreModelCallHookResult;
 import org.gemo.apex.common.message.AgentMessageEntry;
 import org.gemo.apex.common.message.MessageRole;
 import org.gemo.apex.common.message.MessageType;
-import org.gemo.apex.common.model.ModelRequest;
 import org.gemo.apex.extension.hook.LifecycleHook;
 import org.gemo.apex.kit.tool.WriteTodosTool;
 
@@ -21,6 +25,8 @@ import org.gemo.apex.kit.tool.WriteTodosTool;
 public final class TodoMiddleware
         implements LifecycleHook<PreModelCallContext, PreModelCallHookResult> {
     public static final String REGISTRATION_NAME = "todoMiddleware";
+    static final String CONTEXT_KIND_KEY = "apex.kind";
+    static final String CONTEXT_KIND = "todo_context";
     static final String SYSTEM_PROMPT =
             """
             <todo_list_system>
@@ -50,24 +56,50 @@ public final class TodoMiddleware
 
     @Override
     public PreModelCallHookResult apply(PreModelCallContext context) {
-        ModelRequest request = context.request();
-        StringBuilder systemPrompt = new StringBuilder(request.systemPrompt());
-        appendBlock(systemPrompt, SYSTEM_PROMPT);
-
         List<Map<String, Object>> todos =
                 readTodos(context.sharedData().get(WriteTodosTool.SHARED_DATA_KEY));
-        if (!todos.isEmpty() && !containsWriteTodosCall(request.messages())) {
-            appendBlock(systemPrompt, reminder(todos));
+        StringBuilder content = new StringBuilder(SYSTEM_PROMPT.strip());
+        if (!todos.isEmpty()) {
+            appendBlock(content, reminder(todos));
         }
-
-        ModelRequest replacement =
-                new ModelRequest(
-                        systemPrompt.toString(),
-                        request.prefixDeveloperMessages(),
-                        request.messages(),
-                        request.tools(),
-                        request.options());
-        return new ContinuePreModelCall(HookMutations.none(), new ModelRequestPatch(replacement));
+        Map<String, Object> payload = Map.of(CONTEXT_KIND_KEY, CONTEXT_KIND);
+        List<AgentMessageEntry> contexts =
+                context.request().messages().stream()
+                        .filter(this::isTodoContext)
+                        .sorted(Comparator.comparingLong(AgentMessageEntry::sortNo))
+                        .toList();
+        List<MessageOperation> operations = new ArrayList<>();
+        if (contexts.isEmpty()) {
+            operations.add(
+                    new AppendMessage(
+                            "todo-context-append",
+                            MessageRole.SYSTEM,
+                            MessageType.TEXT,
+                            content.toString(),
+                            payload));
+        } else {
+            AgentMessageEntry retained = contexts.getLast();
+            for (int index = 0; index < contexts.size() - 1; index++) {
+                AgentMessageEntry duplicate = contexts.get(index);
+                operations.add(
+                        new RemoveMessage(
+                                "todo-context-remove-" + duplicate.entryId(), duplicate.entryId()));
+            }
+            if (!java.util.Objects.equals(retained.content(), content.toString())
+                    || !retained.payload().equals(payload)
+                    || retained.role() != MessageRole.SYSTEM
+                    || retained.messageType() != MessageType.TEXT) {
+                operations.add(
+                        new ReplaceMessage(
+                                "todo-context-replace",
+                                retained.entryId(),
+                                MessageRole.SYSTEM,
+                                MessageType.TEXT,
+                                content.toString(),
+                                payload));
+            }
+        }
+        return new ContinuePreModelCall(new HookMutations(operations, ToolActivationDelta.none()));
     }
 
     private void appendBlock(StringBuilder target, String block) {
@@ -80,24 +112,10 @@ public final class TodoMiddleware
         target.append(block.strip());
     }
 
-    private boolean containsWriteTodosCall(List<AgentMessageEntry> messages) {
-        for (AgentMessageEntry message : messages) {
-            if (message.role() != MessageRole.ASSISTANT
-                    || message.messageType() != MessageType.TOOL_CALLS) {
-                continue;
-            }
-            Object rawCalls = message.payload().get("toolCalls");
-            if (!(rawCalls instanceof List<?> calls)) {
-                continue;
-            }
-            for (Object rawCall : calls) {
-                if (rawCall instanceof Map<?, ?> call
-                        && WriteTodosTool.NAME.equals(call.get("name"))) {
-                    return true;
-                }
-            }
-        }
-        return false;
+    private boolean isTodoContext(AgentMessageEntry message) {
+        return message.role() == MessageRole.SYSTEM
+                && message.messageType() == MessageType.TEXT
+                && CONTEXT_KIND.equals(message.payload().get(CONTEXT_KIND_KEY));
     }
 
     private List<Map<String, Object>> readTodos(Object raw) {

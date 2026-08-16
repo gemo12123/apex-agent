@@ -102,28 +102,36 @@ class HookContractTest {
     @Test
     void mutationRejectsDuplicateOperationsAndConflictingToolChangesAtConstruction() {
         ToolResult result = new ToolResult("call", "tool", "done", Map.of());
-        MessageOperation first = new AppendMessage("same", CommonFixtures.userMessage());
-        MessageOperation second = new ReplaceMessage("same", 0, CommonFixtures.userMessage());
+        MessageOperation first =
+                new AppendMessage("same", MessageRole.USER, MessageType.TEXT, "新增", Map.of());
+        MessageOperation second =
+                new ReplaceMessage(
+                        "same",
+                        CommonFixtures.userMessage().entryId(),
+                        MessageRole.USER,
+                        MessageType.TEXT,
+                        "替换",
+                        Map.of());
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new HookMutations(List.of(first, second), ToolActivationDelta.none()));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new ToolActivationDelta(Set.of("tool"), Set.of("tool")));
-        assertThrows(IllegalArgumentException.class, () -> new RemoveMessage("remove", -1));
+        assertThrows(IllegalArgumentException.class, () -> new RemoveMessage("remove", " "));
         assertThrows(IllegalArgumentException.class, () -> new BlockTool(" "));
         assertThrows(IllegalArgumentException.class, () -> new ReturnToolResult(null));
     }
 
-    /** 压缩后持久化追加拒绝SUMMARY与重复操作ID */
+    /** 持久化追加拒绝SUMMARY且操作ID继续由HookMutations统一校验 */
     @Test
-    void postCompressionConversationAppendsRejectSummaryAndDuplicateOperationIds() {
-        List<AppendConversationMessage> allowed =
+    void persistentConversationOperationsRejectSummaryAndDuplicateOperationIds() {
+        List<AppendMessage> allowed =
                 Stream.of(MessageType.values())
                         .filter(type -> type != MessageType.SUMMARY)
                         .map(
                                 type ->
-                                        new AppendConversationMessage(
+                                        new AppendMessage(
                                                 type.name(),
                                                 MessageRole.SYSTEM,
                                                 type,
@@ -134,7 +142,7 @@ class HookContractTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () ->
-                        new AppendConversationMessage(
+                        new AppendMessage(
                                 "summary",
                                 MessageRole.SYSTEM,
                                 MessageType.SUMMARY,
@@ -143,16 +151,9 @@ class HookContractTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () ->
-                        new ContinuePostMessageCompression(
-                                HookMutations.none(),
-                                new ConversationCompactionResultPatch(
-                                        new org.gemo.apex.common.conversation
-                                                .ConversationCompactionResult(
-                                                "compaction",
-                                                "摘要",
-                                                List.of(),
-                                                Map.of())),
-                                List.of(allowed.getFirst(), allowed.getFirst())));
+                        new HookMutations(
+                                List.of(allowed.getFirst(), allowed.getFirst()),
+                                ToolActivationDelta.none()));
     }
 
     /** 工具调用上下文应暴露当前Binding与人工提交 */

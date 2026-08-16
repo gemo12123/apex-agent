@@ -149,7 +149,13 @@ final class CoreTestFixture {
                 },
                 new ConversationRepository() {
                     @Override
-                    public void append(List<AgentMessageEntry> entries) {
+                    public void commit(ConversationWriteBatch batch) {
+                        List<AgentMessageEntry> entries =
+                                batch.writes().stream()
+                                        .filter(AppendConversationWrite.class::isInstance)
+                                        .map(AppendConversationWrite.class::cast)
+                                        .map(AppendConversationWrite::entry)
+                                        .toList();
                         if (failPostCompressionAppend
                                 && entries.stream()
                                         .anyMatch(entry -> "Hook补充".equals(entry.content()))) {
@@ -163,15 +169,61 @@ final class CoreTestFixture {
                                                                 == MessageType.TOOL_RESULT)) {
                             throw new IllegalStateException("tool result append failed");
                         }
-                        calls.add("conversation.append");
-                        for (AgentMessageEntry entry : entries) {
-                            if (conversation.stream()
-                                    .noneMatch(
-                                            existing ->
-                                                    existing.entryId().equals(entry.entryId()))) {
-                                conversation.add(entry);
+
+                        List<AgentMessageEntry> nextConversation = new ArrayList<>(conversation);
+                        ConversationSummary nextSummary = summary;
+                        ConversationCompactionCommit nextCompactionCommit = compactionCommit;
+                        for (ConversationWrite write : batch.writes()) {
+                            switch (write) {
+                                case AppendConversationWrite append -> {
+                                    calls.add("conversation.append");
+                                    if (nextConversation.stream()
+                                            .noneMatch(
+                                                    existing ->
+                                                            existing.entryId()
+                                                                    .equals(
+                                                                            append.entry()
+                                                                                    .entryId()))) {
+                                        nextConversation.add(append.entry());
+                                    }
+                                }
+                                case ReplaceConversationWrite replace -> {
+                                    int index =
+                                            editableIndex(
+                                                    nextConversation,
+                                                    nextSummary,
+                                                    replace.targetEntryId());
+                                    AgentMessageEntry target = nextConversation.get(index);
+                                    nextConversation.set(
+                                            index,
+                                            new AgentMessageEntry(
+                                                    target.entryId(),
+                                                    target.sessionId(),
+                                                    target.turnNo(),
+                                                    target.sortNo(),
+                                                    replace.role(),
+                                                    replace.messageType(),
+                                                    replace.content(),
+                                                    replace.payload(),
+                                                    target.createdTime()));
+                                }
+                                case RemoveConversationWrite remove ->
+                                        nextConversation.remove(
+                                                editableIndex(
+                                                        nextConversation,
+                                                        nextSummary,
+                                                        remove.targetEntryId()));
+                                case CompactConversationWrite compact -> {
+                                    calls.add("conversation.compact");
+                                    nextCompactionCommit = compact.commit();
+                                    nextSummary = compact.commit().summary();
+                                }
                             }
                         }
+                        conversation.clear();
+                        conversation.addAll(nextConversation);
+                        summary = nextSummary;
+                        compactionCommit = nextCompactionCommit;
                     }
 
                     @Override
@@ -185,11 +237,25 @@ final class CoreTestFixture {
                                         .toList());
                     }
 
-                    @Override
-                    public void compact(ConversationCompactionCommit commit) {
-                        calls.add("conversation.compact");
-                        compactionCommit = commit;
-                        summary = commit.summary();
+                    private int editableIndex(
+                            List<AgentMessageEntry> entries,
+                            ConversationSummary currentSummary,
+                            String targetEntryId) {
+                        for (int index = 0; index < entries.size(); index++) {
+                            AgentMessageEntry entry = entries.get(index);
+                            if (!entry.entryId().equals(targetEntryId)) {
+                                continue;
+                            }
+                            if (entry.messageType() == MessageType.SUMMARY
+                                    || (currentSummary != null
+                                            && entry.sortNo() >= currentSummary.sourceStartSortNo()
+                                            && entry.sortNo()
+                                                    <= currentSummary.sourceEndSortNo())) {
+                                throw new IllegalArgumentException("消息不可编辑: " + targetEntryId);
+                            }
+                            return index;
+                        }
+                        throw new IllegalArgumentException("消息不存在: " + targetEntryId);
                     }
                 },
                 request -> {

@@ -8,7 +8,6 @@ import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.common.hook.context.HookContextView;
 import org.gemo.apex.common.hook.operation.*;
 import org.gemo.apex.common.hook.result.*;
-import org.gemo.apex.common.message.AgentMessageEntry;
 import org.gemo.apex.common.model.ModelRequest;
 import org.gemo.apex.common.model.ModelResponse;
 import org.gemo.apex.common.tool.ToolCall;
@@ -33,7 +32,29 @@ public final class LifecycleDispatcher {
             ApexAgentContext context,
             BiFunction<ApexAgentContext, HookBinding, HookContextView> contextFactory,
             Set<String> skippedBindingIds) {
-        return dispatch(point, context, contextFactory, skippedBindingIds, ignored -> {});
+        return dispatch(
+                point,
+                context,
+                contextFactory,
+                skippedBindingIds,
+                ignored -> {},
+                (binding, result) -> new LifecycleDispatchOutcome.Continued());
+    }
+
+    /** 分发后允许可选子流程在每个 Continue 结果应用后重建自己的输入。 */
+    public LifecycleDispatchOutcome dispatch(
+            HookPoint point,
+            ApexAgentContext context,
+            BiFunction<ApexAgentContext, HookBinding, HookContextView> contextFactory,
+            Set<String> skippedBindingIds,
+            ContinuationObserver continuationObserver) {
+        return dispatch(
+                point,
+                context,
+                contextFactory,
+                skippedBindingIds,
+                ignored -> {},
+                continuationObserver);
     }
 
     /** 分发单个 ToolCall 的 PRE_TOOL_CALL；工具匹配在调用前完成，结果可阻止或请求人工介入。 */
@@ -48,7 +69,8 @@ public final class LifecycleDispatcher {
                         context,
                         contextFactory,
                         Set.copyOf(executedBindingIds),
-                        binding -> completed.add(binding.id()));
+                        binding -> completed.add(binding.id()),
+                        (binding, result) -> new LifecycleDispatchOutcome.Continued());
         return new PreToolDispatchOutcome(outcome, completed);
     }
 
@@ -57,7 +79,8 @@ public final class LifecycleDispatcher {
             ApexAgentContext context,
             BiFunction<ApexAgentContext, HookBinding, HookContextView> contextFactory,
             Set<String> skippedBindingIds,
-            Consumer<HookBinding> completedBinding) {
+            Consumer<HookBinding> completedBinding,
+            ContinuationObserver continuationObserver) {
         if (point != HookPoint.PRE_TOOL_CALL && !skippedBindingIds.isEmpty()) {
             throw new HookContractException("只有 PRE_TOOL_CALL 恢复允许跳过 Hook");
         }
@@ -105,6 +128,11 @@ public final class LifecycleDispatcher {
             if (!(outcome instanceof LifecycleDispatchOutcome.Continued)) {
                 return outcome;
             }
+            LifecycleDispatchOutcome continuation =
+                    continuationObserver.afterContinue(binding, (LifecycleHookResult) raw);
+            if (!(continuation instanceof LifecycleDispatchOutcome.Continued)) {
+                return continuation;
+            }
         }
         return new LifecycleDispatchOutcome.Continued();
     }
@@ -121,25 +149,24 @@ public final class LifecycleDispatcher {
         }
         return switch (result) {
             case ContinueLoop value -> {
-                applyMutations(context, value.mutations());
+                applyMutations(point, context, value.mutations());
                 yield continued();
             }
             case EndTurnLoop value -> end(value.reason());
             case ContinuePreModelCall value -> {
-                applyMutations(context, value.mutations());
-                context.modelRequest(value.patch().replacement());
+                applyMutations(point, context, value.mutations());
                 yield continued();
             }
             case EndTurnPreModelCall value -> end(value.reason());
             case ContinuePostModelCall value -> {
                 validateResponseAssociation(context.modelResponse(), value.patch().replacement());
-                applyMutations(context, value.mutations());
+                applyMutations(point, context, value.mutations());
                 context.modelResponse(value.patch().replacement());
                 yield continued();
             }
             case EndTurnPostModelCall value -> end(value.reason());
             case ContinuePreToolCall value -> {
-                applyMutations(context, value.mutations());
+                applyMutations(point, context, value.mutations());
                 ToolCall call = context.toolCall();
                 context.toolCall(
                         new ToolCall(
@@ -159,7 +186,7 @@ public final class LifecycleDispatcher {
                     new LifecycleDispatchOutcome.HumanIntervention(value.request());
             case EndTurnPreToolCall value -> end(value.reason());
             case ContinuePostToolCall value -> {
-                applyMutations(context, value.mutations());
+                applyMutations(point, context, value.mutations());
                 context.stageSkillActivation(value.skillActivationDelta());
                 ToolResult old = context.toolResult();
                 context.toolResult(
@@ -172,17 +199,19 @@ public final class LifecycleDispatcher {
             }
             case EndTurnPostToolCall value -> end(value.reason());
             case ContinuePreMessageCompression value -> {
-                validateCompressionMutations(value.mutations());
-                applyMutations(context, value.mutations());
+                if (!value.mutations().messageOperations().isEmpty()
+                        && !value.patch().replacement().equals(context.compactionRequest())) {
+                    throw new HookContractException("PRE_MESSAGE_COMPRESSION 修改消息时不能同时替换压缩请求");
+                }
+                applyMutations(point, context, value.mutations());
                 context.compactionRequest(value.patch().replacement());
                 yield continued();
             }
             case EndTurnPreMessageCompression value -> end(value.reason());
             case ContinuePostMessageCompression value -> {
-                validateCompressionMutations(value.mutations());
-                applyMutations(context, value.mutations());
+                applyToolActivation(context, value.mutations().toolActivationDelta());
+                context.stagePostCompressionOperations(value.mutations().messageOperations());
                 context.compactionResult(value.patch().replacement());
-                context.stagePostCompressionAppends(value.conversationAppends());
                 yield continued();
             }
             case EndTurnPostMessageCompression value -> end(value.reason());
@@ -192,55 +221,54 @@ public final class LifecycleDispatcher {
         };
     }
 
-    private void validateCompressionMutations(HookMutations mutations) {
+    /** 将持久化消息操作和工具启停按生命周期语义应用。 */
+    private void applyMutations(
+            HookPoint point, ApexAgentContext context, HookMutations mutations) {
+        applyToolActivation(context, mutations.toolActivationDelta());
         if (!mutations.messageOperations().isEmpty()) {
-            throw new HookContractException(
-                    "消息压缩 Hook 不支持通用 MessageOperation，请使用压缩专用契约");
+            context.mutateConversation(
+                    mutations.messageOperations(),
+                    point == HookPoint.PRE_TOOL_CALL || point == HookPoint.POST_TOOL_CALL);
+        }
+        if (point == HookPoint.PRE_MODEL_CALL) {
+            synchronizePreModelRequest(context);
         }
     }
 
-    /** 将消息、模型请求、工具调用和激活工具等补丁按既定顺序应用。 */
-    private void applyMutations(ApexAgentContext context, HookMutations mutations) {
+    private void applyToolActivation(
+            ApexAgentContext context, ToolActivationDelta toolActivationDelta) {
         Set<String> nextEnabled = new LinkedHashSet<>(context.snapshot().enabledTools());
         if (!context.definition()
                 .definition()
                 .tools()
                 .availableTools()
-                .containsAll(mutations.toolActivationDelta().enable())) {
+                .containsAll(toolActivationDelta.enable())) {
             throw new HookContractException("Hook 尝试启用不可用工具");
         }
-        nextEnabled.addAll(mutations.toolActivationDelta().enable());
-        nextEnabled.removeAll(mutations.toolActivationDelta().disable());
+        context.enableTools(toolActivationDelta.enable(), toolActivationDelta.disable());
+    }
+
+    private void synchronizePreModelRequest(ApexAgentContext context) {
         ModelRequest current = context.modelRequest();
-        List<AgentMessageEntry> messages =
-                current == null ? new ArrayList<>() : new ArrayList<>(current.messages());
-        if (current == null && !mutations.messageOperations().isEmpty()) {
-            throw new HookContractException("当前生命周期没有可修改的消息集合");
+        if (current == null) {
+            throw new HookContractException("PRE_MODEL_CALL 缺少 ModelRequest");
         }
-        try {
-            for (MessageOperation operation : mutations.messageOperations()) {
-                switch (operation) {
-                    case AppendMessage append -> messages.add(append.message());
-                    case InsertMessage insert -> messages.add(insert.index(), insert.message());
-                    case ReplaceMessage replace -> messages.set(replace.index(), replace.message());
-                    case RemoveMessage remove -> messages.remove(remove.index());
-                }
-            }
-        } catch (IndexOutOfBoundsException error) {
-            throw new HookContractException("消息 Patch 越界", error);
-        }
-        context.enableTools(
-                mutations.toolActivationDelta().enable(),
-                mutations.toolActivationDelta().disable());
-        if (current != null) {
-            context.modelRequest(
-                    new ModelRequest(
-                            current.systemPrompt(),
-                            current.prefixDeveloperMessages(),
-                            messages,
-                            current.tools(),
-                            current.options()));
-        }
+        var tools =
+                context.toolCatalog().ordered().stream()
+                        .filter(
+                                tool ->
+                                        context.snapshot()
+                                                .enabledTools()
+                                                .contains(tool.definition().name()))
+                        .map(tool -> tool.definition())
+                        .toList();
+        context.modelRequest(
+                new ModelRequest(
+                        current.systemPrompt(),
+                        current.prefixDeveloperMessages(),
+                        context.conversationWindow().messages(),
+                        tools,
+                        current.options()));
     }
 
     private void validateResponseAssociation(ModelResponse before, ModelResponse after) {
@@ -269,5 +297,10 @@ public final class LifecycleDispatcher {
 
     private LifecycleDispatchOutcome end(String reason) {
         return new LifecycleDispatchOutcome.EndTurn(reason);
+    }
+
+    @FunctionalInterface
+    public interface ContinuationObserver {
+        LifecycleDispatchOutcome afterContinue(HookBinding binding, LifecycleHookResult result);
     }
 }

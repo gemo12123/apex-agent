@@ -1,4 +1,4 @@
-package org.gemo.apex.common.hook.operation;
+package org.gemo.apex.common.conversation;
 
 import static org.gemo.apex.common.support.DomainValues.nonNull;
 import static org.gemo.apex.common.support.DomainValues.required;
@@ -8,19 +8,19 @@ import org.gemo.apex.common.message.MessageRole;
 import org.gemo.apex.common.message.MessageType;
 import org.gemo.apex.common.support.DomainValues;
 
-/** POST_MESSAGE_COMPRESSION Hook 声明的持久化对话追加。 */
-public record AppendConversationMessage(
-        String operationId,
+public record ReplaceConversationWrite(
+        String targetEntryId,
         MessageRole role,
         MessageType messageType,
         String content,
-        Map<String, Object> payload) {
-    public AppendConversationMessage {
-        operationId = required(operationId, "operationId");
+        Map<String, Object> payload)
+        implements ConversationWrite {
+    public ReplaceConversationWrite {
+        targetEntryId = required(targetEntryId, "targetEntryId");
         role = nonNull(role, "role");
         messageType = nonNull(messageType, "messageType");
         if (messageType == MessageType.SUMMARY) {
-            throw new IllegalArgumentException("压缩后追加不能使用 SUMMARY");
+            throw new IllegalArgumentException("不能把普通消息替换为 SUMMARY");
         }
         payload = DomainValues.jsonMap(payload, "payload");
     }

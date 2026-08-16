@@ -5,25 +5,23 @@ import java.util.concurrent.*;
 import org.gemo.apex.common.conversation.*;
 import org.gemo.apex.common.json.JsonUtils;
 import org.gemo.apex.common.message.AgentMessageEntry;
-import org.gemo.apex.common.message.MessageType;
 import org.gemo.apex.extension.repository.ConversationRepository;
 
 public final class InMemoryConversationRepository implements ConversationRepository {
     private final Map<String, State> map = new ConcurrentHashMap<>();
 
-    public void append(List<AgentMessageEntry> es) {
-        if (es.isEmpty()) {
-            return;
-        }
-        if (es.stream().anyMatch(entry -> entry.messageType() == MessageType.SUMMARY)) {
-            throw new IllegalArgumentException("SUMMARY 消息不能写入对话消息仓储");
-        }
+    public void commit(ConversationWriteBatch batch) {
         map.compute(
-                es.getFirst().sessionId(),
+                batch.sessionId(),
                 (k, v) -> {
                     var s = v == null ? new State() : v.copy();
-                    for (var e : es) {
-                        s.add(copy(e));
+                    for (ConversationWrite write : batch.writes()) {
+                        switch (write) {
+                            case AppendConversationWrite append -> s.add(copy(append.entry()));
+                            case ReplaceConversationWrite replace -> replace(s, replace);
+                            case RemoveConversationWrite remove -> remove(s, remove);
+                            case CompactConversationWrite compact -> compact(s, compact.commit());
+                        }
                     }
                     return s;
                 });
@@ -42,35 +40,56 @@ public final class InMemoryConversationRepository implements ConversationReposit
                                 .toList());
     }
 
-    public void compact(ConversationCompactionCommit c) {
-        map.compute(
-                c.sessionId(),
-                (k, v) -> {
-                    var s = v == null ? new State() : v.copy();
-                    ConversationCompactionCommit existing =
-                            s.compactions.get(c.summary().compactionId());
-                    if (existing != null && !existing.equals(c)) {
-                        throw new IllegalStateException(
-                                "compactionId 内容冲突: " + c.summary().compactionId());
-                    }
-                    if (existing == null) {
-                        validateRetainedMessages(s, c);
-                        s.compactions.put(c.summary().compactionId(), c);
-                        s.summary = c.summary();
-                        s.items.stream()
-                                .filter(
-                                        item ->
-                                                item.sortNo()
-                                                                >= c.summary()
-                                                                        .sourceStartSortNo()
-                                                        && item.sortNo()
-                                                                <= c.summary()
-                                                                        .sourceEndSortNo())
-                                .map(AgentMessageEntry::entryId)
-                                .forEach(s.compactedEntryIds::add);
-                    }
-                    return s;
-                });
+    private void replace(State state, ReplaceConversationWrite write) {
+        int index = indexOfEditable(state, write.targetEntryId());
+        AgentMessageEntry old = state.items.get(index);
+        state.items.set(
+                index,
+                new AgentMessageEntry(
+                        old.entryId(),
+                        old.sessionId(),
+                        old.turnNo(),
+                        old.sortNo(),
+                        write.role(),
+                        write.messageType(),
+                        write.content(),
+                        write.payload(),
+                        old.createdTime()));
+    }
+
+    private void remove(State state, RemoveConversationWrite write) {
+        state.items.remove(indexOfEditable(state, write.targetEntryId()));
+    }
+
+    private int indexOfEditable(State state, String entryId) {
+        if (state.compactedEntryIds.contains(entryId)) {
+            throw new IllegalStateException("已压缩消息不可编辑: " + entryId);
+        }
+        for (int index = 0; index < state.items.size(); index++) {
+            if (state.items.get(index).entryId().equals(entryId)) {
+                return index;
+            }
+        }
+        throw new IllegalStateException("消息不存在: " + entryId);
+    }
+
+    private void compact(State s, ConversationCompactionCommit c) {
+        ConversationCompactionCommit existing = s.compactions.get(c.summary().compactionId());
+        if (existing != null && !existing.equals(c)) {
+            throw new IllegalStateException("compactionId 内容冲突: " + c.summary().compactionId());
+        }
+        if (existing == null) {
+            validateRetainedMessages(s, c);
+            s.compactions.put(c.summary().compactionId(), c);
+            s.summary = c.summary();
+            s.items.stream()
+                    .filter(
+                            item ->
+                                    item.sortNo() >= c.summary().sourceStartSortNo()
+                                            && item.sortNo() <= c.summary().sourceEndSortNo())
+                    .map(AgentMessageEntry::entryId)
+                    .forEach(s.compactedEntryIds::add);
+        }
     }
 
     private void validateRetainedMessages(State state, ConversationCompactionCommit commit) {

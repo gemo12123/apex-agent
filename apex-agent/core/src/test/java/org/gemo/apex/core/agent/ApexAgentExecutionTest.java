@@ -16,7 +16,7 @@ import org.gemo.apex.common.hook.context.AgentBuildContext;
 import org.gemo.apex.common.hook.context.PostMessageCompressionContext;
 import org.gemo.apex.common.hook.context.PostToolCallContext;
 import org.gemo.apex.common.hook.context.PreToolCallContext;
-import org.gemo.apex.common.hook.operation.AppendConversationMessage;
+import org.gemo.apex.common.hook.operation.AppendMessage;
 import org.gemo.apex.common.hook.operation.ConversationCompactionResultPatch;
 import org.gemo.apex.common.hook.operation.HookMutations;
 import org.gemo.apex.common.hook.operation.SkillActivationDelta;
@@ -29,8 +29,8 @@ import org.gemo.apex.common.hook.result.ContinuePostMessageCompression;
 import org.gemo.apex.common.hook.result.ContinuePostToolCall;
 import org.gemo.apex.common.hook.result.ContinuePreToolCall;
 import org.gemo.apex.common.hook.result.EndTurnPostMessageCompression;
-import org.gemo.apex.common.hook.result.PostToolCallHookResult;
 import org.gemo.apex.common.hook.result.PostMessageCompressionHookResult;
+import org.gemo.apex.common.hook.result.PostToolCallHookResult;
 import org.gemo.apex.common.hook.result.PreToolCallHookResult;
 import org.gemo.apex.common.message.MessageRole;
 import org.gemo.apex.common.message.MessageType;
@@ -358,7 +358,7 @@ class ApexAgentExecutionTest {
         assertInstanceOf(AgentRunOutcome.Completed.class, outcome);
         assertEquals(1, fixture.windowLoads);
         assertEquals(
-                List.of(MessageType.SUMMARY, MessageType.TOOL_RESULT),
+                List.of(MessageType.SUMMARY, MessageType.TOOL_CALLS, MessageType.TOOL_RESULT),
                 fixture.modelRequests.getLast().messages().stream()
                         .map(message -> message.messageType())
                         .toList());
@@ -400,9 +400,9 @@ class ApexAgentExecutionTest {
                         < fixture.calls.lastIndexOf("conversation.append"));
     }
 
-    /** 压缩后Hook追加失败不回滚已经提交的压缩 */
+    /** POST压缩Hook消息写入失败时摘要与消息操作共同回滚 */
     @Test
-    void keepsCommittedCompactionWhenPostCompressionAppendFails() {
+    void rollsBackCompactionWhenPostCompressionAppendFails() {
         CoreTestFixture fixture = new CoreTestFixture();
         fixture.compact = true;
         fixture.hooks.put("append", postCompressionAppendHook("append", "Hook补充"));
@@ -412,12 +412,7 @@ class ApexAgentExecutionTest {
                                 HookPoint.POST_MESSAGE_COMPRESSION,
                                 List.of(
                                         new HookBinding(
-                                                "append",
-                                                "append",
-                                                0,
-                                                true,
-                                                List.of(),
-                                                Map.of()))),
+                                                "append", "append", 0, true, List.of(), Map.of()))),
                         Set.of(),
                         Set.of());
         fixture.modelResponses.add(new ModelResponse("不会调用", List.of(), Map.of()));
@@ -427,8 +422,8 @@ class ApexAgentExecutionTest {
         AgentRunOutcome outcome = agent.run();
 
         assertInstanceOf(AgentRunOutcome.Failed.class, outcome);
-        assertNotNull(fixture.compactionCommit);
-        assertNotNull(fixture.summary);
+        assertNull(fixture.compactionCommit);
+        assertNull(fixture.summary);
         assertTrue(
                 fixture.conversation.stream()
                         .noneMatch(message -> "Hook补充".equals(message.content())));
@@ -471,12 +466,7 @@ class ApexAgentExecutionTest {
                                 HookPoint.POST_MESSAGE_COMPRESSION,
                                 List.of(
                                         new HookBinding(
-                                                "append",
-                                                "append",
-                                                0,
-                                                true,
-                                                List.of(),
-                                                Map.of()),
+                                                "append", "append", 0, true, List.of(), Map.of()),
                                         new HookBinding(
                                                 "end", "end", 10, true, List.of(), Map.of()))),
                         Set.of(),
@@ -920,15 +910,16 @@ class ApexAgentExecutionTest {
             @Override
             public PostMessageCompressionHookResult apply(PostMessageCompressionContext context) {
                 return new ContinuePostMessageCompression(
-                        HookMutations.none(),
-                        new ConversationCompactionResultPatch(context.result()),
-                        List.of(
-                                new AppendConversationMessage(
-                                        operationId,
-                                        MessageRole.SYSTEM,
-                                        MessageType.TEXT,
-                                        content,
-                                        Map.of())));
+                        new HookMutations(
+                                List.of(
+                                        new AppendMessage(
+                                                operationId,
+                                                MessageRole.SYSTEM,
+                                                MessageType.TEXT,
+                                                content,
+                                                Map.of())),
+                                ToolActivationDelta.none()),
+                        new ConversationCompactionResultPatch(context.result()));
             }
         };
     }

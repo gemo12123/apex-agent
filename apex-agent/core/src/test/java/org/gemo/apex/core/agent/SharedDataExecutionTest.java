@@ -231,10 +231,7 @@ class SharedDataExecutionTest {
                             HookMutations.none(),
                             new ConversationCompactionResultPatch(
                                     ((PostMessageCompressionContext) context).result()));
-            case PRE_MODEL_CALL ->
-                    new ContinuePreModelCall(
-                            HookMutations.none(),
-                            new ModelRequestPatch(((PreModelCallContext) context).request()));
+            case PRE_MODEL_CALL -> new ContinuePreModelCall(HookMutations.none());
             case POST_MODEL_CALL ->
                     new ContinuePostModelCall(
                             HookMutations.none(),

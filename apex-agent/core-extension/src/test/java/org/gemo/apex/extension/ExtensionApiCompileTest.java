@@ -152,8 +152,12 @@ class ExtensionApiCompileTest {
                         new ConversationSummary("compaction-1", "摘要", 0, 0, 1, Instant.EPOCH),
                         List.of(entry));
 
-        repository.append(List.of(entry));
-        repository.compact(commit);
+        repository.commit(
+                new ConversationWriteBatch(
+                        "session",
+                        List.of(
+                                new AppendConversationWrite(entry),
+                                new CompactConversationWrite(commit))));
 
         assertEquals("entry-1", repository.entries.getFirst().entryId());
         assertEquals("compaction-1", repository.commit.summary().compactionId());
@@ -228,15 +232,12 @@ class ExtensionApiCompileTest {
 
     private static final class FakeConversationRepository implements ConversationRepository {
         @Override
-        public void append(List<AgentMessageEntry> entries) {}
+        public void commit(ConversationWriteBatch batch) {}
 
         @Override
         public ConversationHistory load(ConversationQuery query) {
             return new ConversationHistory(query.sessionId(), Optional.empty(), List.of());
         }
-
-        @Override
-        public void compact(ConversationCompactionCommit commit) {}
     }
 
     private static final class CapturingConversationRepository implements ConversationRepository {
@@ -244,18 +245,25 @@ class ExtensionApiCompileTest {
         private ConversationCompactionCommit commit;
 
         @Override
-        public void append(List<AgentMessageEntry> entries) {
-            this.entries = List.copyOf(entries);
+        public void commit(ConversationWriteBatch batch) {
+            this.entries =
+                    batch.writes().stream()
+                            .filter(AppendConversationWrite.class::isInstance)
+                            .map(AppendConversationWrite.class::cast)
+                            .map(AppendConversationWrite::entry)
+                            .toList();
+            this.commit =
+                    batch.writes().stream()
+                            .filter(CompactConversationWrite.class::isInstance)
+                            .map(CompactConversationWrite.class::cast)
+                            .map(CompactConversationWrite::commit)
+                            .findFirst()
+                            .orElse(null);
         }
 
         @Override
         public ConversationHistory load(ConversationQuery query) {
             return new ConversationHistory(query.sessionId(), Optional.empty(), List.of());
-        }
-
-        @Override
-        public void compact(ConversationCompactionCommit commit) {
-            this.commit = commit;
         }
     }
 
