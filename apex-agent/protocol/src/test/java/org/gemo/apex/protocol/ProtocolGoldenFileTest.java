@@ -123,6 +123,8 @@ class ProtocolGoldenFileTest {
                 Arguments.of("end.json", EndMessage.class, false),
                 Arguments.of("stream-think.compat.json", StreamThinkMessage.class, false),
                 Arguments.of("invocation-declared.json", InvocationDeclaredMessage.class, true),
+                Arguments.of(
+                        "invocation-declared-nested.json", InvocationDeclaredMessage.class, true),
                 Arguments.of("invocation-change.json", InvocationChangeMessage.class, true),
                 Arguments.of("artifact-declared.compat.json", ArtifactDeclaredMessage.class, false),
                 Arguments.of("artifact-change.compat.json", ArtifactChangeMessage.class, false));

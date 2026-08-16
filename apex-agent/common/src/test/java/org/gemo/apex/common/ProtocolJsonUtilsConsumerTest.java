@@ -22,12 +22,10 @@ class ProtocolJsonUtilsConsumerTest {
                 "human-intervention.json",
                 "invocation-change.json",
                 "invocation-declared.json",
-                "plan-change.compat.json",
-                "plan-declared.compat.json",
+                "invocation-declared-nested.json",
                 "stream-content.json",
                 "stream-think.compat.json",
-                "task-think-change.compat.json",
-                "task-think-declared.compat.json"
+                "task-error.json"
             })
     void productJsonUtilsConsumesAllEventGoldenFiles(String fileName) throws IOException {
         String golden = resource(fileName);

@@ -339,6 +339,9 @@ function createInvocationRecord(
 ): InvocationRecord {
   return {
     id: message.invocation_id,
+    ...(message.parent_invocation_id
+      ? { parentInvocationId: message.parent_invocation_id }
+      : {}),
     stageId,
     name: message.name,
     invocationType: message.invocation_type,

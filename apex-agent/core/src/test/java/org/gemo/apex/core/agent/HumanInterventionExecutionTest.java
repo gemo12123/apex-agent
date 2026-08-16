@@ -29,6 +29,7 @@ import org.gemo.apex.core.exception.InvalidHumanResponseException;
 import org.gemo.apex.extension.hook.LifecycleHook;
 import org.gemo.apex.protocol.event.EndMessage;
 import org.gemo.apex.protocol.event.HumanInterventionMessage;
+import org.gemo.apex.protocol.event.InvocationDeclaredMessage;
 import org.gemo.apex.protocol.event.detail.AskHumanInterventionDetail;
 import org.gemo.apex.protocol.event.detail.ToolConfirmationDetail;
 import org.junit.jupiter.api.Test;
@@ -182,6 +183,11 @@ class HumanInterventionExecutionTest {
         assertInstanceOf(AgentRunOutcome.Completed.class, resumeQuestion(blocked).run());
         assertEquals("工具执行被阻断：policy", toolContents(blocked.fixture).getFirst());
         assertEquals(1, blocked.postCalls.get());
+        assertEquals(
+                0,
+                blocked.fixture.events.stream()
+                        .filter(InvocationDeclaredMessage.class::isInstance)
+                        .count());
         assertTrue(
                 toolCallPayload(blocked.fixture.conversation, "call-1")
                         .containsKey("resolvedArguments"));
@@ -200,6 +206,11 @@ class HumanInterventionExecutionTest {
         assertInstanceOf(AgentRunOutcome.Completed.class, resumeQuestion(returned).run());
         assertEquals("直接结果", toolContents(returned.fixture).getFirst());
         assertEquals(1, returned.postCalls.get());
+        assertEquals(
+                0,
+                returned.fixture.events.stream()
+                        .filter(InvocationDeclaredMessage.class::isInstance)
+                        .count());
         assertTrue(
                 toolCallPayload(returned.fixture.conversation, "call-1")
                         .containsKey("resolvedArguments"));
@@ -218,6 +229,18 @@ class HumanInterventionExecutionTest {
                     return new ToolResult(call.toolCallId(), call.name(), "answers", Map.of());
                 });
         assertInstanceOf(AgentRunOutcome.Suspended.class, scenario.fresh.run());
+        String stableInvocationId =
+                scenario.fresh
+                        .snapshot()
+                        .suspendedToolBatch()
+                        .toolCalls()
+                        .getFirst()
+                        .invocationId();
+        assertEquals(
+                0,
+                scenario.fixture.events.stream()
+                        .filter(InvocationDeclaredMessage.class::isInstance)
+                        .count());
         scenario.fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
 
         AgentRunOutcome outcome = resumeQuestion(scenario).run();
@@ -228,6 +251,14 @@ class HumanInterventionExecutionTest {
         assertEquals(1, scenario.fixture.toolCalls);
         assertEquals(1, scenario.postCalls.get());
         assertNull(scenario.fixture.sessions.get("session-1").suspendedToolBatch());
+        InvocationDeclaredMessage resumedDeclaration =
+                scenario.fixture.events.stream()
+                        .filter(InvocationDeclaredMessage.class::isInstance)
+                        .map(InvocationDeclaredMessage.class::cast)
+                        .findFirst()
+                        .orElseThrow();
+        assertEquals(
+                stableInvocationId, resumedDeclaration.getMessages().getFirst().getInvocationId());
     }
 
     /** 工具确认批准只合并可编辑参数而拒绝使用唯一固定结果 */
@@ -257,8 +288,7 @@ class HumanInterventionExecutionTest {
         Map<?, ?> audited = toolCallPayload(approved.fixture.conversation, "call-1");
         assertEquals("A", ((Map<?, ?>) audited.get("arguments")).get("room"));
         assertEquals("B", ((Map<?, ?>) audited.get("resolvedArguments")).get("room"));
-        assertEquals(
-                "original", ((Map<?, ?>) audited.get("resolvedArguments")).get("locked"));
+        assertEquals("original", ((Map<?, ?>) audited.get("resolvedArguments")).get("locked"));
 
         Scenario denied =
                 confirmationScenario(context -> continued(context), new AtomicReference<>());
@@ -280,6 +310,11 @@ class HumanInterventionExecutionTest {
         assertEquals("用户拒绝执行", toolContents(denied.fixture).getFirst());
         assertEquals(0, denied.fixture.toolCalls);
         assertEquals(1, denied.postCalls.get());
+        assertEquals(
+                0,
+                denied.fixture.events.stream()
+                        .filter(InvocationDeclaredMessage.class::isInstance)
+                        .count());
     }
 
     /** 非法恢复在解析阶段拒绝且不保存不执行扩展 */
@@ -568,6 +603,11 @@ class HumanInterventionExecutionTest {
 
         assertEquals("工具不可用", toolContents(scenario.fixture).getFirst());
         assertEquals(0, scenario.fixture.toolCalls);
+        assertEquals(
+                0,
+                scenario.fixture.events.stream()
+                        .filter(InvocationDeclaredMessage.class::isInstance)
+                        .count());
         assertFalse(resumed.snapshot().enabledTools().contains("ask"));
         assertEquals(
                 List.of("ask"),
@@ -742,8 +782,7 @@ class HumanInterventionExecutionTest {
                 continue;
             }
             for (Object value : calls) {
-                if (value instanceof Map<?, ?> call
-                        && toolCallId.equals(call.get("toolCallId"))) {
+                if (value instanceof Map<?, ?> call && toolCallId.equals(call.get("toolCallId"))) {
                     return call;
                 }
             }

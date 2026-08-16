@@ -5,6 +5,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -46,6 +48,7 @@ public final class HttpSubAgentTool implements AgentTool {
     }
 
     public ToolResult execute(ToolCall call, ToolExecutionContext x, ToolExecutionObserver o) {
+        String parentInvocationId = Objects.toString(x.attributes().get("invocationId"), "");
         var trace = x.subAgentCallTrace();
         if (trace != null) {
             if (trace.agentKeys().contains(key)) {
@@ -80,9 +83,18 @@ public final class HttpSubAgentTool implements AgentTool {
                     lines.forEach(
                             l -> {
                                 x.cancellationToken().throwIfCancellationRequested();
-                                decoder.accept(l).forEach(j -> consume(j, content, o, future));
+                                decoder.accept(l)
+                                        .forEach(
+                                                j ->
+                                                        consume(
+                                                                j,
+                                                                content,
+                                                                o,
+                                                                future,
+                                                                parentInvocationId));
                             });
-                    decoder.finish().forEach(j -> consume(j, content, o, future));
+                    decoder.finish()
+                            .forEach(j -> consume(j, content, o, future, parentInvocationId));
                 }
                 return new ToolResult(
                         call.toolCallId(),
@@ -99,7 +111,11 @@ public final class HttpSubAgentTool implements AgentTool {
     }
 
     private void consume(
-            String j, StringBuilder c, ToolExecutionObserver o, CompletableFuture<?> f) {
+            String j,
+            StringBuilder c,
+            ToolExecutionObserver o,
+            CompletableFuture<?> f,
+            String parentInvocationId) {
         AgentMessage m = JsonUtils.fromJson(j, AgentMessage.class);
         if (m instanceof HumanInterventionMessage) {
             f.cancel(true);
@@ -108,7 +124,51 @@ public final class HttpSubAgentTool implements AgentTool {
         if (m instanceof StreamContentMessage s && s.getMessages() != null) {
             s.getMessages().forEach(p -> c.append(p.getContent()));
         } else if (m instanceof InvocationDeclaredMessage || m instanceof InvocationChangeMessage) {
-            o.onEvent(m);
+            o.onEvent(forwardedInvocation(m, parentInvocationId));
         }
+    }
+
+    static AgentMessage forwardedInvocation(AgentMessage message, String parentInvocationId) {
+        if (parentInvocationId == null || parentInvocationId.isBlank()) {
+            throw new IllegalStateException("SubAgent 工具缺少父 invocationId");
+        }
+        Map<String, Object> context =
+                message.getContext() == null
+                        ? new LinkedHashMap<>()
+                        : new LinkedHashMap<>(message.getContext());
+        context.put("invocation_id", parentInvocationId);
+        context.putIfAbsent("mode", "react");
+        if (message instanceof InvocationDeclaredMessage declared) {
+            List<InvocationDeclaredMessage.InvocationMessage> details =
+                    declared.getMessages().stream()
+                            .map(
+                                    detail ->
+                                            InvocationDeclaredMessage.InvocationMessage.builder()
+                                                    .invocationId(detail.getInvocationId())
+                                                    .parentInvocationId(
+                                                            detail.getParentInvocationId() == null
+                                                                            || detail.getParentInvocationId()
+                                                                                    .isBlank()
+                                                                    ? parentInvocationId
+                                                                    : detail
+                                                                            .getParentInvocationId())
+                                                    .name(detail.getName())
+                                                    .invocationType(detail.getInvocationType())
+                                                    .clickEffect(detail.getClickEffect())
+                                                    .content(detail.getContent())
+                                                    .complete(detail.isComplete())
+                                                    .renderType(detail.getRenderType())
+                                                    .build())
+                            .toList();
+            return InvocationDeclaredMessage.builder()
+                    .context(Map.copyOf(context))
+                    .messages(details)
+                    .build();
+        }
+        InvocationChangeMessage changed = (InvocationChangeMessage) message;
+        return InvocationChangeMessage.builder()
+                .context(Map.copyOf(context))
+                .messages(changed.getMessages())
+                .build();
     }
 }

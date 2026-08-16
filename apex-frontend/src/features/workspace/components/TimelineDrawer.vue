@@ -81,6 +81,7 @@ function formatKind(kind: TimelineEntry['kind']): string {
         :key="entry.id"
         class="timeline-entry"
         :class="`timeline-entry--${entry.tone}`"
+        :style="{ marginInlineStart: `${entry.depth * 14}px` }"
       >
         <button
           :data-testid="`timeline-entry-${entry.id}`"

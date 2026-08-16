@@ -43,6 +43,8 @@ import org.gemo.apex.common.tool.ToolCall;
 import org.gemo.apex.common.tool.ToolResult;
 import org.gemo.apex.extension.hook.LifecycleHook;
 import org.gemo.apex.protocol.event.EndMessage;
+import org.gemo.apex.protocol.event.InvocationChangeMessage;
+import org.gemo.apex.protocol.event.InvocationDeclaredMessage;
 import org.gemo.apex.protocol.event.TaskErrorMessage;
 import org.junit.jupiter.api.Test;
 
@@ -120,6 +122,107 @@ class ApexAgentExecutionTest {
                 toolCallPayload(fixture.modelRequests.getLast().messages(), "call-1");
         assertEquals(original, nextRequest.get("arguments"));
         assertEquals(resolved, nextRequest.get("resolvedArguments"));
+        InvocationDeclaredMessage declared =
+                fixture.events.stream()
+                        .filter(InvocationDeclaredMessage.class::isInstance)
+                        .map(InvocationDeclaredMessage.class::cast)
+                        .findFirst()
+                        .orElseThrow();
+        assertEquals("weather", declared.getContext().get("executor"));
+        assertEquals(
+                resolved,
+                org.gemo.apex.common.json.JsonUtils.fromJson(
+                        declared.getMessages().getFirst().getContent(), Map.class));
+    }
+
+    @Test
+    void publishesPostHookResultOnlyAfterItWasPersisted() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        fixture.tool(
+                "tool",
+                (call, context, observer) ->
+                        new ToolResult(call.toolCallId(), call.name(), "原始结果", Map.of()));
+        fixture.hooks.put(
+                "post",
+                postToolHook(context -> new ToolResultPatch("POST最终结果", Map.of("checked", true))));
+        fixture.definition =
+                fixture.definition(
+                        Map.of(
+                                HookPoint.POST_TOOL_CALL,
+                                List.of(
+                                        new HookBinding(
+                                                "post",
+                                                "post",
+                                                0,
+                                                true,
+                                                List.of("tool"),
+                                                Map.of()))),
+                        Set.of("tool"),
+                        Set.of("tool"));
+        fixture.modelResponses.add(
+                new ModelResponse(
+                        "",
+                        List.of(new ToolCall("call-1", "tool", 0, Map.of(), Map.of())),
+                        Map.of()));
+        fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
+
+        assertInstanceOf(AgentRunOutcome.Completed.class, create(fixture).run());
+
+        InvocationChangeMessage changed =
+                fixture.events.stream()
+                        .filter(InvocationChangeMessage.class::isInstance)
+                        .map(InvocationChangeMessage.class::cast)
+                        .findFirst()
+                        .orElseThrow();
+        assertEquals("POST最终结果", changed.getMessages().getFirst().getContent());
+        assertEquals("COMPLETE", changed.getMessages().getLast().getStatus());
+        int changeIndex = fixture.calls.indexOf("event.InvocationChangeMessage");
+        assertEquals("session.save", fixture.calls.get(changeIndex - 1));
+    }
+
+    @Test
+    void doesNotExecuteWhenInvocationDeclarationCannotBePublished() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        fixture.tool(
+                "tool",
+                (call, context, observer) ->
+                        new ToolResult(call.toolCallId(), call.name(), "不应执行", Map.of()));
+        fixture.definition = fixture.definition(Map.of(), Set.of("tool"), Set.of("tool"));
+        fixture.failInvocationDeclaredPublish = true;
+        fixture.modelResponses.add(
+                new ModelResponse(
+                        "",
+                        List.of(new ToolCall("call-1", "tool", 0, Map.of(), Map.of())),
+                        Map.of()));
+
+        assertInstanceOf(AgentRunOutcome.Failed.class, create(fixture).run());
+        assertEquals(0, fixture.toolCalls);
+    }
+
+    @Test
+    void doesNotPublishTerminalInvocationWhenToolResultPersistenceFails() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        fixture.tool(
+                "tool",
+                (call, context, observer) ->
+                        new ToolResult(call.toolCallId(), call.name(), "结果", Map.of()));
+        fixture.definition = fixture.definition(Map.of(), Set.of("tool"), Set.of("tool"));
+        fixture.failToolResultAppend = true;
+        fixture.modelResponses.add(
+                new ModelResponse(
+                        "",
+                        List.of(new ToolCall("call-1", "tool", 0, Map.of(), Map.of())),
+                        Map.of()));
+
+        assertInstanceOf(AgentRunOutcome.Failed.class, create(fixture).run());
+        assertEquals(
+                1,
+                fixture.events.stream()
+                        .filter(InvocationDeclaredMessage.class::isInstance)
+                        .count());
+        assertEquals(
+                0,
+                fixture.events.stream().filter(InvocationChangeMessage.class::isInstance).count());
     }
 
     /** 最终参数审计写入失败时不得执行真实工具 */
@@ -135,9 +238,7 @@ class ApexAgentExecutionTest {
         fixture.modelResponses.add(
                 new ModelResponse(
                         "",
-                        List.of(
-                                new ToolCall(
-                                        "call-1", "tool", 0, Map.of("value", "x"), Map.of())),
+                        List.of(new ToolCall("call-1", "tool", 0, Map.of("value", "x"), Map.of())),
                         Map.of()));
 
         AgentRunOutcome outcome = create(fixture).run();
@@ -329,6 +430,13 @@ class ApexAgentExecutionTest {
                         .toList();
         assertEquals(List.of("成功", "工具执行失败：IllegalStateException"), toolContents);
         assertEquals(2, fixture.modelCalls);
+        assertEquals(
+                List.of("COMPLETE", "FAILED"),
+                fixture.events.stream()
+                        .filter(InvocationChangeMessage.class::isInstance)
+                        .map(InvocationChangeMessage.class::cast)
+                        .map(event -> event.getMessages().getLast().getStatus())
+                        .toList());
     }
 
     /** 最后一轮仍返回工具时不执行工具并补齐固定结果 */
@@ -398,6 +506,18 @@ class ApexAgentExecutionTest {
                         .toList());
         assertTrue(toolCallPayload(fixture.conversation, "c1").containsKey("resolvedArguments"));
         assertTrue(toolCallPayload(fixture.conversation, "c2").containsKey("resolvedArguments"));
+        assertEquals(
+                1,
+                fixture.events.stream()
+                        .filter(InvocationDeclaredMessage.class::isInstance)
+                        .count());
+        InvocationChangeMessage cancelled =
+                fixture.events.stream()
+                        .filter(InvocationChangeMessage.class::isInstance)
+                        .map(InvocationChangeMessage.class::cast)
+                        .findFirst()
+                        .orElseThrow();
+        assertEquals("CANCELLED", cancelled.getMessages().getLast().getStatus());
     }
 
     /** 压缩门按compact再session保存后才调用模型 */
@@ -814,6 +934,11 @@ class ApexAgentExecutionTest {
                         .toList()
                         .getLast()
                         .content());
+        assertEquals(
+                1,
+                fixture.events.stream()
+                        .filter(InvocationDeclaredMessage.class::isInstance)
+                        .count());
         assertTrue(toolCallPayload(fixture.conversation, "c1").containsKey("resolvedArguments"));
         assertTrue(toolCallPayload(fixture.conversation, "c2").containsKey("resolvedArguments"));
     }
@@ -1000,6 +1125,29 @@ class ApexAgentExecutionTest {
         };
     }
 
+    private LifecycleHook<PostToolCallContext, PostToolCallHookResult> postToolHook(
+            Function<PostToolCallContext, ToolResultPatch> action) {
+        return new LifecycleHook<>() {
+            @Override
+            public String name() {
+                return "postTool";
+            }
+
+            @Override
+            public HookTypeDescriptor descriptor() {
+                return new HookTypeDescriptor(
+                        HookPoint.POST_TOOL_CALL,
+                        PostToolCallContext.class,
+                        PostToolCallHookResult.class);
+            }
+
+            @Override
+            public PostToolCallHookResult apply(PostToolCallContext context) {
+                return new ContinuePostToolCall(HookMutations.none(), action.apply(context));
+            }
+        };
+    }
+
     private LifecycleHook<PostMessageCompressionContext, PostMessageCompressionHookResult>
             postCompressionAppendHook(String operationId, String content) {
         return new LifecycleHook<>() {
@@ -1085,8 +1233,7 @@ class ApexAgentExecutionTest {
                 continue;
             }
             for (Object value : calls) {
-                if (value instanceof Map<?, ?> call
-                        && toolCallId.equals(call.get("toolCallId"))) {
+                if (value instanceof Map<?, ?> call && toolCallId.equals(call.get("toolCallId"))) {
                     return call;
                 }
             }

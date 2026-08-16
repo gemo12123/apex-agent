@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import org.gemo.apex.common.intervention.QuestionInterventionRequest;
 import org.gemo.apex.common.intervention.ToolConfirmationInterventionRequest;
+import org.gemo.apex.common.json.JsonUtils;
 import org.gemo.apex.common.snapshot.PreparedToolCallDisposition;
 import org.gemo.apex.common.snapshot.SuspendedToolBatch;
 import org.gemo.apex.protocol.event.*;
@@ -15,6 +16,56 @@ import org.gemo.apex.protocol.event.detail.AskHumanQuestionDetail;
 import org.gemo.apex.protocol.event.detail.HumanInterventionDetail;
 
 public final class AgentEventFactory {
+    public InvocationDeclaredMessage invocationDeclared(
+            String invocationId, String toolName, Map<String, Object> arguments) {
+        String requiredInvocationId = required(invocationId, "invocationId");
+        String requiredToolName = required(toolName, "toolName");
+        return InvocationDeclaredMessage.builder()
+                .context(
+                        context(
+                                Map.of(
+                                        "invocation_id", requiredInvocationId,
+                                        "executor", requiredToolName)))
+                .messages(
+                        List.of(
+                                InvocationDeclaredMessage.InvocationMessage.builder()
+                                        .invocationId(requiredInvocationId)
+                                        .name(requiredToolName)
+                                        .invocationType("tool")
+                                        .clickEffect("none")
+                                        .content(JsonUtils.toJson(arguments))
+                                        .complete(false)
+                                        .renderType("json")
+                                        .build()))
+                .build();
+    }
+
+    public InvocationChangeMessage invocationChange(
+            String invocationId, String toolName, String content, String status) {
+        String requiredInvocationId = required(invocationId, "invocationId");
+        String requiredToolName = required(toolName, "toolName");
+        return InvocationChangeMessage.builder()
+                .context(
+                        context(
+                                Map.of(
+                                        "invocation_id", requiredInvocationId,
+                                        "executor", requiredToolName)))
+                .messages(
+                        List.of(
+                                InvocationChangeMessage.InvocationChangeDetail.builder()
+                                        .changeType("CONTENT_APPEND")
+                                        .invocationId(requiredInvocationId)
+                                        .content(content)
+                                        .renderType("text")
+                                        .build(),
+                                InvocationChangeMessage.InvocationChangeDetail.builder()
+                                        .changeType("STATUS_CHANGE")
+                                        .invocationId(requiredInvocationId)
+                                        .status(required(status, "status"))
+                                        .build()))
+                .build();
+    }
+
     public StreamContentMessage streamContent(String contentId, String delta) {
         return StreamContentMessage.builder()
                 .context(context(Map.of("content_id", required(contentId, "contentId"))))

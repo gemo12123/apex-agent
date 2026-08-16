@@ -56,6 +56,7 @@ final class CoreTestFixture {
     boolean failSuspensionSave;
     int remainingSessionSaveFailures;
     boolean failToolResultAppend;
+    boolean failInvocationDeclaredPublish;
     boolean failToolCallAuditReplace;
     boolean failPostCompressionAppend;
 
@@ -336,6 +337,12 @@ final class CoreTestFixture {
                     }
                 },
                 message -> {
+                    if (failInvocationDeclaredPublish
+                            && message
+                                    instanceof
+                                    org.gemo.apex.protocol.event.InvocationDeclaredMessage) {
+                        throw new IllegalStateException("invocation declared publish failed");
+                    }
                     calls.add("event." + message.getClass().getSimpleName());
                     events.add(message);
                 },

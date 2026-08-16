@@ -158,6 +158,49 @@ describe('session reducer', () => {
     ])
   })
 
+  it('保存父调用并将取消变化应用到实际子节点', () => {
+    let state = applyEnvelope(createSessionViewModel(), {
+      event_type: 'INVOCATION_DECLARED',
+      context: { mode: 'react', invocation_id: 'parent' },
+      messages: [
+        {
+          invocation_id: 'child',
+          parent_invocation_id: 'parent',
+          name: 'child-tool',
+          invocation_type: 'tool',
+          complete: false,
+          render_type: 'json',
+        },
+      ],
+    } satisfies SseEnvelope)
+
+    state = applyEnvelope(state, {
+      event_type: 'INVOCATION_CHANGE',
+      context: { mode: 'react', invocation_id: 'parent' },
+      messages: [
+        {
+          invocation_id: 'child',
+          change_type: 'CONTENT_APPEND',
+          content: '已取消',
+          render_type: 'text',
+        },
+        {
+          invocation_id: 'child',
+          change_type: 'STATUS_CHANGE',
+          status: 'CANCELLED',
+        },
+      ],
+    } satisfies SseEnvelope)
+
+    expect(state.stages[0].invocations[0]).toMatchObject({
+      id: 'child',
+      parentInvocationId: 'parent',
+      status: 'CANCELLED',
+      content: '已取消',
+      renderType: 'text',
+    })
+  })
+
   it('stores global artifacts separately from stage artifacts', () => {
     let state = createSessionViewModel()
     state = startAssistantMessage(state)

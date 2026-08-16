@@ -25,6 +25,9 @@ public class InvocationDeclaredMessage extends AgentMessage {
         @JsonProperty("invocation_id")
         private String invocationId;
 
+        @JsonProperty("parent_invocation_id")
+        private String parentInvocationId;
+
         @JsonProperty("name")
         private String name;
 

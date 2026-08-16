@@ -17,6 +17,7 @@ const timelineEntries: TimelineEntry[] = [
     tone: 'success',
     body: '找到 2 条记录。',
     defaultExpanded: false,
+    depth: 1,
   },
   {
     id: 'artifact:1',
@@ -27,6 +28,7 @@ const timelineEntries: TimelineEntry[] = [
     body: '# Draft',
     exportFileName: '报告草稿.md',
     defaultExpanded: false,
+    depth: 1,
   },
 ]
 
@@ -75,5 +77,16 @@ describe('TimelineDrawer', () => {
     await wrapper.get('[data-testid="timeline-export-artifact:1"]').trigger('click')
 
     expect(downloadTextFile).toHaveBeenCalledWith('报告草稿.md', '# Draft')
+  })
+
+  it('按调用层级缩进时间线节点', () => {
+    const wrapper = mount(TimelineDrawer, {
+      props: {
+        open: true,
+        entries: [{ ...timelineEntries[0], depth: 2 }],
+      },
+    })
+
+    expect(wrapper.get('article').attributes('style')).toContain('margin-inline-start: 28px')
   })
 })

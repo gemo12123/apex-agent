@@ -41,6 +41,7 @@ export interface TaskErrorDetail {
 
 export interface InvocationDeclaredDetail {
   invocation_id: string
+  parent_invocation_id?: string
   name: string
   invocation_type: string
   click_effect?: string
@@ -170,10 +171,11 @@ export interface TextFlowRecord {
 
 export interface InvocationRecord {
   id: string
+  parentInvocationId?: string
   stageId: string
   name: string
   invocationType: string
-  status: 'PENDING' | 'RUNNING' | 'COMPLETE' | 'FAILED'
+  status: 'PENDING' | 'RUNNING' | 'COMPLETE' | 'FAILED' | 'CANCELLED'
   renderType: string
   content: string
   executor?: string

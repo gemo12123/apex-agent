@@ -29,11 +29,11 @@ import org.gemo.apex.extension.tool.AgentTool;
 
 /** 对同一模型响应先完成整批 PRE_TOOL_CALL，再统一挂起或按原顺序执行。 */
 public final class ToolCallCoordinator {
-    private static final System.Logger LOG =
-            System.getLogger(ToolCallCoordinator.class.getName());
+    private static final System.Logger LOG = System.getLogger(ToolCallCoordinator.class.getName());
     private final LifecycleDispatcher dispatcher;
     private final ToolResultFactory results;
     private final AgentEventEmitter emitter;
+    private final AgentEventFactory eventFactory;
     private final InterventionSuspender suspender;
     private final HumanResponseParser responses = new HumanResponseParser();
 
@@ -45,6 +45,7 @@ public final class ToolCallCoordinator {
         this.dispatcher = dispatcher;
         this.results = results;
         this.emitter = emitter;
+        this.eventFactory = eventFactory;
         this.suspender = new InterventionSuspender(emitter, eventFactory);
     }
 
@@ -58,9 +59,7 @@ public final class ToolCallCoordinator {
                         prepare(context, call, invocationId, List.of(), null, false);
                 if (outcome instanceof PreparationOutcome.EndTurn end) {
                     auditResolvedArguments(
-                            context,
-                            calls,
-                            appendResolvedCall(prepared, end.resolvedCall()));
+                            context, calls, appendResolvedCall(prepared, end.resolvedCall()));
                     commitBatch(context, calls.stream().map(results::forcedEnd).toList());
                     return new ToolCallsOutcome.EndTurn();
                 }
@@ -119,9 +118,7 @@ public final class ToolCallCoordinator {
                 if (outcome instanceof PreparationOutcome.EndTurn end) {
                     context.resumeFromSuspension();
                     auditResolvedArguments(
-                            context,
-                            modelCalls,
-                            appendResolvedCall(prepared, end.resolvedCall()));
+                            context, modelCalls, appendResolvedCall(prepared, end.resolvedCall()));
                     commitBatch(context, modelCalls.stream().map(results::forcedEnd).toList());
                     return new ToolCallsOutcome.EndTurn();
                 }
@@ -246,17 +243,27 @@ public final class ToolCallCoordinator {
             ToolCall call = call(item);
             context.toolCall(call);
             context.humanSubmission(item.submission());
+            ToolExecutionAttempt attempt = null;
             try {
                 context.ports().cancellationToken().throwIfCancellationRequested();
-                ToolResult result =
+                attempt =
                         item.disposition() == PreparedToolCallDisposition.RETURN_RESULT
-                                ? item.result()
+                                ? ToolExecutionAttempt.notInvoked(item.result())
                                 : execute(context, item.invocationId());
+                ToolResult result = attempt.result();
                 context.toolResult(result);
                 LifecycleDispatchOutcome post = dispatchPost(context);
                 result = context.toolResult();
                 validateAssociation(call, result);
                 commitOne(context, result, resumed ? "tool-result-" + item.invocationId() : null);
+                if (attempt.invoked()) {
+                    emitter.publish(
+                            eventFactory.invocationChange(
+                                    item.invocationId(),
+                                    call.name(),
+                                    result.content(),
+                                    attempt.failed() ? "FAILED" : "COMPLETE"));
+                }
                 if (post instanceof LifecycleDispatchOutcome.EndTurn) {
                     List<ToolResult> forced =
                             prepared.subList(index + 1, prepared.size()).stream()
@@ -265,19 +272,16 @@ public final class ToolCallCoordinator {
                     commitBatch(context, forced);
                     return new ToolCallsOutcome.EndTurn();
                 }
+            } catch (InvocationCancellationException cancellation) {
+                return cancel(context, prepared, index, item, true);
             } catch (CancellationRequestedException cancellation) {
-                List<ToolResult> cancelled =
-                        prepared.subList(index, prepared.size()).stream()
-                                .map(next -> results.cancelled(call(next)))
-                                .toList();
-                commitCancelled(context, cancelled);
-                return new ToolCallsOutcome.Cancelled();
+                return cancel(context, prepared, index, item, attempt != null && attempt.invoked());
             }
         }
         return new ToolCallsOutcome.Completed();
     }
 
-    private ToolResult execute(ApexAgentContext context, String invocationId) {
+    private ToolExecutionAttempt execute(ApexAgentContext context, String invocationId) {
         ToolCall call = context.toolCall();
         AgentTool tool = context.toolCatalog().find(call.name());
         if (tool == null) {
@@ -287,7 +291,7 @@ public final class ToolCallCoordinator {
                 if (isKnownUnavailable(context, call.name())) {
                     context.migrateUnavailableTool(call.name());
                 }
-                return results.unavailable(call);
+                return ToolExecutionAttempt.notInvoked(results.unavailable(call));
             }
             throw new ToolContractException("模型调用了未注册工具: " + call.name());
         }
@@ -304,8 +308,9 @@ public final class ToolCallCoordinator {
                         context.ports().cancellationToken(),
                         context.sharedData(),
                         Map.of("invocationId", invocationId));
+        emitter.publish(
+                eventFactory.invocationDeclared(invocationId, call.name(), call.arguments()));
         try {
-            context.ports().cancellationToken().throwIfCancellationRequested();
             ToolResult result =
                     tool.execute(
                             call,
@@ -314,13 +319,58 @@ public final class ToolCallCoordinator {
                                     invocationId, emitter, context.ports().cancellationToken()));
             context.ports().cancellationToken().throwIfCancellationRequested();
             validateAssociation(call, result);
-            return result;
+            return ToolExecutionAttempt.complete(result);
         } catch (CancellationRequestedException error) {
-            throw error;
+            throw new InvocationCancellationException();
         } catch (RuntimeException error) {
-            return results.executionFailed(call, error);
+            return ToolExecutionAttempt.failed(results.executionFailed(call, error));
         }
     }
+
+    private ToolCallsOutcome cancel(
+            ApexAgentContext context,
+            List<PreparedToolCallSnapshot> prepared,
+            int index,
+            PreparedToolCallSnapshot current,
+            boolean invocationDeclared) {
+        List<ToolResult> cancelled =
+                prepared.subList(index, prepared.size()).stream()
+                        .map(next -> results.cancelled(call(next)))
+                        .toList();
+        commitCancelled(context, cancelled);
+        if (invocationDeclared) {
+            try {
+                emitter.publish(
+                        eventFactory.invocationChange(
+                                current.invocationId(),
+                                current.toolName(),
+                                cancelled.getFirst().content(),
+                                "CANCELLED"));
+            } catch (RuntimeException publishError) {
+                LOG.log(
+                        System.Logger.Level.WARNING,
+                        "取消状态发布失败: invocationId=" + current.invocationId(),
+                        publishError);
+            }
+        }
+        return new ToolCallsOutcome.Cancelled();
+    }
+
+    private record ToolExecutionAttempt(ToolResult result, boolean invoked, boolean failed) {
+        private static ToolExecutionAttempt notInvoked(ToolResult result) {
+            return new ToolExecutionAttempt(result, false, false);
+        }
+
+        private static ToolExecutionAttempt complete(ToolResult result) {
+            return new ToolExecutionAttempt(result, true, false);
+        }
+
+        private static ToolExecutionAttempt failed(ToolResult result) {
+            return new ToolExecutionAttempt(result, true, true);
+        }
+    }
+
+    private static final class InvocationCancellationException extends RuntimeException {}
 
     private PreparedToolCallSnapshot snapshot(
             ApexAgentContext context,
@@ -371,8 +421,7 @@ public final class ToolCallCoordinator {
         if (target == null) {
             LOG.log(
                     System.Logger.Level.WARNING,
-                    "未找到当前 ToolCall 批次消息，跳过最终参数审计: sessionId="
-                            + context.snapshot().sessionId());
+                    "未找到当前 ToolCall 批次消息，跳过最终参数审计: sessionId=" + context.snapshot().sessionId());
             return;
         }
         Map<String, ToolCall> resolvedById = new LinkedHashMap<>();
