@@ -19,8 +19,8 @@ public class SessionStateController {
 
     @GetMapping(value = "/{sessionId}", produces = MediaType.APPLICATION_JSON_VALUE)
     public ApiResponse<SessionStateView> state(
-            @PathVariable String sessionId,
-            @RequestParam String agentKey,
+            @PathVariable("sessionId") String sessionId,
+            @RequestParam("agentKey") String agentKey,
             @RequestHeader(UserContextFilter.HEADER) String userId) {
         if (!StringUtils.hasText(sessionId) || !StringUtils.hasText(agentKey)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "sessionId/agentKey 不能为空");
