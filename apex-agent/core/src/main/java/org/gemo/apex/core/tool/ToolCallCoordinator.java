@@ -5,6 +5,7 @@ import org.gemo.apex.common.exception.CancellationRequestedException;
 import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.common.hook.context.PostToolCallContext;
 import org.gemo.apex.common.hook.context.PreToolCallContext;
+import org.gemo.apex.common.hook.operation.ReplaceMessage;
 import org.gemo.apex.common.intervention.*;
 import org.gemo.apex.common.message.AgentMessageEntry;
 import org.gemo.apex.common.message.MessageRole;
@@ -28,6 +29,8 @@ import org.gemo.apex.extension.tool.AgentTool;
 
 /** 对同一模型响应先完成整批 PRE_TOOL_CALL，再统一挂起或按原顺序执行。 */
 public final class ToolCallCoordinator {
+    private static final System.Logger LOG =
+            System.getLogger(ToolCallCoordinator.class.getName());
     private final LifecycleDispatcher dispatcher;
     private final ToolResultFactory results;
     private final AgentEventEmitter emitter;
@@ -53,7 +56,11 @@ public final class ToolCallCoordinator {
                 String invocationId = context.ports().idGenerator().newInvocationId();
                 PreparationOutcome outcome =
                         prepare(context, call, invocationId, List.of(), null, false);
-                if (outcome instanceof PreparationOutcome.EndTurn) {
+                if (outcome instanceof PreparationOutcome.EndTurn end) {
+                    auditResolvedArguments(
+                            context,
+                            calls,
+                            appendResolvedCall(prepared, end.resolvedCall()));
                     commitBatch(context, calls.stream().map(results::forcedEnd).toList());
                     return new ToolCallsOutcome.EndTurn();
                 }
@@ -63,8 +70,10 @@ public final class ToolCallCoordinator {
                 suspender.suspend(context, batch(context, prepared), false);
                 return new ToolCallsOutcome.Suspended();
             }
+            auditResolvedArguments(context, calls, resolvedCalls(prepared));
             return consume(context, prepared, false);
         } catch (CancellationRequestedException cancellation) {
+            auditResolvedArguments(context, calls, resolvedCalls(prepared));
             commitCancelled(context, calls.stream().map(results::cancelled).toList());
             return new ToolCallsOutcome.Cancelled();
         }
@@ -107,8 +116,12 @@ public final class ToolCallCoordinator {
                                 current.executedPreToolHookIds(),
                                 submission,
                                 true);
-                if (outcome instanceof PreparationOutcome.EndTurn) {
+                if (outcome instanceof PreparationOutcome.EndTurn end) {
                     context.resumeFromSuspension();
+                    auditResolvedArguments(
+                            context,
+                            modelCalls,
+                            appendResolvedCall(prepared, end.resolvedCall()));
                     commitBatch(context, modelCalls.stream().map(results::forcedEnd).toList());
                     return new ToolCallsOutcome.EndTurn();
                 }
@@ -119,9 +132,11 @@ public final class ToolCallCoordinator {
                 return new ToolCallsOutcome.Suspended();
             }
             context.resumeFromSuspension();
+            auditResolvedArguments(context, modelCalls, resolvedCalls(prepared));
             return consume(context, prepared, true);
         } catch (CancellationRequestedException cancellation) {
             context.resumeFromSuspension();
+            auditResolvedArguments(context, modelCalls, resolvedCalls(prepared));
             commitCancelled(context, modelCalls.stream().map(results::cancelled).toList());
             return new ToolCallsOutcome.Cancelled();
         }
@@ -167,7 +182,7 @@ public final class ToolCallCoordinator {
                         executedHookIds);
         LifecycleDispatchOutcome outcome = dispatched.outcome();
         if (outcome instanceof LifecycleDispatchOutcome.EndTurn end) {
-            return new PreparationOutcome.EndTurn(end.reason());
+            return new PreparationOutcome.EndTurn(end.reason(), context.toolCall());
         }
         if (outcome instanceof LifecycleDispatchOutcome.HumanIntervention intervention) {
             return prepared(
@@ -346,6 +361,95 @@ public final class ToolCallCoordinator {
                 submission);
     }
 
+    /** 将已经完成 PRE/HITL 决议的参数写入当前助手 ToolCall 消息，但不覆盖模型原始参数。 */
+    private void auditResolvedArguments(
+            ApexAgentContext context, List<ToolCall> batchCalls, List<ToolCall> resolvedCalls) {
+        if (resolvedCalls.isEmpty()) {
+            return;
+        }
+        AgentMessageEntry target = findToolCallMessage(context, batchCalls);
+        if (target == null) {
+            LOG.log(
+                    System.Logger.Level.WARNING,
+                    "未找到当前 ToolCall 批次消息，跳过最终参数审计: sessionId="
+                            + context.snapshot().sessionId());
+            return;
+        }
+        Map<String, ToolCall> resolvedById = new LinkedHashMap<>();
+        resolvedCalls.forEach(call -> resolvedById.put(call.toolCallId(), call));
+        List<?> originalCalls = (List<?>) target.payload().get("toolCalls");
+        List<Map<String, Object>> auditedCalls = new ArrayList<>(originalCalls.size());
+        for (Object value : originalCalls) {
+            Map<?, ?> original = (Map<?, ?>) value;
+            Map<String, Object> audited = new LinkedHashMap<>();
+            original.forEach((key, item) -> audited.put((String) key, item));
+            ToolCall resolved = resolvedById.get(original.get("toolCallId"));
+            if (resolved != null) {
+                audited.put("resolvedArguments", resolved.arguments());
+            }
+            auditedCalls.add(audited);
+        }
+        Map<String, Object> payload = new LinkedHashMap<>(target.payload());
+        payload.put("toolCalls", auditedCalls);
+        context.mutateConversation(
+                List.of(
+                        new ReplaceMessage(
+                                "record-resolved-tool-arguments",
+                                target.entryId(),
+                                target.role(),
+                                target.messageType(),
+                                target.content(),
+                                payload)));
+    }
+
+    private AgentMessageEntry findToolCallMessage(
+            ApexAgentContext context, List<ToolCall> batchCalls) {
+        List<AgentMessageEntry> messages = context.conversationWindow().messages();
+        for (int index = messages.size() - 1; index >= 0; index--) {
+            AgentMessageEntry message = messages.get(index);
+            if (message.turnNo() == context.snapshot().currentTurnNo()
+                    && message.role() == MessageRole.ASSISTANT
+                    && message.messageType() == MessageType.TOOL_CALLS
+                    && matchesBatch(message.payload().get("toolCalls"), batchCalls)) {
+                return message;
+            }
+        }
+        return null;
+    }
+
+    private boolean matchesBatch(Object value, List<ToolCall> batchCalls) {
+        if (!(value instanceof List<?> payloadCalls) || payloadCalls.size() != batchCalls.size()) {
+            return false;
+        }
+        for (int index = 0; index < batchCalls.size(); index++) {
+            if (!matchesCall(payloadCalls.get(index), batchCalls.get(index))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean matchesCall(Object value, ToolCall call) {
+        if (!(value instanceof Map<?, ?> payloadCall)
+                || !(payloadCall.get("ordinal") instanceof Number ordinal)) {
+            return false;
+        }
+        return call.toolCallId().equals(payloadCall.get("toolCallId"))
+                && call.name().equals(payloadCall.get("name"))
+                && call.ordinal() == ordinal.intValue();
+    }
+
+    private List<ToolCall> resolvedCalls(List<PreparedToolCallSnapshot> prepared) {
+        return prepared.stream().map(this::call).toList();
+    }
+
+    private List<ToolCall> appendResolvedCall(
+            List<PreparedToolCallSnapshot> prepared, ToolCall resolvedCall) {
+        List<ToolCall> calls = new ArrayList<>(resolvedCalls(prepared));
+        calls.add(resolvedCall);
+        return calls;
+    }
+
     private PreparationOutcome prepared(PreparedToolCallSnapshot snapshot) {
         return new PreparationOutcome.Prepared(snapshot);
     }
@@ -518,7 +622,7 @@ public final class ToolCallCoordinator {
     private sealed interface PreparationOutcome {
         record Prepared(PreparedToolCallSnapshot snapshot) implements PreparationOutcome {}
 
-        record EndTurn(String reason) implements PreparationOutcome {}
+        record EndTurn(String reason, ToolCall resolvedCall) implements PreparationOutcome {}
     }
 
     public sealed interface ToolCallsOutcome {

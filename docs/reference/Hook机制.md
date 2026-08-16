@@ -334,6 +334,13 @@ BlockTool 和 ReturnToolResult 生成的结果仍会经过 POST_TOOL_CALL。EndT
 
 该顺序保证人工介入事件能一次展示同批的完整待处理项，也保证 ToolCall 与 ToolResult 一一对应。
 
+完成 PRE/HITL 参数决议后，core 在真实工具消费前更新当前助手 `TOOL_CALLS` 消息：
+
+- `payload.toolCalls[].arguments` 始终保留模型原始参数，后续模型请求仍使用该字段。
+- 已完成决议的调用增加 `payload.toolCalls[].resolvedArguments`，记录 PRE Hook 与人工可编辑参数合并后的最终值。该字段只用于审计，不表示工具一定实际执行或执行成功。
+- HITL 挂起和再次介入期间不写中间态；整批不再介入后一次提交。Block、直接结果、禁用以及已决议后被取消或强制结束的调用同样保留最终参数。
+- 审计更新通过单个 `ConversationWriteBatch` 原子提交；提交失败时不执行真实工具。若 Hook 已删除当前工具消息或破坏其 ToolCall 身份结构，core 尊重该修改、记录 warning 并跳过审计，不重新创建消息。
+
 ### HUMAN_RESPONSE 恢复
 
 挂起前，core 先保存 `SuspendedToolBatch`，再发布唯一 `HUMAN_INTERVENTION`。批次保存：

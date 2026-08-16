@@ -425,7 +425,9 @@ class RuntimeContractTest {
                                                 "name",
                                                 "weather",
                                                 "arguments",
-                                                Map.of("city", "上海")))),
+                                                Map.of("city", "上海"),
+                                                "resolvedArguments",
+                                                Map.of("city", "北京")))),
                         Instant.EPOCH);
 
         var mapped =

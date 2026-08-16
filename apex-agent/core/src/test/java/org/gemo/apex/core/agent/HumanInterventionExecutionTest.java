@@ -18,6 +18,7 @@ import org.gemo.apex.common.hook.operation.ToolCallPatch;
 import org.gemo.apex.common.hook.operation.ToolResultPatch;
 import org.gemo.apex.common.hook.result.*;
 import org.gemo.apex.common.intervention.*;
+import org.gemo.apex.common.message.AgentMessageEntry;
 import org.gemo.apex.common.message.MessageType;
 import org.gemo.apex.common.model.ModelResponse;
 import org.gemo.apex.common.shared.SharedDataCleanupPolicy;
@@ -90,6 +91,9 @@ class HumanInterventionExecutionTest {
                         .getFirst()
                         .resolvedArguments()
                         .get("value"));
+        assertFalse(
+                toolCallPayload(scenario.fixture.conversation, "call-1")
+                        .containsKey("resolvedArguments"));
         assertEquals(0, scenario.fixture.toolCalls);
         int saved = scenario.fixture.calls.lastIndexOf("session.save");
         int published = scenario.fixture.calls.indexOf("event.HumanInterventionMessage");
@@ -161,6 +165,12 @@ class HumanInterventionExecutionTest {
         assertEquals(List.of("达到最大轮次，强制结束", "达到最大轮次，强制结束"), toolContents(scenario.fixture));
         assertEquals(0, scenario.fixture.toolCalls);
         assertNull(scenario.fixture.sessions.get("session-1").suspendedToolBatch());
+        assertTrue(
+                toolCallPayload(scenario.fixture.conversation, "call-1")
+                        .containsKey("resolvedArguments"));
+        assertFalse(
+                toolCallPayload(scenario.fixture.conversation, "call-2")
+                        .containsKey("resolvedArguments"));
     }
 
     /** 恢复BLOCK和RETURN均执行POST并清除挂起 */
@@ -172,6 +182,9 @@ class HumanInterventionExecutionTest {
         assertInstanceOf(AgentRunOutcome.Completed.class, resumeQuestion(blocked).run());
         assertEquals("工具执行被阻断：policy", toolContents(blocked.fixture).getFirst());
         assertEquals(1, blocked.postCalls.get());
+        assertTrue(
+                toolCallPayload(blocked.fixture.conversation, "call-1")
+                        .containsKey("resolvedArguments"));
 
         Scenario returned =
                 questionScenario(
@@ -187,6 +200,9 @@ class HumanInterventionExecutionTest {
         assertInstanceOf(AgentRunOutcome.Completed.class, resumeQuestion(returned).run());
         assertEquals("直接结果", toolContents(returned.fixture).getFirst());
         assertEquals(1, returned.postCalls.get());
+        assertTrue(
+                toolCallPayload(returned.fixture.conversation, "call-1")
+                        .containsKey("resolvedArguments"));
     }
 
     /** 恢复全部CONTINUE时askHuman读取typed答案并继续下一Iteration */
@@ -238,6 +254,11 @@ class HumanInterventionExecutionTest {
         assertInstanceOf(AgentRunOutcome.Completed.class, approvedAgent.run());
         assertEquals("B", arguments.get().get("room"));
         assertEquals("original", arguments.get().get("locked"));
+        Map<?, ?> audited = toolCallPayload(approved.fixture.conversation, "call-1");
+        assertEquals("A", ((Map<?, ?>) audited.get("arguments")).get("room"));
+        assertEquals("B", ((Map<?, ?>) audited.get("resolvedArguments")).get("room"));
+        assertEquals(
+                "original", ((Map<?, ?>) audited.get("resolvedArguments")).get("locked"));
 
         Scenario denied =
                 confirmationScenario(context -> continued(context), new AtomicReference<>());
@@ -712,6 +733,22 @@ class HumanInterventionExecutionTest {
     private PreToolCallHookResult continued(PreToolCallContext context) {
         return new ContinuePreToolCall(
                 HookMutations.none(), new ToolCallPatch(context.toolCall().arguments()));
+    }
+
+    private Map<?, ?> toolCallPayload(List<AgentMessageEntry> messages, String toolCallId) {
+        for (AgentMessageEntry message : messages) {
+            if (message.messageType() != MessageType.TOOL_CALLS
+                    || !(message.payload().get("toolCalls") instanceof List<?> calls)) {
+                continue;
+            }
+            for (Object value : calls) {
+                if (value instanceof Map<?, ?> call
+                        && toolCallId.equals(call.get("toolCallId"))) {
+                    return call;
+                }
+            }
+        }
+        throw new AssertionError("未找到 ToolCall payload: " + toolCallId);
     }
 
     private QuestionInterventionRequest question(ToolCall call) {

@@ -56,6 +56,7 @@ final class CoreTestFixture {
     boolean failSuspensionSave;
     int remainingSessionSaveFailures;
     boolean failToolResultAppend;
+    boolean failToolCallAuditReplace;
     boolean failPostCompressionAppend;
 
     CoreTestFixture() {
@@ -168,6 +169,9 @@ final class CoreTestFixture {
                                                         entry.messageType()
                                                                 == MessageType.TOOL_RESULT)) {
                             throw new IllegalStateException("tool result append failed");
+                        }
+                        if (failToolCallAuditReplace && containsResolvedArguments(batch)) {
+                            throw new IllegalStateException("tool call audit replace failed");
                         }
 
                         List<AgentMessageEntry> nextConversation = new ArrayList<>(conversation);
@@ -413,6 +417,21 @@ final class CoreTestFixture {
                 };
         tools.put(name, tool);
         return tool;
+    }
+
+    private boolean containsResolvedArguments(ConversationWriteBatch batch) {
+        for (ConversationWrite write : batch.writes()) {
+            if (!(write instanceof ReplaceConversationWrite replace)
+                    || !(replace.payload().get("toolCalls") instanceof List<?> calls)) {
+                continue;
+            }
+            for (Object value : calls) {
+                if (value instanceof Map<?, ?> call && call.containsKey("resolvedArguments")) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     interface ToolBehavior {

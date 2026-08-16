@@ -2,10 +2,13 @@ package org.gemo.apex.core.agent;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import org.gemo.apex.common.agent.*;
 import org.gemo.apex.common.execution.AgentRequest;
 import org.gemo.apex.common.execution.IterationStatus;
@@ -44,6 +47,108 @@ import org.gemo.apex.protocol.event.TaskErrorMessage;
 import org.junit.jupiter.api.Test;
 
 class ApexAgentExecutionTest {
+    /** 多个PRE Hook逐项看到前序Patch，最终参数仅作为审计字段写入 */
+    @Test
+    void auditsFinalResolvedArgumentsWithoutReplacingModelArguments() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        AtomicReference<Map<String, Object>> executedArguments = new AtomicReference<>();
+        fixture.tool(
+                "weather",
+                (call, context, observer) -> {
+                    executedArguments.set(call.arguments());
+                    return new ToolResult(call.toolCallId(), call.name(), "晴", Map.of());
+                });
+        fixture.hooks.put(
+                "first",
+                preToolHook(
+                        context -> {
+                            Map<String, Object> arguments =
+                                    new LinkedHashMap<>(context.toolCall().arguments());
+                            arguments.put("city", "北京");
+                            return new ContinuePreToolCall(
+                                    HookMutations.none(), new ToolCallPatch(arguments));
+                        }));
+        fixture.hooks.put(
+                "second",
+                preToolHook(
+                        context -> {
+                            assertEquals("北京", context.toolCall().arguments().get("city"));
+                            Map<String, Object> arguments =
+                                    new LinkedHashMap<>(context.toolCall().arguments());
+                            arguments.put("timeout", 3);
+                            return new ContinuePreToolCall(
+                                    HookMutations.none(), new ToolCallPatch(arguments));
+                        }));
+        fixture.definition =
+                fixture.definition(
+                        Map.of(
+                                HookPoint.PRE_TOOL_CALL,
+                                List.of(
+                                        new HookBinding(
+                                                "second",
+                                                "second",
+                                                20,
+                                                true,
+                                                List.of("weather"),
+                                                Map.of()),
+                                        new HookBinding(
+                                                "first",
+                                                "first",
+                                                10,
+                                                true,
+                                                List.of("weather"),
+                                                Map.of()))),
+                        Set.of("weather"),
+                        Set.of("weather"));
+        Map<String, Object> original = Map.of("city", "上海", "unit", "C");
+        Map<String, Object> resolved = Map.of("city", "北京", "unit", "C", "timeout", 3);
+        fixture.modelResponses.add(
+                new ModelResponse(
+                        "",
+                        List.of(new ToolCall("call-1", "weather", 0, original, Map.of())),
+                        Map.of()));
+        fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
+
+        AgentRunOutcome outcome = create(fixture).run();
+
+        assertInstanceOf(AgentRunOutcome.Completed.class, outcome, outcome.toString());
+        assertEquals(resolved, executedArguments.get());
+        Map<?, ?> audited = toolCallPayload(fixture.conversation, "call-1");
+        assertEquals(original, audited.get("arguments"));
+        assertEquals(resolved, audited.get("resolvedArguments"));
+        Map<?, ?> nextRequest =
+                toolCallPayload(fixture.modelRequests.getLast().messages(), "call-1");
+        assertEquals(original, nextRequest.get("arguments"));
+        assertEquals(resolved, nextRequest.get("resolvedArguments"));
+    }
+
+    /** 最终参数审计写入失败时不得执行真实工具 */
+    @Test
+    void preventsToolExecutionWhenResolvedArgumentAuditCannotBePersisted() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        fixture.tool(
+                "tool",
+                (call, context, observer) ->
+                        new ToolResult(call.toolCallId(), call.name(), "不应执行", Map.of()));
+        fixture.definition = fixture.definition(Map.of(), Set.of("tool"), Set.of("tool"));
+        fixture.failToolCallAuditReplace = true;
+        fixture.modelResponses.add(
+                new ModelResponse(
+                        "",
+                        List.of(
+                                new ToolCall(
+                                        "call-1", "tool", 0, Map.of("value", "x"), Map.of())),
+                        Map.of()));
+
+        AgentRunOutcome outcome = create(fixture).run();
+
+        assertInstanceOf(AgentRunOutcome.Failed.class, outcome);
+        assertEquals(0, fixture.toolCalls);
+        assertTrue(
+                fixture.conversation.stream()
+                        .noneMatch(message -> message.messageType() == MessageType.TOOL_RESULT));
+    }
+
     /** AGENT_BUILD按固定顺序追加前置消息，同一请求各Iteration复用且快照不保存 */
     @Test
     void appendsPrefixDeveloperMessagesOncePerRequestAndExcludesThemFromSnapshot() {
@@ -291,6 +396,8 @@ class ApexAgentExecutionTest {
                         .filter(entry -> entry.messageType() == MessageType.TOOL_RESULT)
                         .map(entry -> entry.content())
                         .toList());
+        assertTrue(toolCallPayload(fixture.conversation, "c1").containsKey("resolvedArguments"));
+        assertTrue(toolCallPayload(fixture.conversation, "c2").containsKey("resolvedArguments"));
     }
 
     /** 压缩门按compact再session保存后才调用模型 */
@@ -707,6 +814,8 @@ class ApexAgentExecutionTest {
                         .toList()
                         .getLast()
                         .content());
+        assertTrue(toolCallPayload(fixture.conversation, "c1").containsKey("resolvedArguments"));
+        assertTrue(toolCallPayload(fixture.conversation, "c2").containsKey("resolvedArguments"));
     }
 
     /** 工具发布非白名单事件会转换为当前工具失败结果 */
@@ -943,6 +1052,46 @@ class ApexAgentExecutionTest {
                 return new ContinueAgentBuild(action.apply(context));
             }
         };
+    }
+
+    private LifecycleHook<PreToolCallContext, PreToolCallHookResult> preToolHook(
+            Function<PreToolCallContext, PreToolCallHookResult> action) {
+        return new LifecycleHook<>() {
+            @Override
+            public String name() {
+                return "preTool";
+            }
+
+            @Override
+            public HookTypeDescriptor descriptor() {
+                return new HookTypeDescriptor(
+                        HookPoint.PRE_TOOL_CALL,
+                        PreToolCallContext.class,
+                        PreToolCallHookResult.class);
+            }
+
+            @Override
+            public PreToolCallHookResult apply(PreToolCallContext context) {
+                return action.apply(context);
+            }
+        };
+    }
+
+    private Map<?, ?> toolCallPayload(
+            List<org.gemo.apex.common.message.AgentMessageEntry> messages, String toolCallId) {
+        for (var message : messages) {
+            if (message.messageType() != MessageType.TOOL_CALLS
+                    || !(message.payload().get("toolCalls") instanceof List<?> calls)) {
+                continue;
+            }
+            for (Object value : calls) {
+                if (value instanceof Map<?, ?> call
+                        && toolCallId.equals(call.get("toolCallId"))) {
+                    return call;
+                }
+            }
+        }
+        throw new AssertionError("未找到 ToolCall payload: " + toolCallId);
     }
 
     private ModelResponse activationResponse(String callId) {
