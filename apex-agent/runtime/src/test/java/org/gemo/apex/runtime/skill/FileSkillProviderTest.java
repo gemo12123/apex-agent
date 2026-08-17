@@ -46,6 +46,53 @@ class FileSkillProviderTest {
         }
     }
 
+    @Test
+    void loadsResourceWithLeadingDotSlashPrefix() throws Exception {
+        Path jar = Files.createTempFile(Path.of("target"), "skill-provider", ".jar");
+        try (JarOutputStream output = new JarOutputStream(Files.newOutputStream(jar))) {
+            add(output, "jar-skills/");
+            add(output, "jar-skills/pdf/");
+            add(
+                    output,
+                    "jar-skills/pdf/SKILL.md",
+                    "---\nname: pdf\ndescription: PDF\n---\nJAR 使用说明");
+            add(output, "jar-skills/pdf/references/");
+            add(output, "jar-skills/pdf/references/guide.md", "JAR 资源");
+        }
+
+        try (URLClassLoader loader =
+                new URLClassLoader(new java.net.URL[] {jar.toUri().toURL()}, null)) {
+            FileSkillProvider provider = new FileSkillProvider("classpath:jar-skills", loader);
+
+            assertEquals("JAR 资源", provider.loadResource("pdf", "./references/guide.md"));
+            assertEquals("JAR 资源", provider.loadResource("pdf", "references/guide.md"));
+        }
+    }
+
+    @Test
+    void rejectsBareLeadingDotSlash() throws Exception {
+        Path jar = Files.createTempFile(Path.of("target"), "skill-provider", ".jar");
+        try (JarOutputStream output = new JarOutputStream(Files.newOutputStream(jar))) {
+            add(output, "jar-skills/");
+            add(output, "jar-skills/pdf/");
+            add(
+                    output,
+                    "jar-skills/pdf/SKILL.md",
+                    "---\nname: pdf\ndescription: PDF\n---\nJAR 使用说明");
+        }
+
+        try (URLClassLoader loader =
+                new URLClassLoader(new java.net.URL[] {jar.toUri().toURL()}, null)) {
+            FileSkillProvider provider = new FileSkillProvider("classpath:jar-skills", loader);
+
+            IllegalArgumentException exception =
+                    assertThrows(
+                            IllegalArgumentException.class,
+                            () -> provider.loadResource("pdf", "./"));
+            assertTrue(exception.getMessage().contains("不能为空"));
+        }
+    }
+
     private void add(JarOutputStream output, String name) throws Exception {
         output.putNextEntry(new JarEntry(name));
         output.closeEntry();

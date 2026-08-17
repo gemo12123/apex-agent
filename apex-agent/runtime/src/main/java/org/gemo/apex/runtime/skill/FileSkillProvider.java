@@ -291,6 +291,12 @@ public final class FileSkillProvider implements SkillProvider {
         if (value.startsWith("/")) {
             throw new IllegalArgumentException("Skill 资源路径必须是相对路径");
         }
+        if (value.startsWith("./")) {
+            value = value.substring(2);
+            if (value.isEmpty()) {
+                throw new IllegalArgumentException("Skill 资源路径不能为空");
+            }
+        }
         for (String segment : value.split("/", -1)) {
             if (segment.isBlank() || ".".equals(segment) || "..".equals(segment)) {
                 throw new IllegalArgumentException("Skill 资源路径非法: " + resourcePath);
