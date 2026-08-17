@@ -428,7 +428,7 @@ class ApexAgentExecutionTest {
                         .filter(entry -> entry.messageType() == MessageType.TOOL_RESULT)
                         .map(entry -> entry.content())
                         .toList();
-        assertEquals(List.of("成功", "工具执行失败：IllegalStateException"), toolContents);
+        assertEquals(List.of("成功", "工具执行失败：boom"), toolContents);
         assertEquals(2, fixture.modelCalls);
         assertEquals(
                 List.of("COMPLETE", "FAILED"),
@@ -965,7 +965,7 @@ class ApexAgentExecutionTest {
 
         assertInstanceOf(AgentRunOutcome.Completed.class, outcome, outcome.toString());
         assertEquals(
-                "工具执行失败：IllegalToolEventException",
+                "工具执行失败：工具只能发布 INVOCATION_DECLARED/INVOCATION_CHANGE",
                 fixture.conversation.stream()
                         .filter(entry -> entry.messageType() == MessageType.TOOL_RESULT)
                         .findFirst()

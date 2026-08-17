@@ -30,7 +30,11 @@ public final class ToolResultFactory {
     }
 
     public ToolResult executionFailed(ToolCall call, Throwable error) {
-        return fixed(call, "工具执行失败：" + error.getClass().getSimpleName());
+        String reason = error.getMessage();
+        if (reason == null || reason.isBlank()) {
+            reason = error.getClass().getSimpleName();
+        }
+        return fixed(call, "工具执行失败：" + reason);
     }
 
     private ToolResult fixed(ToolCall call, String content) {

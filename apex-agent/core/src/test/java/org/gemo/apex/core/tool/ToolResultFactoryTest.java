@@ -27,4 +27,21 @@ class ToolResultFactoryTest {
                 () -> assertTrue(forced.metadata().isEmpty()),
                 () -> assertTrue(cancelled.metadata().isEmpty()));
     }
+
+    /** 执行失败优先展示异常message，message为空时回退到类名 */
+    @Test
+    void executionFailedShowsMessageAndFallsBackToClassNameWhenBlank() {
+        ToolCall call = new ToolCall("call-1", "tool", 0, Map.of(), Map.of());
+        ToolResultFactory factory = new ToolResultFactory();
+
+        assertEquals(
+                "工具执行失败：boom",
+                factory.executionFailed(call, new IllegalStateException("boom")).content());
+        assertEquals(
+                "工具执行失败：IllegalStateException",
+                factory.executionFailed(call, new IllegalStateException()).content());
+        assertEquals(
+                "工具执行失败：IllegalStateException",
+                factory.executionFailed(call, new IllegalStateException("   ")).content());
+    }
 }
