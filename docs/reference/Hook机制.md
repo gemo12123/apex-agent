@@ -409,11 +409,65 @@ TURN_START 提前结束时尚未创建 Iteration，因此不会分发 ITERATION_
 | `ToolConfirmHook` | PRE_TOOL_CALL | 首次调用请求工具确认；恢复后放行，拒绝和可编辑参数合并由 core 处理 |
 | `AskHumanInterventionHook` | PRE_TOOL_CALL | 把 `ask_human` ToolCall 转换为问题介入；非法问题定义转为 BlockTool |
 | `PlainTextTruncateHook` | POST_TOOL_CALL | 截断过长纯文本 ToolResult，默认上限为 4000 个 Unicode 码点 |
+| `JsonTruncateHook` | POST_TOOL_CALL | 超长 JSON ToolResult 结构化截断并落盘完整原文，返回 preview + truncation_info + full_result_file |
 | `SkillActivationStateHook` | POST_TOOL_CALL | 从 ToolResult metadata 读取 Skill 名并声明激活状态 |
 | `TodoMiddleware` | PRE_MODEL_CALL | 维护带稳定 payload 标记的持久化 SYSTEM/TEXT Todo 上下文；状态变化时 Replace、重复时 Remove、压缩淘汰后重新 Append |
 | `CompositeLifecycleHook` | 任意单一结果族 | 顺序调用相同 descriptor 的 Hook，遇到非 Continue 结果立即短路 |
 
 `CompositeLifecycleHook` 不合并多个 Continue 结果。如果所有子 Hook 都返回 Continue，只有最后一个 Continue 结果会交给 core 应用；前面返回的 Mutation 和 Patch 不会自动累积。需要组合修改时，应实现一个明确合并结果的专用 Hook，或使用多个独立 Binding 让 dispatcher 逐项应用。
+
+### JsonTruncateHook
+
+`JsonTruncateHook` 在 POST_TOOL_CALL 对超长 JSON ToolResult 做结构化截断：内容较小时原样透传；超过阈值时解析 JSON 递归截断、把完整原文落盘到本地文件，并返回一个信封。它不覆盖 `PlainTextTruncateHook` 的纯文本能力，非 JSON 内容始终原样返回。
+
+信封格式：
+
+```json
+{
+  "truncated": true,
+  "data_preview": { "e": [ { "k": "value-0" }, { "k": "value-1" }, { "k": "value-2" } ] },
+  "truncation_info": {
+    "$.e": { "type": "array", "original_length": 1000, "kept": 3 }
+  },
+  "full_result_file": {
+    "file_path": "/abs/path/tool-<uuid>.json",
+    "content_type": "application/json"
+  }
+}
+```
+
+截断规则：
+
+- 数组保留前 `maxArrayElements` 个真实元素，记录 `original_length` 与 `kept`，大元素继续递归截断。
+- 对象保留前 `maxObjectFields` 个字段，记录 `original_fields` 与 `kept`，字段值继续递归截断。
+- 超长字符串按 Unicode 码点截断到 `maxStringLength`，记录 `original_length` 与 `kept`。
+- 截断信息统一放在 `truncation_info`，以 JSONPath（`$`、`$.e`、`$.e[0]`）为键，不混入数组元素。
+
+binding options（均在构造默认值基础上可按 binding 覆盖）：
+
+| 键 | 默认值 | 说明 |
+| --- | --- | --- |
+| `maxSize` | 8000 | 触发截断的 Unicode 码点阈值 |
+| `maxArrayElements` | 3 | 数组保留样例数 |
+| `maxObjectFields` | 10 | 对象保留字段数 |
+| `maxStringLength` | 200 | 字符串保留码点数 |
+| `outputDir` | 系统临时目录 | 完整原文落盘目录 |
+
+绑定示例：
+
+```yaml
+hooks:
+  POST_TOOL_CALL:
+    - id: json-truncate
+      hook: jsonTruncateHook
+      order: 100
+      enabled: true
+      options:
+        maxSize: 12000
+        maxArrayElements: 5
+```
+
+写盘失败时 Hook 回退为原样透传，避免在无法持久化时截断导致完整数据丢失。
 
 ## 当前默认启用状态
 

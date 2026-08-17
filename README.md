@@ -70,6 +70,7 @@
 
 - `ToolConfirmHook`
 - `PlainTextTruncateHook`
+- `JsonTruncateHook`
 - `SkillExperienceAugmentHook`
 - `SkillUsageRecorderHook`
 
