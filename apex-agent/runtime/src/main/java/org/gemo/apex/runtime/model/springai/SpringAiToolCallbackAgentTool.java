@@ -1,5 +1,6 @@
 package org.gemo.apex.runtime.model.springai;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.gemo.apex.common.exception.CancellationRequestedException;
@@ -19,6 +20,7 @@ public final class SpringAiToolCallbackAgentTool implements AgentTool {
     private final ToolCallback callback;
     private final ToolCallingManager manager;
     private final ToolDefinition definition;
+    private final boolean mcpTool;
 
     public SpringAiToolCallbackAgentTool(ToolCallback callback, ToolCallingManager manager) {
         this.callback = Objects.requireNonNull(callback, "callback");
@@ -30,6 +32,7 @@ public final class SpringAiToolCallbackAgentTool implements AgentTool {
         this.definition =
                 new ToolDefinition(
                         source.name(), source.description(), source.inputSchema(), Map.of());
+        this.mcpTool = isMcpTool(callback);
     }
 
     @Override
@@ -120,6 +123,31 @@ public final class SpringAiToolCallbackAgentTool implements AgentTool {
         if (!call.toolCallId().equals(response.id()) || !call.name().equals(response.name())) {
             throw new IllegalStateException("ToolCallingManager 响应与 ToolCall ID/name 不一致");
         }
-        return new ToolResult(response.id(), response.name(), response.responseData(), Map.of());
+        return new ToolResult(response.id(), response.name(), content(response), Map.of());
+    }
+
+    private String content(ToolResponseMessage.ToolResponse response) {
+        String data = response.responseData();
+        return mcpTool ? unwrapMcpContent(data) : data;
+    }
+
+    private static boolean isMcpTool(ToolCallback callback) {
+        return callback.getClass().getName().contains("McpToolCallback");
+    }
+
+    static String unwrapMcpContent(String content) {
+        if (content == null || content.isBlank()) {
+            return content;
+        }
+        try {
+            JsonNode root = JsonUtils.parseTree(content);
+            if (root == null || !root.isArray() || root.size() != 1) {
+                return content;
+            }
+            JsonNode text = root.get(0).get("text");
+            return (text != null && text.isTextual()) ? text.textValue() : content;
+        } catch (RuntimeException exception) {
+            return content;
+        }
     }
 }

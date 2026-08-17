@@ -184,6 +184,104 @@ class SpringAiToolCallbackAgentToolTest {
                 () -> assertFalse(interruptedAfterExecute.get()));
     }
 
+    @Test
+    void unwrapsMcpToolContentButKeepsOtherTools() {
+        var source = new RuntimeCancellationSource();
+        ToolCallingManager mcpManager =
+                new CapturingManager(
+                        executionResult(
+                                false,
+                                new ToolResponseMessage.ToolResponse(
+                                        "call-1",
+                                        "mcp_tool",
+                                        "[{\"text\":\"[{\\\"name\\\":\\\"zs\\\"}]\"}]")));
+        var mcpAdapter = new SpringAiToolCallbackAgentTool(new FakeMcpToolCallback(), mcpManager);
+        ToolResult mcpResult =
+                mcpAdapter.execute(
+                        new ToolCall("call-1", "mcp_tool", 0, Map.of(), Map.of()),
+                        context(source),
+                        observer(source));
+
+        ToolCallingManager plainManager =
+                new CapturingManager(
+                        executionResult(
+                                false,
+                                new ToolResponseMessage.ToolResponse(
+                                        "call-1", "plain", "[{\"text\":\"hello\"}]")));
+        var plainAdapter =
+                new SpringAiToolCallbackAgentTool(callback("plain", false), plainManager);
+        ToolResult plainResult =
+                plainAdapter.execute(
+                        new ToolCall("call-1", "plain", 0, Map.of(), Map.of()),
+                        context(source),
+                        observer(source));
+
+        assertAll(
+                () -> assertEquals("[{\"name\":\"zs\"}]", mcpResult.content()),
+                () -> assertEquals("[{\"text\":\"hello\"}]", plainResult.content()));
+    }
+
+    @Test
+    void unwrapMcpContentExtractsSingleTextBlock() {
+        assertAll(
+                () ->
+                        assertEquals(
+                                "[{\"name\":\"zs\"}]",
+                                SpringAiToolCallbackAgentTool.unwrapMcpContent(
+                                        "[{\"text\":\"[{\\\"name\\\":\\\"zs\\\"}]\"}]")),
+                () ->
+                        assertEquals(
+                                "hello",
+                                SpringAiToolCallbackAgentTool.unwrapMcpContent(
+                                        "[{\"text\":\"hello\"}]")),
+                () ->
+                        assertEquals(
+                                "world",
+                                SpringAiToolCallbackAgentTool.unwrapMcpContent(
+                                        "[{\"type\":\"text\",\"text\":\"world\"}]")));
+    }
+
+    @Test
+    void keepsMultipleContentBlocksUnchanged() {
+        assertAll(
+                () ->
+                        assertEquals(
+                                "[{\"text\":\"a\"},{\"text\":\"b\"}]",
+                                SpringAiToolCallbackAgentTool.unwrapMcpContent(
+                                        "[{\"text\":\"a\"},{\"text\":\"b\"}]")),
+                () ->
+                        assertEquals(
+                                "[{\"text\":\"x\"},{\"text\":\"y\"},{\"text\":\"z\"}]",
+                                SpringAiToolCallbackAgentTool.unwrapMcpContent(
+                                        "[{\"text\":\"x\"},{\"text\":\"y\"},{\"text\":\"z\"}]")),
+                () ->
+                        assertEquals(
+                                "[{\"text\":\"a\"},{\"foo\":\"bar\"}]",
+                                SpringAiToolCallbackAgentTool.unwrapMcpContent(
+                                        "[{\"text\":\"a\"},{\"foo\":\"bar\"}]")));
+    }
+
+    @Test
+    void unwrapMcpContentFallsBackToRawWhenUnrecognized() {
+        assertAll(
+                () ->
+                        assertEquals(
+                                "{\"foo\":\"bar\"}",
+                                SpringAiToolCallbackAgentTool.unwrapMcpContent(
+                                        "{\"foo\":\"bar\"}")),
+                () ->
+                        assertEquals(
+                                "not json",
+                                SpringAiToolCallbackAgentTool.unwrapMcpContent("not json")),
+                () ->
+                        assertEquals(
+                                "[{\"type\":\"image\",\"data\":\"xyz\"}]",
+                                SpringAiToolCallbackAgentTool.unwrapMcpContent(
+                                        "[{\"type\":\"image\",\"data\":\"xyz\"}]")),
+                () -> assertNull(SpringAiToolCallbackAgentTool.unwrapMcpContent(null)),
+                () -> assertEquals("", SpringAiToolCallbackAgentTool.unwrapMcpContent("")));
+    }
+
     private static ToolResult execute(
             ToolCallback callback,
             ToolExecutionResult executionResult,
@@ -266,6 +364,23 @@ class SpringAiToolCallbackAgentToolTest {
             this.prompt.set(prompt);
             response.set(chatResponse);
             return result;
+        }
+    }
+
+    private static final class FakeMcpToolCallback implements ToolCallback {
+        @Override
+        public org.springframework.ai.tool.definition.ToolDefinition getToolDefinition() {
+            return new DefaultToolDefinition("mcp_tool", "MCP 工具", "{\"type\":\"object\"}");
+        }
+
+        @Override
+        public ToolMetadata getToolMetadata() {
+            return ToolMetadata.builder().build();
+        }
+
+        @Override
+        public String call(String input) {
+            throw new AssertionError("测试由 Manager 返回固定结果");
         }
     }
 }
