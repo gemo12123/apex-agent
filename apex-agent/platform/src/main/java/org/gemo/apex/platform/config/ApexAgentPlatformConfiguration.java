@@ -21,7 +21,6 @@ import org.gemo.apex.kit.tool.AskHumanTool;
 import org.gemo.apex.kit.tool.WriteTodosTool;
 import org.gemo.apex.platform.execution.UserContextTaskDecorator;
 import org.gemo.apex.platform.skill.RuntimeSkillRegistry;
-import org.gemo.apex.platform.tool.QueryWeatherTool;
 import org.gemo.apex.platform.web.sse.RequestBoundAgentEventPublisherFactory;
 import org.gemo.apex.runtime.api.ApexAgentRuntime;
 import org.gemo.apex.runtime.skill.FileSkillProvider;
