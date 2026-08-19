@@ -1,0 +1,749 @@
+package org.gemo.apex.runtime;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.nio.file.*;
+import java.time.*;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.*;
+import org.gemo.apex.common.agent.*;
+import org.gemo.apex.common.conversation.*;
+import org.gemo.apex.common.execution.*;
+import org.gemo.apex.common.hook.HookBinding;
+import org.gemo.apex.common.hook.HookPoint;
+import org.gemo.apex.common.hook.HookTypeDescriptor;
+import org.gemo.apex.common.hook.context.HookContextView;
+import org.gemo.apex.common.hook.result.LifecycleHookResult;
+import org.gemo.apex.common.message.*;
+import org.gemo.apex.common.model.*;
+import org.gemo.apex.common.skill.*;
+import org.gemo.apex.common.tool.*;
+import org.gemo.apex.core.agent.AgentRunOutcome;
+import org.gemo.apex.extension.definition.AgentDefinitionProvider;
+import org.gemo.apex.extension.hook.LifecycleHook;
+import org.gemo.apex.extension.repository.ConversationRepository;
+import org.gemo.apex.extension.skill.SkillProvider;
+import org.gemo.apex.extension.tool.ToolExecutionObserver;
+import org.gemo.apex.kit.hook.SkillActivationStateHook;
+import org.gemo.apex.kit.tool.ActivateSkillTool;
+import org.gemo.apex.kit.tool.ReadSkillResourceTool;
+import org.gemo.apex.protocol.event.*;
+import org.gemo.apex.runtime.api.*;
+import org.gemo.apex.runtime.conversation.DefaultConversationServices;
+import org.gemo.apex.runtime.definition.*;
+import org.gemo.apex.runtime.execution.*;
+import org.gemo.apex.runtime.model.springai.*;
+import org.gemo.apex.runtime.repository.memory.*;
+import org.gemo.apex.runtime.skill.*;
+import org.junit.jupiter.api.*;
+import org.springframework.ai.chat.messages.AssistantMessage;
+
+class RuntimeContractTest {
+    @Test
+    void validatesHookNamesAndUniquenessWithinHookPoint() {
+        assertThrows(
+                RuntimeConfigurationException.class,
+                () -> ApexAgentRuntime.builder().registerHook(hook(" ", HookPoint.PRE_TOOL_CALL)));
+        assertThrows(
+                RuntimeConfigurationException.class,
+                () -> ApexAgentRuntime.builder().registerHook(hook(null, HookPoint.PRE_TOOL_CALL)));
+
+        var builder = ApexAgentRuntime.builder();
+        builder.registerHook(hook("same", HookPoint.PRE_TOOL_CALL));
+        assertThrows(
+                RuntimeConfigurationException.class,
+                () -> builder.registerHook(hook("same", HookPoint.PRE_TOOL_CALL)));
+        assertDoesNotThrow(() -> builder.registerHook(hook("same", HookPoint.POST_TOOL_CALL)));
+    }
+
+    /** 无IoC默认Agent执行且End精确一次 */
+    @Test
+    void executesDefaultAgentWithoutIoCAndPublishesEndExactlyOnce() {
+        List<AgentMessage> events = new CopyOnWriteArrayList<>();
+        try (var runtime =
+                ApexAgentRuntime.builder()
+                        .modelGateway((r, o) -> new ModelResponse("完成", List.of(), Map.of()))
+                        .defaultEventPublisherFactory(d -> events::add)
+                        .build()) {
+            assertInstanceOf(
+                    AgentRunOutcome.Completed.class,
+                    runtime.newAgent(new AgentRequest("s", "default", "u", "q")).run());
+            assertEquals(1, events.stream().filter(EndMessage.class::isInstance).count());
+            assertEquals(0, runtime.activeExecutionCount());
+        }
+    }
+
+    /** provider在build不加载请求时加载 */
+    @Test
+    void loadsProviderOnRequestRatherThanBuild() {
+        var count = new AtomicInteger();
+        var d = definition();
+        var p =
+                new AgentDefinitionProvider() {
+                    public AgentDefinition load(String k) {
+                        count.incrementAndGet();
+                        return d;
+                    }
+
+                    public List<AgentMetadata> listAgents() {
+                        return List.of(d.metadata());
+                    }
+                };
+        try (var r =
+                ApexAgentRuntime.builder()
+                        .modelGateway((a, b) -> new ModelResponse("x", List.of(), Map.of()))
+                        .agentDefinitionProvider(p)
+                        .build()) {
+            assertEquals(0, count.get());
+            r.newAgent(new AgentRequest("s2", "default", "u", "q")).run();
+            assertEquals(1, count.get());
+        }
+    }
+
+    /** builder互斥与同sessionLease */
+    @Test
+    void rejectsInvalidBuilderConfigurationAndEnforcesSameSessionLease() {
+        assertThrows(RuntimeConfigurationException.class, () -> ApexAgentRuntime.builder().build());
+        try (var r =
+                ApexAgentRuntime.builder()
+                        .modelGateway((a, b) -> new ModelResponse("x", List.of(), Map.of()))
+                        .build()) {
+            var first = r.newAgent(new AgentRequest("busy", "default", "u", "q"));
+            assertThrows(
+                    SessionBusyException.class,
+                    () -> r.newAgent(new AgentRequest("busy", "default", "u", "q")));
+            assertTrue(first.cancelBeforeStart());
+            assertDoesNotThrow(
+                    () ->
+                            r.newAgent(new AgentRequest("busy", "default", "u", "q"))
+                                    .cancelBeforeStart());
+        }
+    }
+
+    /** 内存Conversation幂等与冲突 */
+    @Test
+    void makesInMemoryConversationOperationsIdempotentAndDetectsConflicts() {
+        var r = new InMemoryConversationRepository();
+        var e = entry("e1", 0);
+        r.commit(new ConversationWriteBatch("s", List.of(new AppendConversationWrite(e))));
+        r.commit(new ConversationWriteBatch("s", List.of(new AppendConversationWrite(e))));
+        assertEquals(1, r.load(new ConversationQuery("s")).messages().size());
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                        r.commit(
+                                new ConversationWriteBatch(
+                                        "s",
+                                        List.of(new AppendConversationWrite(entry("e2", 0))))));
+        var c =
+                new ConversationCompactionCommit(
+                        "s",
+                        new ConversationSummary("c", "sum", 0, 0, 1, Instant.EPOCH),
+                        List.of());
+        r.commit(new ConversationWriteBatch("s", List.of(new CompactConversationWrite(c))));
+        r.commit(new ConversationWriteBatch("s", List.of(new CompactConversationWrite(c))));
+        assertEquals("sum", r.load(new ConversationQuery("s")).summary().orElseThrow().content());
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                        r.commit(
+                                new ConversationWriteBatch(
+                                        "s",
+                                        List.of(
+                                                new ReplaceConversationWrite(
+                                                        "e1",
+                                                        MessageRole.SYSTEM,
+                                                        MessageType.TEXT,
+                                                        "非法替换",
+                                                        Map.of())))));
+    }
+
+    /** 内存批次先在副本预演，任一操作失败时不暴露部分写入。 */
+    @Test
+    void rollsBackEntireInMemoryConversationBatchOnFailure() {
+        var repository = new InMemoryConversationRepository();
+        AgentMessageEntry original = entry("e1", 0);
+        repository.commit(
+                new ConversationWriteBatch("s", List.of(new AppendConversationWrite(original))));
+
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                        repository.commit(
+                                new ConversationWriteBatch(
+                                        "s",
+                                        List.of(
+                                                new ReplaceConversationWrite(
+                                                        "e1",
+                                                        MessageRole.SYSTEM,
+                                                        MessageType.TEXT,
+                                                        "已替换",
+                                                        Map.of("source", "hook")),
+                                                new RemoveConversationWrite("missing")))));
+
+        assertEquals(original, repository.load(new ConversationQuery("s")).messages().getFirst());
+    }
+
+    /** Replace保持存储身份字段，Remove物理删除且不改变其他消息sortNo。 */
+    @Test
+    void replacesLogicalContentAndPhysicallyRemovesWithoutRenumbering() {
+        var repository = new InMemoryConversationRepository();
+        AgentMessageEntry first = entry("e1", 0);
+        AgentMessageEntry second = entry("e2", 2);
+        repository.commit(
+                new ConversationWriteBatch(
+                        "s",
+                        List.of(
+                                new AppendConversationWrite(first),
+                                new AppendConversationWrite(second))));
+
+        repository.commit(
+                new ConversationWriteBatch(
+                        "s",
+                        List.of(
+                                new ReplaceConversationWrite(
+                                        "e2",
+                                        MessageRole.SYSTEM,
+                                        MessageType.TEXT,
+                                        "替换后",
+                                        Map.of("source", "hook")),
+                                new RemoveConversationWrite("e1"))));
+
+        AgentMessageEntry retained =
+                repository.load(new ConversationQuery("s")).messages().getFirst();
+        assertEquals("e2", retained.entryId());
+        assertEquals(2, retained.sortNo());
+        assertEquals(second.createdTime(), retained.createdTime());
+        assertEquals("替换后", retained.content());
+    }
+
+    /** Repository只返回未压缩消息且窗口装配摘要与保留尾部 */
+    @Test
+    void assemblesSummaryMessageAndMessagesOutsideCoveredRange() {
+        var repository = new InMemoryConversationRepository();
+        AgentMessageEntry first = entry("e1", 0);
+        AgentMessageEntry second = entry("e2", 1);
+        AgentMessageEntry retained = entry("e3", 2);
+        repository.commit(
+                new ConversationWriteBatch(
+                        "s",
+                        List.of(
+                                new AppendConversationWrite(first),
+                                new AppendConversationWrite(second),
+                                new AppendConversationWrite(retained),
+                                new CompactConversationWrite(
+                                        new ConversationCompactionCommit(
+                                                "s",
+                                                new ConversationSummary(
+                                                        "c", "累计摘要", 0, 1, 1, Instant.EPOCH),
+                                                List.of(retained))))));
+
+        ConversationWindow window =
+                DefaultConversationServices.window(repository)
+                        .prepare(new ConversationWindowRequest(new ConversationQuery("s")));
+
+        assertEquals(
+                List.of(MessageType.SUMMARY, MessageType.TEXT),
+                window.messages().stream().map(AgentMessageEntry::messageType).toList());
+        assertEquals(
+                List.of("累计摘要", retained.content()),
+                window.messages().stream().map(AgentMessageEntry::content).toList());
+        assertEquals(1, repository.load(new ConversationQuery("s")).messages().size());
+    }
+
+    /** 窗口拒绝Repository把摘要覆盖消息伪装成未压缩消息 */
+    @Test
+    void rejectsRepositoryHistoryInsideSummaryCoverage() {
+        AgentMessageEntry covered = entry("covered", 0);
+        ConversationSummary summary = new ConversationSummary("c", "摘要", 0, 0, 1, Instant.EPOCH);
+        ConversationRepository repository =
+                new ConversationRepository() {
+                    public void commit(ConversationWriteBatch batch) {}
+
+                    public ConversationHistory load(ConversationQuery query) {
+                        return new ConversationHistory(
+                                query.sessionId(), Optional.of(summary), List.of(covered));
+                    }
+                };
+
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                        DefaultConversationServices.window(repository)
+                                .prepare(
+                                        new ConversationWindowRequest(new ConversationQuery("s"))));
+    }
+
+    /** 默认策略对消息数及两个可选容量阈值执行OR判断 */
+    @Test
+    void evaluatesConfiguredCompactionThresholdsIndependently() {
+        var policy = DefaultConversationServices.policy();
+        var trigger = new ConversationCompactionTrigger("s", 1, 1, "MODEL_CALL");
+        assertTrue(policy.shouldCompact(check(1, 10, 10L, null, 10, 100, trigger)));
+        assertTrue(policy.shouldCompact(check(1, 10, null, 100L, 10, 100, trigger)));
+        assertFalse(policy.shouldCompact(check(1, 10, null, null, 10, 100, trigger)));
+        assertTrue(policy.shouldCompact(check(2, 1, null, null, 2, 100, trigger)));
+    }
+
+    /** 默认压缩器使用同一模型生成累计摘要，再由业务模型继续执行 */
+    @Test
+    void usesModelGatewayForDefaultConversationCompaction() {
+        List<ModelRequest> requests = new CopyOnWriteArrayList<>();
+        var conversations = new InMemoryConversationRepository();
+        AgentDefinition source = definition();
+        AgentDefinition compressionDefinition =
+                new AgentDefinition(
+                        source.schemaVersion(),
+                        source.metadata(),
+                        source.prompt(),
+                        new MessageCompressionDefinition(true, 1),
+                        source.tools(),
+                        source.enabledSkills(),
+                        source.subAgents(),
+                        source.hooks());
+        try (var runtime =
+                ApexAgentRuntime.builder()
+                        .modelGateway(
+                                (request, observer) -> {
+                                    requests.add(request);
+                                    return request.systemPrompt().contains("压缩为可供后续模型继续工作的累计摘要")
+                                            ? new ModelResponse("  模型累计摘要  ", List.of(), Map.of())
+                                            : new ModelResponse("业务回答", List.of(), Map.of());
+                                })
+                        .agentDefinition(compressionDefinition)
+                        .conversationRepository(conversations)
+                        .build()) {
+            assertInstanceOf(
+                    AgentRunOutcome.Completed.class,
+                    runtime.newAgent(new AgentRequest("model-summary", "default", "u", "问题一"))
+                            .run());
+            assertInstanceOf(
+                    AgentRunOutcome.Completed.class,
+                    runtime.newAgent(new AgentRequest("model-summary", "default", "u", "问题二"))
+                            .run());
+            assertInstanceOf(
+                    AgentRunOutcome.Completed.class,
+                    runtime.newAgent(new AgentRequest("model-summary", "default", "u", "问题三"))
+                            .run());
+        }
+
+        assertEquals(5, requests.size());
+        ModelRequest firstCompaction = requests.get(1);
+        assertTrue(firstCompaction.tools().isEmpty());
+        assertEquals(1, firstCompaction.messages().size());
+        assertTrue(firstCompaction.messages().getFirst().content().contains("问题一"));
+        assertTrue(firstCompaction.messages().getFirst().content().contains("问题二"));
+        ModelRequest secondCompaction = requests.get(3);
+        assertTrue(secondCompaction.messages().getFirst().content().contains("模型累计摘要"));
+        assertTrue(secondCompaction.messages().getFirst().content().contains("问题三"));
+        assertEquals(
+                "模型累计摘要",
+                conversations
+                        .load(new ConversationQuery("model-summary"))
+                        .summary()
+                        .orElseThrow()
+                        .content());
+    }
+
+    private ConversationCompactionCheck check(
+            int messageCount,
+            int messageThreshold,
+            Long tokenThreshold,
+            Long characterHardLimit,
+            long totalTokens,
+            long totalCharacters,
+            ConversationCompactionTrigger trigger) {
+        return new ConversationCompactionCheck(
+                java.util.stream.IntStream.range(0, messageCount)
+                        .mapToObj(index -> entry("check-" + index, index))
+                        .toList(),
+                totalTokens,
+                totalCharacters,
+                0,
+                0,
+                0,
+                0,
+                totalTokens,
+                totalCharacters,
+                messageThreshold,
+                tokenThreshold,
+                characterHardLimit,
+                0,
+                trigger);
+    }
+
+    /** 取消前后注册命令均精确一次 */
+    @Test
+    void invokesCancellationCallbacksExactlyOnceBeforeAndAfterCancellation() {
+        var s = new RuntimeCancellationSource();
+        var a = new AtomicInteger();
+        s.token().onCancel(a::incrementAndGet);
+        assertTrue(s.cancel());
+        assertFalse(s.cancel());
+        s.token().onCancel(a::incrementAndGet);
+        assertEquals(2, a.get());
+    }
+
+    /** SpringAiToolCall往返保留字段顺序 */
+    @Test
+    void preservesSpringAiToolCallFieldsAndOrdinalOnRoundTrip() {
+        var m = new SpringAiMessageMapper();
+        var c = new ToolCall("id", "tool", 0, Map.of("x", 1), Map.of());
+        var out = m.fromSpring(m.toSpring(c), 0);
+        assertEquals(c.toolCallId(), out.toolCallId());
+        assertEquals(c.name(), out.name());
+        assertEquals(c.arguments(), out.arguments());
+        assertEquals(0, out.ordinal());
+    }
+
+    @Test
+    void mapsAssistantToolCallsFromConversationPayload() {
+        var message =
+                new AgentMessageEntry(
+                        "entry",
+                        "session",
+                        1,
+                        0,
+                        MessageRole.ASSISTANT,
+                        MessageType.TOOL_CALLS,
+                        "正在查询",
+                        Map.of(
+                                "toolCalls",
+                                List.of(
+                                        Map.of(
+                                                "toolCallId",
+                                                "call-1",
+                                                "name",
+                                                "weather",
+                                                "arguments",
+                                                Map.of("city", "上海"),
+                                                "resolvedArguments",
+                                                Map.of("city", "北京")))),
+                        Instant.EPOCH);
+
+        var mapped =
+                assertInstanceOf(
+                        AssistantMessage.class, new SpringAiMessageMapper().toSpring(message));
+
+        assertEquals("正在查询", mapped.getText());
+        assertEquals(1, mapped.getToolCalls().size());
+        var call = mapped.getToolCalls().getFirst();
+        assertEquals("call-1", call.id());
+        assertEquals("function", call.type());
+        assertEquals("weather", call.name());
+        assertEquals("{\"city\":\"上海\"}", call.arguments());
+    }
+
+    /** fileProvider初始化缓存且列出元数据 */
+    @Test
+    void cachesFileProviderAtInitializationAndListsMetadata() throws Exception {
+        Path f = Files.createTempFile("agents", ".yml");
+        Files.writeString(
+                f,
+                """
+                agents:
+                  default:
+                    schemaVersion: 1.0.0
+                    metadata: {agentKey: default, name: 默认, description: 测试}
+                    prompt: {systemPrompt: 系统, maxIterations: 2}
+                    messageCompression: {enabled: false, maxMessages: 10}
+                    tools: {availableTools: [], defaultEnabledTools: []}
+                    enabledSkills: []
+                    subAgents: {}
+                    hooks: {}
+                """);
+        var p = new FileAgentDefinitionProvider(f.toUri());
+        Files.writeString(f, "agents: {}");
+        assertEquals("系统", p.load("default").prompt().systemPrompt());
+        assertEquals(1, p.listAgents().size());
+    }
+
+    /** owned资源反向关闭且borrowed不关闭 */
+    @Test
+    void closesOwnedResourcesInReverseOrderButNotBorrowedResources() {
+        List<String> closed = new ArrayList<>();
+        AutoCloseable a = () -> closed.add("a"),
+                b = () -> closed.add("b"),
+                borrowed = () -> closed.add("borrowed");
+        var r =
+                ApexAgentRuntime.builder()
+                        .modelGateway((x, o) -> new ModelResponse("ok", List.of(), Map.of()))
+                        .ownedResource(a)
+                        .ownedResource(b)
+                        .borrowedResource(borrowed)
+                        .build();
+        r.close();
+        r.close();
+        assertEquals(List.of("b", "a"), closed);
+        assertThrows(
+                IllegalStateException.class,
+                () -> r.newAgent(new AgentRequest("closed", "default", "u", "q")));
+    }
+
+    @Test
+    void loadsSkillsFromClasspathAndTreatsMissingClasspathRootAsEmpty() {
+        var provider = new FileSkillProvider("classpath:test-skills");
+
+        assertEquals(
+                List.of("classpath-skill"),
+                provider.loadSkills().stream().map(SkillMeta::name).toList());
+        SkillDefinition loaded = provider.loadSkill("classpath-skill");
+        assertEquals("类路径使用说明", loaded.instructions());
+        assertEquals(Set.of("references/guide.txt"), loaded.resources().keySet());
+        assertNull(loaded.resources().get("references/guide.txt").content());
+        assertEquals(
+                "类路径资源", provider.loadResource("classpath-skill/references/guide.txt").strip());
+        assertNotNull(loaded.resources().get("references/guide.txt").content());
+        assertTrue(new FileSkillProvider("classpath:not-existing-skills").loadSkills().isEmpty());
+    }
+
+    @Test
+    void defaultsToEmptySkillProvider() {
+        AgentDefinition skillDefinition =
+                new AgentDefinition(
+                        "1.0.0",
+                        new AgentMetadata("default", "默认", "测试"),
+                        new PromptDefinition("系统", 2),
+                        new MessageCompressionDefinition(false, 10),
+                        new ToolSetDefinition(Set.of(), Set.of()),
+                        Set.of("pdf"),
+                        Map.of(),
+                        Map.of());
+
+        try (var runtime =
+                ApexAgentRuntime.builder()
+                        .modelGateway(
+                                (request, observer) -> new ModelResponse("完成", List.of(), Map.of()))
+                        .agentDefinition(skillDefinition)
+                        .build()) {
+            AgentPreparationException error =
+                    assertThrows(
+                            AgentPreparationException.class,
+                            () ->
+                                    runtime.newAgent(
+                                            new AgentRequest("empty-skills", "default", "u", "q")));
+            assertEquals("enabledSkills 存在无法解析的名称", error.getCause().getMessage());
+        }
+    }
+
+    @Test
+    void usesInjectedSkillProviderForValidationAndResourceTool() {
+        AtomicInteger metadataLoads = new AtomicInteger();
+        AtomicInteger resourceLoads = new AtomicInteger();
+        SkillDefinition skill = new SkillDefinition(new SkillMeta("pdf", "PDF"), "使用 PDF 指令");
+        SkillProvider skillProvider =
+                new SkillProvider() {
+                    @Override
+                    public List<SkillMeta> loadSkills() {
+                        metadataLoads.incrementAndGet();
+                        return List.of(skill.meta());
+                    }
+
+                    @Override
+                    public SkillDefinition loadSkill(String skillName) {
+                        return skill;
+                    }
+
+                    @Override
+                    public String loadResource(String skillName, String resourcePath) {
+                        resourceLoads.incrementAndGet();
+                        return "资源内容";
+                    }
+
+                    @Override
+                    public String loadResource(String path) {
+                        return loadResource("pdf", path);
+                    }
+                };
+        AgentDefinition skillDefinition =
+                new AgentDefinition(
+                        "1.0.0",
+                        new AgentMetadata("default", "默认", "测试"),
+                        new PromptDefinition("系统", 2),
+                        new MessageCompressionDefinition(false, 10),
+                        new ToolSetDefinition(
+                                Set.of(ReadSkillResourceTool.NAME),
+                                Set.of(ReadSkillResourceTool.NAME)),
+                        Set.of("pdf"),
+                        Map.of(),
+                        Map.of());
+        Deque<ModelResponse> responses =
+                new ArrayDeque<>(
+                        List.of(
+                                new ModelResponse(
+                                        "",
+                                        List.of(
+                                                new ToolCall(
+                                                        "read-1",
+                                                        ReadSkillResourceTool.NAME,
+                                                        0,
+                                                        Map.of(
+                                                                "skillName",
+                                                                "pdf",
+                                                                "path",
+                                                                "references/guide.txt"),
+                                                        Map.of())),
+                                        Map.of()),
+                                new ModelResponse("完成", List.of(), Map.of())));
+
+        try (var runtime =
+                ApexAgentRuntime.builder()
+                        .modelGateway((request, observer) -> responses.removeFirst())
+                        .agentDefinition(skillDefinition)
+                        .skillProvider(skillProvider)
+                        .build()) {
+            assertInstanceOf(
+                    AgentRunOutcome.Completed.class,
+                    runtime.newAgent(new AgentRequest("skill-provider", "default", "u", "q"))
+                            .run());
+        }
+
+        assertEquals(1, metadataLoads.get());
+        assertEquals(1, resourceLoads.get());
+    }
+
+    /** Skill激活工具不再隐式注册，显式组合Kit工具和Hook后才更新会话状态 */
+    @Test
+    void requiresExplicitSkillToolRegistrationAndSupportsKitComposition() {
+        SkillDefinition skill = new SkillDefinition(new SkillMeta("pdf", "PDF"), "使用 PDF 指令");
+        SkillProvider skillProvider = provider(skill);
+        AgentDefinition activationDefinition =
+                new AgentDefinition(
+                        "1.0.0",
+                        new AgentMetadata("default", "默认", "测试"),
+                        new PromptDefinition("系统", 2),
+                        new MessageCompressionDefinition(false, 10),
+                        new ToolSetDefinition(
+                                Set.of(ActivateSkillTool.NAME), Set.of(ActivateSkillTool.NAME)),
+                        Set.of("pdf"),
+                        Map.of(),
+                        Map.of(
+                                HookPoint.POST_TOOL_CALL,
+                                List.of(
+                                        new HookBinding(
+                                                "skill-state",
+                                                SkillActivationStateHook.REGISTRATION_NAME,
+                                                0,
+                                                true,
+                                                List.of(ActivateSkillTool.NAME),
+                                                Map.of()))));
+
+        try (var missing =
+                ApexAgentRuntime.builder()
+                        .modelGateway((request, observer) -> null)
+                        .agentDefinition(activationDefinition)
+                        .skillProvider(skillProvider)
+                        .build()) {
+            assertThrows(
+                    AgentPreparationException.class,
+                    () -> missing.newAgent(new AgentRequest("missing", "default", "u", "q")));
+        }
+
+        Deque<ModelResponse> responses =
+                new ArrayDeque<>(
+                        List.of(
+                                new ModelResponse(
+                                        "",
+                                        List.of(
+                                                new ToolCall(
+                                                        "activate-1",
+                                                        ActivateSkillTool.NAME,
+                                                        0,
+                                                        Map.of(
+                                                                ActivateSkillTool.COMMAND_ARGUMENT,
+                                                                "pdf"),
+                                                        Map.of())),
+                                        Map.of()),
+                                new ModelResponse("完成", List.of(), Map.of())));
+        InMemorySessionRepository sessions = new InMemorySessionRepository();
+        try (var runtime =
+                ApexAgentRuntime.builder()
+                        .modelGateway((request, observer) -> responses.removeFirst())
+                        .agentDefinition(activationDefinition)
+                        .sessionRepository(sessions)
+                        .skillProvider(skillProvider)
+                        .registerTool(new ActivateSkillTool(skillProvider))
+                        .registerHook(new SkillActivationStateHook())
+                        .build()) {
+            ApexAgentExecution execution =
+                    runtime.newAgent(new AgentRequest("explicit", "default", "u", "q"));
+
+            assertInstanceOf(AgentRunOutcome.Completed.class, execution.run());
+            assertEquals(Set.of("pdf"), sessions.load("explicit").orElseThrow().activatedSkills());
+        }
+    }
+
+    private static AgentDefinition definition() {
+        return new AgentDefinition(
+                "1.0.0",
+                new AgentMetadata("default", "默认", "测试"),
+                new PromptDefinition("系统", 2),
+                new MessageCompressionDefinition(false, 10),
+                new ToolSetDefinition(Set.of(), Set.of()),
+                Set.of(),
+                Map.of(),
+                Map.of());
+    }
+
+    private static SkillProvider provider(SkillDefinition skill) {
+        return new SkillProvider() {
+            @Override
+            public List<SkillMeta> loadSkills() {
+                return List.of(skill.meta());
+            }
+
+            @Override
+            public SkillDefinition loadSkill(String skillName) {
+                if (!skill.meta().name().equals(skillName)) {
+                    throw new IllegalArgumentException("Skill 不存在: " + skillName);
+                }
+                return skill;
+            }
+
+            @Override
+            public String loadResource(String skillName, String resourcePath) {
+                return resourcePath;
+            }
+
+            @Override
+            public String loadResource(String path) {
+                return path;
+            }
+        };
+    }
+
+    private static LifecycleHook<HookContextView, LifecycleHookResult> hook(
+            String name, HookPoint point) {
+        return new LifecycleHook<>() {
+            @Override
+            public String name() {
+                return name;
+            }
+
+            @Override
+            public HookTypeDescriptor descriptor() {
+                return new HookTypeDescriptor(
+                        point, HookContextView.class, LifecycleHookResult.class);
+            }
+
+            @Override
+            public LifecycleHookResult apply(HookContextView context) {
+                return null;
+            }
+        };
+    }
+
+    private static AgentMessageEntry entry(String id, long sort) {
+        return new AgentMessageEntry(
+                id, "s", 1, sort, MessageRole.USER, MessageType.TEXT, "x", Map.of(), Instant.EPOCH);
+    }
+
+    private record Observer(RuntimeCancellationSource s) implements ToolExecutionObserver {
+        public void onEvent(AgentMessage e) {}
+
+        public CancellationToken cancellationToken() {
+            return s.token();
+        }
+    }
+}

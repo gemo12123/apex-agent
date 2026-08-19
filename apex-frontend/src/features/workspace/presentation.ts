@@ -8,8 +8,7 @@ import type {
 const sessionStatusLabels: Record<SessionViewModel['status'], string> = {
   idle: '待开始',
   streaming: '处理中',
-  'waiting-human': '等待人工确认',
-  'waiting-confirmation': '等待工具确认',
+  'waiting-intervention': '等待人工介入',
   completed: '已完成',
   aborted: '已停止',
   error: '异常',
@@ -48,6 +47,10 @@ export function formatPromptInputType(type: HumanPromptRecord['inputType']): str
 export function formatRuntimeStatus(status: string): string {
   const normalized = status.toUpperCase()
 
+  if (normalized.includes('CANCEL')) {
+    return '已取消'
+  }
+
   if (normalized.includes('COMPLETE') || normalized.includes('SUCCESS')) {
     return '已完成'
   }
@@ -69,6 +72,10 @@ export function formatRuntimeStatus(status: string): string {
 
 export function toneFromStatus(status: string): 'idle' | 'success' | 'active' | 'warning' | 'danger' {
   const normalized = status.toUpperCase()
+
+  if (normalized.includes('CANCEL')) {
+    return 'warning'
+  }
 
   if (normalized.includes('COMPLETE') || normalized.includes('SUCCESS')) {
     return 'success'

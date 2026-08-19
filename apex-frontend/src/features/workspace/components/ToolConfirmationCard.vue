@@ -12,13 +12,17 @@ import type {
 
 const props = defineProps<{
   confirmation: ToolConfirmationRecord
+  showBatchSubmit?: boolean
+  batchCanSubmit?: boolean
 }>()
 
 const emit = defineEmits<{
   (
-    event: 'submit',
+    event: 'answer',
     payload: { decision: 'APPROVE' | 'DENY'; updatedArgs?: Record<string, unknown> },
   ): void
+  (event: 'skip'): void
+  (event: 'submit-batch'): void
 }>()
 
 const editing = ref(false)
@@ -39,14 +43,14 @@ function toggleEditing(): void {
 }
 
 function approve(): void {
-  emit('submit', {
+  emit('answer', {
     decision: 'APPROVE',
     updatedArgs: editing.value ? { ...formState } : {},
   })
 }
 
 function deny(): void {
-  emit('submit', { decision: 'DENY' })
+  emit('answer', { decision: 'DENY' })
 }
 
 function isFieldSatisfied(
@@ -173,6 +177,7 @@ function formatDisplayValue(field: ToolConfirmationDisplayField): string {
     </div>
 
     <footer class="tool-confirmation-card__actions">
+      <button class="ghost-button" type="button" @click="emit('skip')">跳过</button>
       <button class="ghost-button" type="button" @click="deny">
         {{ confirmation.denyLabel }}
       </button>
@@ -184,6 +189,22 @@ function formatDisplayValue(field: ToolConfirmationDisplayField): string {
         @click="approve"
       >
         {{ confirmation.confirmLabel }}
+      </button>
+    </footer>
+
+    <p v-if="confirmation.resolution !== 'pending'" class="tool-confirmation-card__resolution">
+      {{ confirmation.resolution === 'answered' ? '已处理' : '已跳过，将默认批准且不修改参数' }}
+    </p>
+
+    <footer v-if="showBatchSubmit" class="tool-confirmation-card__batch-submit">
+      <button
+        data-testid="submit-interventions"
+        class="accent-button"
+        type="button"
+        :disabled="!batchCanSubmit"
+        @click="emit('submit-batch')"
+      >
+        提交并继续
       </button>
     </footer>
   </article>
@@ -323,6 +344,19 @@ function formatDisplayValue(field: ToolConfirmationDisplayField): string {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.tool-confirmation-card__resolution {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+}
+
+.tool-confirmation-card__batch-submit {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
 }
 
 @media (max-width: 720px) {

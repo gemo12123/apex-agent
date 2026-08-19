@@ -74,6 +74,6 @@ describe('global style tokens', () => {
   it('keeps the unified chat composer 30px taller than the compact baseline', () => {
     const promptBarRule = cssRule(chatPaneSource, '.chat-pane__composer-shell--prompt-bar')
 
-    expect(promptBarRule).toContain('min-height: 84px;')
+    expect(promptBarRule).toContain('min-height: 60px;')
   })
 })

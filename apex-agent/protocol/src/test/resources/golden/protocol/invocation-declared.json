@@ -1,0 +1,1 @@
+{"event_type":"INVOCATION_DECLARED","context":{"invocation_id":"invocation-3","mode":"react"},"messages":[{"invocation_id":"invocation-3","name":"Search","invocation_type":"search","click_effect":"none","content":"query","complete":false,"render_type":"text"}]}

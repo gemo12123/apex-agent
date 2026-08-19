@@ -1,19 +1,18 @@
 import type {
-  AskHumanEnvelope,
   ArtifactDeclaredDetail,
   ArtifactRecord,
   EnvelopeContext,
+  HumanInterventionEnvelope,
   HumanPromptRecord,
+  HumanResponseEntry,
   InvocationChangeDetail,
   InvocationDeclaredDetail,
   InvocationRecord,
   MessageRecord,
-  PlanChangeMessage,
+  PendingInterventionRecord,
   StageRecord,
   SessionViewModel,
   SseEnvelope,
-  ToolConfirmationEnvelope,
-  ToolConfirmationRecord,
   UserMessageRecord,
 } from '@/types/apex'
 
@@ -30,8 +29,7 @@ export function createSessionViewModel(): SessionViewModel {
     messages: [],
     stages: [],
     globalArtifacts: [],
-    pendingPrompts: [],
-    pendingConfirmations: [],
+    pendingInterventions: [],
   }
 }
 
@@ -63,44 +61,84 @@ export function startAssistantMessage(state: SessionViewModel): SessionViewModel
   }
 }
 
-export function createHumanPromptRecords(envelope: AskHumanEnvelope): HumanPromptRecord[] {
-  return envelope.messages.map((message, index) => ({
-    id: `${message.tool_call_id}:${index}`,
-    index,
-    inputType: message.input_type,
-    question: message.question,
-    description: message.description,
-    options: message.options ?? [],
-    toolCallId: message.tool_call_id,
-    answered: false,
-  }))
+export function createPendingInterventionRecords(
+  envelope: HumanInterventionEnvelope,
+): PendingInterventionRecord[] {
+  return envelope.messages.flatMap<PendingInterventionRecord>(
+    (message): PendingInterventionRecord[] => {
+    if (message.interaction_type === 'ASK_HUMAN') {
+      return message.questions.map<HumanPromptRecord>((question, index) => ({
+        id: `${message.tool_call_id}:question:${index}`,
+        kind: 'question',
+        index,
+        inputType: question.input_type,
+        question: question.question,
+        description: question.description,
+        options: question.options ?? [],
+        toolCallId: message.tool_call_id,
+        invocationId: message.invocation_id,
+        toolName: message.tool_name,
+        resolution: 'pending',
+      }))
+    }
+
+    return [{
+      id: `${message.tool_call_id}:${message.confirmation_id}`,
+      kind: 'confirmation' as const,
+      confirmationId: message.confirmation_id,
+      toolCallId: message.tool_call_id,
+      invocationId: message.invocation_id,
+      toolName: message.tool_name,
+      toolDisplayName: message.tool_display_name,
+      title: message.title,
+      description: message.description,
+      riskLevel: message.risk_level,
+      editable: message.editable,
+      confirmLabel: message.confirm_label,
+      denyLabel: message.deny_label,
+      displayFields: message.display_fields.map((field) => ({ ...field })),
+      editableFields: message.editable_fields.map((field) => ({
+        ...field,
+        options: field.options?.map((option) => ({ ...option })),
+      })),
+      resolution: 'pending' as const,
+    }]
+    },
+  )
 }
 
 export function buildHumanResponsePayload(
-  prompts: HumanPromptRecord[],
-): Record<string, { interaction_type: 'ASK_HUMAN'; answers: Record<string, string | string[]> }> {
-  const answeredPrompts = prompts.filter((prompt) => prompt.answered)
-  if (answeredPrompts.length === 0) {
-    return {}
-  }
+  interventions: PendingInterventionRecord[],
+): Record<string, HumanResponseEntry> {
+  return interventions.reduce<Record<string, HumanResponseEntry>>((payload, intervention) => {
+    if (intervention.resolution !== 'answered') {
+      return payload
+    }
 
-  return answeredPrompts.reduce<
-    Record<string, { interaction_type: 'ASK_HUMAN'; answers: Record<string, string | string[]> }>
-  >(
-    (accumulator, prompt) => {
-      if (prompt.answer === undefined) {
-        return accumulator
+    if (intervention.kind === 'question') {
+      if (intervention.answer === undefined) {
+        return payload
       }
-
-      if (!accumulator[prompt.toolCallId]) {
-        accumulator[prompt.toolCallId] = { interaction_type: 'ASK_HUMAN', answers: {} }
+      const existing = payload[intervention.toolCallId]
+      const answers = existing?.interaction_type === 'ASK_HUMAN' ? existing.answers : {}
+      payload[intervention.toolCallId] = {
+        interaction_type: 'ASK_HUMAN',
+        answers: { ...answers, [String(intervention.index)]: intervention.answer },
       }
+      return payload
+    }
 
-      accumulator[prompt.toolCallId].answers[String(prompt.index)] = prompt.answer
-      return accumulator
-    },
-    {},
-  )
+    if (!intervention.decision) {
+      return payload
+    }
+    payload[intervention.toolCallId] = {
+      interaction_type: 'TOOL_CONFIRMATION',
+      confirmation_id: intervention.confirmationId,
+      decision: intervention.decision,
+      ...(intervention.updatedArgs ? { updated_args: intervention.updatedArgs } : {}),
+    }
+    return payload
+  }, {})
 }
 
 export function applyEnvelope(state: SessionViewModel, envelope: SseEnvelope): SessionViewModel {
@@ -133,24 +171,6 @@ export function applyEnvelope(state: SessionViewModel, envelope: SseEnvelope): S
           })
         }
       })
-      return nextState
-    case 'PLAN_DECLARED':
-      nextState.status = 'streaming'
-      nextState.stages = envelope.messages.map((message) => {
-        const existingStage = nextState.stages.find((stage) => stage.id === message.stage_id)
-        return {
-          id: message.stage_id,
-          name: message.stage_name,
-          description: message.description,
-          status: message.status,
-          invocations: existingStage?.invocations ?? [],
-          artifacts: existingStage?.artifacts ?? [],
-        }
-      })
-      return nextState
-    case 'PLAN_CHANGE':
-      nextState.status = 'streaming'
-      envelope.messages.forEach((message) => applyPlanChange(nextState, message))
       return nextState
     case 'INVOCATION_DECLARED':
       nextState.status = 'streaming'
@@ -206,23 +226,21 @@ export function applyEnvelope(state: SessionViewModel, envelope: SseEnvelope): S
         }
       })
       return nextState
-    case 'ASK_HUMAN':
-      nextState.pendingPrompts = createHumanPromptRecords(envelope)
-      nextState.pendingConfirmations = []
-      nextState.status = 'waiting-human'
+    case 'HUMAN_INTERVENTION':
+      nextState.pendingInterventions = createPendingInterventionRecords(envelope)
+      nextState.status = 'waiting-intervention'
       return nextState
-    case 'TOOL_CONFIRMATION':
-      nextState.pendingConfirmations = createToolConfirmationRecords(envelope)
-      nextState.pendingPrompts = []
-      nextState.status = 'waiting-confirmation'
+    case 'TASK_ERROR':
+      nextState.status = 'error'
       return nextState
     case 'END':
       if (!context.execution_status) {
-        nextState.status = nextState.pendingConfirmations.length > 0
-          ? 'waiting-confirmation'
-          : nextState.pendingPrompts.some((prompt) => !prompt.answered)
-            ? 'waiting-human'
-            : 'completed'
+        if (nextState.status === 'error') {
+          return nextState
+        }
+        nextState.status = nextState.pendingInterventions.length > 0
+          ? 'waiting-intervention'
+          : 'completed'
         return nextState
       }
 
@@ -232,9 +250,7 @@ export function applyEnvelope(state: SessionViewModel, envelope: SseEnvelope): S
       }
 
       if (context.execution_status === 'HUMAN_IN_THE_LOOP') {
-        nextState.status = nextState.pendingConfirmations.length > 0
-          ? 'waiting-confirmation'
-          : 'waiting-human'
+        nextState.status = 'waiting-intervention'
         return nextState
       }
 
@@ -262,19 +278,25 @@ function cloneState(state: SessionViewModel): SessionViewModel {
       artifacts: stage.artifacts.map((artifact) => ({ ...artifact })),
     })),
     globalArtifacts: state.globalArtifacts.map((artifact) => ({ ...artifact })),
-    pendingPrompts: state.pendingPrompts.map((prompt) => ({
-      ...prompt,
-      options: prompt.options.map((option) => ({ ...option })),
-      answer: Array.isArray(prompt.answer) ? [...prompt.answer] : prompt.answer,
-    })),
-    pendingConfirmations: state.pendingConfirmations.map((confirmation) => ({
-      ...confirmation,
-      displayFields: confirmation.displayFields.map((field) => ({ ...field })),
-      editableFields: confirmation.editableFields.map((field) => ({
-        ...field,
-        options: field.options?.map((option) => ({ ...option })),
-      })),
-    })),
+    pendingInterventions: state.pendingInterventions.map((intervention) =>
+      intervention.kind === 'question'
+        ? {
+            ...intervention,
+            options: intervention.options.map((option) => ({ ...option })),
+            answer: Array.isArray(intervention.answer)
+              ? [...intervention.answer]
+              : intervention.answer,
+          }
+        : {
+            ...intervention,
+            displayFields: intervention.displayFields.map((field) => ({ ...field })),
+            editableFields: intervention.editableFields.map((field) => ({
+              ...field,
+              options: field.options?.map((option) => ({ ...option })),
+            })),
+            updatedArgs: intervention.updatedArgs ? { ...intervention.updatedArgs } : undefined,
+          },
+    ),
   }
 }
 
@@ -310,53 +332,6 @@ function ensureStage(state: SessionViewModel, stageId?: string): StageRecord {
   return stage
 }
 
-function applyPlanChange(state: SessionViewModel, message: PlanChangeMessage): void {
-  if (message.change_type === 'STATUS_CHANGE' && message.stage_id) {
-    const stage = ensureStage(state, message.stage_id)
-    if (message.status) {
-      stage.status = message.status
-    }
-    return
-  }
-
-  if (message.change_type === 'PLAN_CHANGE') {
-    if (message.operation === 'ADD_STAGE' && message.new_stage_id) {
-      const nextStage: StageRecord = {
-        id: message.new_stage_id,
-        name: message.stage_name ?? message.new_stage_id,
-        description: message.description ?? '',
-        status: message.status ?? 'PENDING',
-        invocations: [],
-        artifacts: [],
-      }
-
-      const targetIndex = state.stages.findIndex((stage) => stage.id === message.stage_id)
-      if (targetIndex >= 0) {
-        state.stages.splice(targetIndex + 1, 0, nextStage)
-      } else {
-        state.stages.push(nextStage)
-      }
-    }
-
-    if (message.operation === 'DELETE_STAGE' && message.stage_id) {
-      state.stages = state.stages.filter((stage) => stage.id !== message.stage_id)
-    }
-
-    if (message.operation === 'UPDATE_STAGE' && message.stage_id) {
-      const stage = ensureStage(state, message.stage_id)
-      if (message.stage_name) {
-        stage.name = message.stage_name
-      }
-      if (message.description) {
-        stage.description = message.description
-      }
-      if (message.status) {
-        stage.status = message.status
-      }
-    }
-  }
-}
-
 function createInvocationRecord(
   message: InvocationDeclaredDetail,
   stageId: string,
@@ -364,6 +339,9 @@ function createInvocationRecord(
 ): InvocationRecord {
   return {
     id: message.invocation_id,
+    ...(message.parent_invocation_id
+      ? { parentInvocationId: message.parent_invocation_id }
+      : {}),
     stageId,
     name: message.name,
     invocationType: message.invocation_type,
@@ -405,30 +383,6 @@ function applyInvocationChange(
   if (message.render_type) {
     invocation.renderType = message.render_type
   }
-}
-
-export function createToolConfirmationRecords(
-  envelope: ToolConfirmationEnvelope,
-): ToolConfirmationRecord[] {
-  return envelope.messages.map((message) => ({
-    id: `${message.tool_call_id}:${message.confirmation_id}`,
-    confirmationId: message.confirmation_id,
-    toolCallId: message.tool_call_id,
-    invocationId: message.invocation_id,
-    toolName: message.tool_name,
-    toolDisplayName: message.tool_display_name,
-    title: message.title,
-    description: message.description,
-    riskLevel: message.risk_level,
-    editable: message.editable,
-    confirmLabel: message.confirm_label,
-    denyLabel: message.deny_label,
-    displayFields: message.display_fields.map((field) => ({ ...field })),
-    editableFields: message.editable_fields.map((field) => ({
-      ...field,
-      options: field.options?.map((option) => ({ ...option })),
-    })),
-  }))
 }
 
 function upsertStageArtifact(

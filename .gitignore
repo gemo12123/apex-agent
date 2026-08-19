@@ -37,3 +37,4 @@ build/
 .DS_Store
 /.codex/
 /.worktrees/
+/apex-agent/legacy/src/main/resources/application-dev.yml

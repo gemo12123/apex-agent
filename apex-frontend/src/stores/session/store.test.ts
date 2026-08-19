@@ -1,15 +1,23 @@
 import { createPinia, setActivePinia } from 'pinia'
-import { createApexApiClient, setApexApiClientForTesting } from '@/services/apex-api'
+import {
+  createApexApiClient,
+  SessionStateHttpError,
+  setApexApiClientForTesting,
+} from '@/services/apex-api'
 import { useSessionStore } from '@/stores/session/store'
 import type { ApexApiClient } from '@/services/apex-api'
-import type { ChatRequest, SseEnvelope } from '@/types/apex'
+import type { ChatRequest, HumanInterventionEnvelope, SseEnvelope } from '@/types/apex'
 
 describe('useSessionStore', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
   afterEach(() => {
     setApexApiClientForTesting(createApexApiClient())
   })
 
-  it('builds a plan-executor session from streamed envelopes', async () => {
+  it('builds a session from invocation and artifact envelopes', async () => {
     const requests: ChatRequest[] = []
     const mockClient: ApexApiClient = {
       async fetchAgents() {
@@ -20,20 +28,8 @@ describe('useSessionStore', () => {
 
         const envelopes: SseEnvelope[] = [
           {
-            event_type: 'PLAN_DECLARED',
-            context: { mode: 'plan-executor' },
-            messages: [
-              {
-                stage_id: 'stage-1',
-                stage_name: 'Collect context',
-                description: 'Read docs',
-                status: 'PENDING',
-              },
-            ],
-          },
-          {
             event_type: 'INVOCATION_DECLARED',
-            context: { mode: 'plan-executor', stage_id: 'stage-1', executor: 'contacts_tool' },
+            context: { mode: 'react', stage_id: 'stage-1', executor: 'contacts_tool' },
             messages: [
               {
                 invocation_id: 'invoke-1',
@@ -48,7 +44,7 @@ describe('useSessionStore', () => {
           },
           {
             event_type: 'INVOCATION_CHANGE',
-            context: { mode: 'plan-executor', stage_id: 'stage-1', executor: 'contacts_tool' },
+            context: { mode: 'react', stage_id: 'stage-1', executor: 'contacts_tool' },
             messages: [
               {
                 invocation_id: 'invoke-1',
@@ -60,7 +56,7 @@ describe('useSessionStore', () => {
           },
           {
             event_type: 'ARTIFACT_DECLARED',
-            context: { mode: 'plan-executor', stage_id: 'stage-1' },
+            context: { mode: 'react', stage_id: 'stage-1' },
             messages: [
               {
                 scope: 'STAGE',
@@ -76,7 +72,7 @@ describe('useSessionStore', () => {
           },
           {
             event_type: 'END',
-            context: { mode: 'plan-executor', stage_id: 'stage-1', execution_status: 'COMPLETED' },
+            context: { mode: 'react', stage_id: 'stage-1', execution_status: 'COMPLETED' },
             messages: [],
           },
         ]
@@ -99,25 +95,16 @@ describe('useSessionStore', () => {
     expect(store.session.stages[0]?.artifacts[0]?.artifactName).toBe('Report')
   })
 
-  it('resumes a human-in-the-loop session with grouped answers', async () => {
+  it('逐卡回答或跳过后一次提交混合人工介入', async () => {
     let resumePayload: ChatRequest['humanResponse']
+    let resumeRequests = 0
     const mockClient: ApexApiClient = {
       async fetchAgents() {
         return [{ agentKey: 'default_agent', name: 'Default Agent' }]
       },
       async streamChat(request, _userId, _signal, onEnvelope) {
         if (request.type === 'NEW') {
-          onEnvelope({
-            event_type: 'ASK_HUMAN',
-            context: { mode: 'react' },
-            messages: [
-              {
-                input_type: 'CONFIRM',
-                question: 'Continue?',
-                tool_call_id: 'tool-9',
-              },
-            ],
-          })
+          onEnvelope(humanInterventionEnvelope())
           onEnvelope({
             event_type: 'END',
             context: { mode: 'react', execution_status: 'HUMAN_IN_THE_LOOP' },
@@ -126,6 +113,7 @@ describe('useSessionStore', () => {
           return
         }
 
+        resumeRequests += 1
         resumePayload = request.humanResponse
         onEnvelope({
           event_type: 'STREAM_CONTENT',
@@ -147,24 +135,39 @@ describe('useSessionStore', () => {
     await store.initialize()
     await store.sendPrompt('Check whether approval is required')
 
-    expect(store.session.status).toBe('waiting-human')
-    expect(store.session.pendingPrompts).toHaveLength(1)
+    expect(store.session.status).toBe('waiting-intervention')
+    expect(store.session.pendingInterventions).toHaveLength(3)
+    const first = store.session.pendingInterventions[0]
+    const skipped = store.session.pendingInterventions[1]
+    const confirmation = store.session.pendingInterventions[2]
+    if (first.kind !== 'question' || skipped.kind !== 'question'
+      || confirmation.kind !== 'confirmation') {
+      throw new Error('人工介入顺序不符合预期')
+    }
 
-    await store.answerPrompt(store.session.pendingPrompts[0], '确认')
+    store.answerPrompt(first, 'react')
+    store.skipIntervention(skipped)
+    store.answerConfirmation(confirmation, 'APPROVE', { room: 'B2001' })
+    expect(resumeRequests).toBe(0)
+    await store.submitInterventions()
 
     expect(resumePayload).toEqual({
-      'tool-9': {
+      'call-1': {
         interaction_type: 'ASK_HUMAN',
-        answers: {
-          '0': '确认',
-        },
+        answers: { '0': 'react' },
+      },
+      'call-2': {
+        interaction_type: 'TOOL_CONFIRMATION',
+        confirmation_id: 'confirm-2',
+        decision: 'APPROVE',
+        updated_args: { room: 'B2001' },
       },
     })
     expect(store.session.status).toBe('completed')
     expect(store.session.messages.at(-1)?.role).toBe('assistant')
   })
 
-  it('resumes a tool confirmation session with edited arguments', async () => {
+  it('全部跳过时提交空 humanResponse', async () => {
     let resumePayload: ChatRequest['humanResponse']
     const mockClient: ApexApiClient = {
       async fetchAgents() {
@@ -172,36 +175,7 @@ describe('useSessionStore', () => {
       },
       async streamChat(request, _userId, _signal, onEnvelope) {
         if (request.type === 'NEW') {
-          onEnvelope({
-            event_type: 'TOOL_CONFIRMATION',
-            context: { mode: 'react', executor: 'meeting_tool' },
-            messages: [
-              {
-                confirmation_id: 'confirm-1',
-                tool_call_id: 'call-1',
-                invocation_id: 'invocation-1',
-                tool_name: 'meeting_tool',
-                tool_display_name: '会议室助手',
-                title: '预订会议室前确认',
-                description: '请确认会议信息。',
-                risk_level: 'MEDIUM',
-                editable: true,
-                confirm_label: '确认执行',
-                deny_label: '取消',
-                display_fields: [{ key: 'room', label: '会议室', value: 'A1001', type: 'text' }],
-                editable_fields: [
-                  {
-                    key: 'room',
-                    label: '会议室',
-                    input_type: 'single-select',
-                    value: 'A1001',
-                    required: true,
-                    options: [{ label: 'A1001' }, { label: 'B2001' }],
-                  },
-                ],
-              },
-            ],
-          })
+          onEnvelope(humanInterventionEnvelope())
           onEnvelope({
             event_type: 'END',
             context: { mode: 'react', execution_status: 'HUMAN_IN_THE_LOOP' },
@@ -231,28 +205,16 @@ describe('useSessionStore', () => {
     await store.initialize()
     await store.sendPrompt('Book the meeting room')
 
-    expect(store.session.status).toBe('waiting-confirmation')
-    expect(store.session.pendingConfirmations).toHaveLength(1)
-
-    await store.submitConfirmation(store.session.pendingConfirmations[0], 'APPROVE', {
-      room: 'B2001',
+    store.session.pendingInterventions.forEach((item) => {
+      store.skipIntervention(item)
     })
+    await store.submitInterventions()
 
-    expect(resumePayload).toEqual({
-      'call-1': {
-        interaction_type: 'TOOL_CONFIRMATION',
-        confirmation_id: 'confirm-1',
-        decision: 'APPROVE',
-        updated_args: {
-          room: 'B2001',
-        },
-      },
-    })
+    expect(resumePayload).toEqual({})
     expect(store.session.status).toBe('completed')
-    expect(store.session.messages.at(-1)?.role).toBe('assistant')
   })
 
-  it('marks the active session as error when the stream terminates with FAILED status', async () => {
+  it('展示 TASK_ERROR message，并在后续 END 后保持 error', async () => {
     const mockClient: ApexApiClient = {
       async fetchAgents() {
         return [{ agentKey: 'default_agent', name: 'Default Agent' }]
@@ -265,13 +227,13 @@ describe('useSessionStore', () => {
             messages: [{ content: 'hello' }],
           },
           {
+            event_type: 'TASK_ERROR',
+            context: { mode: 'react' },
+            messages: [{ message: 'boom' }],
+          },
+          {
             event_type: 'END',
-            context: {
-              mode: 'react',
-              execution_status: 'FAILED',
-              error_code: 'STREAM_EXECUTION_FAILED',
-              error_message: 'boom',
-            },
+            context: {},
             messages: [],
           },
         ]
@@ -288,5 +250,137 @@ describe('useSessionStore', () => {
     await store.sendPrompt('Trigger failure')
 
     expect(store.session.status).toBe('error')
+    expect(store.errorMessage).toBe('boom')
+    expect(localStorage.getItem('apex:active-session:v1')).toBeNull()
+  })
+
+  it('TASK_ERROR 缺少有效 message 时展示固定兜底', async () => {
+    const mockClient: ApexApiClient = {
+      async fetchAgents() {
+        return [{ agentKey: 'default_agent', name: 'Default Agent' }]
+      },
+      async streamChat(_request, _userId, _signal, onEnvelope) {
+        onEnvelope({
+          event_type: 'TASK_ERROR',
+          context: { mode: 'react' },
+          messages: [{ message: '   ' }],
+        })
+        onEnvelope({ event_type: 'END', context: {}, messages: [] })
+      },
+    }
+
+    setActivePinia(createPinia())
+    setApexApiClientForTesting(mockClient)
+    const store = useSessionStore()
+    await store.initialize()
+    await store.sendPrompt('Trigger failure')
+
+    expect(store.session.status).toBe('error')
+    expect(store.errorMessage).toBe('Agent 执行失败。')
+  })
+
+  it('刷新后恢复完整人工介入批次且不自动提交', async () => {
+    localStorage.setItem('apex:active-session:v1', JSON.stringify({
+      userId: 'demo-user',
+      agentKey: 'default_agent',
+      sessionId: 'session-refresh',
+    }))
+    const streamChat = vi.fn()
+    const mockClient: ApexApiClient = {
+      async fetchAgents() {
+        return [{ agentKey: 'default_agent', name: 'Default Agent' }]
+      },
+      async fetchSessionState() {
+        return {
+          sessionId: 'session-refresh',
+          agentKey: 'default_agent',
+          executionStatus: 'HUMAN_IN_THE_LOOP',
+          pendingInteraction: humanInterventionEnvelope(),
+        }
+      },
+      streamChat,
+    }
+    setActivePinia(createPinia())
+    setApexApiClientForTesting(mockClient)
+
+    const store = useSessionStore()
+    await store.initialize()
+
+    expect(store.session.sessionId).toBe('session-refresh')
+    expect(store.session.status).toBe('waiting-intervention')
+    expect(store.session.pendingInterventions.map((item) => item.toolCallId)).toEqual([
+      'call-1', 'call-1', 'call-2',
+    ])
+    expect(streamChat).not.toHaveBeenCalled()
+  })
+
+  it('clears stale locators on 404 but retains them on server errors', async () => {
+    const locator = JSON.stringify({
+      userId: 'demo-user', agentKey: 'default_agent', sessionId: 'session-refresh',
+    })
+    const client = (status: number): ApexApiClient => ({
+      async fetchAgents() {
+        return [{ agentKey: 'default_agent', name: 'Default Agent' }]
+      },
+      async fetchSessionState() { throw new SessionStateHttpError(status) },
+      async streamChat() { },
+    })
+
+    localStorage.setItem('apex:active-session:v1', locator)
+    setActivePinia(createPinia())
+    setApexApiClientForTesting(client(404))
+    await useSessionStore().initialize()
+    expect(localStorage.getItem('apex:active-session:v1')).toBeNull()
+
+    localStorage.setItem('apex:active-session:v1', locator)
+    setActivePinia(createPinia())
+    setApexApiClientForTesting(client(500))
+    const store = useSessionStore()
+    await store.initialize()
+    expect(localStorage.getItem('apex:active-session:v1')).toBe(locator)
+    expect(store.errorMessage).toContain('500')
   })
 })
+
+function humanInterventionEnvelope(): HumanInterventionEnvelope {
+  return {
+    event_type: 'HUMAN_INTERVENTION',
+    context: { mode: 'react' },
+    messages: [
+      {
+        interaction_type: 'ASK_HUMAN',
+        tool_call_id: 'call-1',
+        invocation_id: 'invocation-1',
+        tool_name: 'ask_human',
+        questions: [
+          {
+            input_type: 'SINGLE_SELECT',
+            question: '请选择模式',
+            options: [{ label: 'react' }, { label: 'plan-executor' }],
+          },
+          {
+            input_type: 'TEXT_INPUT',
+            question: '补充说明',
+            options: [],
+          },
+        ],
+      },
+      {
+        interaction_type: 'TOOL_CONFIRMATION',
+        confirmation_id: 'confirm-2',
+        tool_call_id: 'call-2',
+        invocation_id: 'invocation-2',
+        tool_name: 'meeting_tool',
+        tool_display_name: '会议室助手',
+        title: '预订会议室前确认',
+        description: '请确认会议信息。',
+        risk_level: 'MEDIUM',
+        editable: true,
+        confirm_label: '确认执行',
+        deny_label: '取消',
+        display_fields: [],
+        editable_fields: [],
+      },
+    ],
+  }
+}

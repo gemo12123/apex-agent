@@ -1,0 +1,50 @@
+# protocol 模块任务
+
+> 模块职责：维护前端、platform、core 事件工厂和远程 SubAgent 共用的线协议
+> 当前总体进度：已完成（2026-08-01）；PRO-01、PRO-02 已通过 protocol 专项、legacy 对照和父 reactor 验证
+
+## PRO-01 提取并净化公共协议 DTO
+
+- **任务名称**：迁移 HTTP/SSE 与远程调用公共协议。
+- **任务目标**：形成不依赖 core、Spring AI、Servlet、SSE 和数据库实现的独立 `apex-agent-protocol`。
+- **当前进度**：已完成（2026-08-01）。HTTP/SSE、人在回路和远程 SubAgent 线协议已提取到 `org.gemo.apex.protocol`；legacy 保留原包兼容 DTO，新 protocol 不含运行上下文构造逻辑，并新增独立只读 `SessionStateView`。
+- **设计依据**：设计文档第 5.1、13、17 节；架构文档第 5.1、13 节。
+- **涉及范围**：`ChatRequest`、`RequestType`、刷新查询 `SessionStateView`、`AgentEventType`、`AgentMessage` 及所有具体消息、工具确认展示/编辑/选项 DTO、协议常量。
+- **前置依赖**：FND-01、FND-02。
+- **具体执行内容**：
+  1. 搬迁全部对外可见请求和事件 DTO，保持现有包外协议行为。
+  2. 保留 `PLAN_*`、`TASK_THINK_*`、`STREAM_THINK` DTO，但不提供默认生产逻辑。
+  3. 移除 `ToolConfirmationMessage.from(context, ...)` 等运行上下文依赖，构造职责交给 core 事件工厂。
+  4. 保持 snake_case 字段、Jackson 多态标识、默认值与空字段行为。
+  5. 为远程 SubAgent 的消息反序列化保留完整事件类型。
+  6. 新增 `SessionStateView(sessionId, agentKey, executionStatus, pendingInteraction)`；REST 外层沿用 camelCase，pending 只能复用 ASK_HUMAN/TOOL_CONFIRMATION 消息，不复制交互 DTO。
+- **预期产出**：可独立编译和发布的 protocol artifact，以及迁移后的协议单元测试。
+- **验收标准**：
+  - protocol 模块独立 `test` 通过。
+  - 字节码/源码检查确认不引用 `ApexAgentContext`、HookContext、Spring AI、`SseEmitter`、Servlet 或数据库类型。
+  - 所有当前协议类型均有明确迁移或保留映射，无遗漏事件。
+- **限制条件或注意事项**：不得删除兼容 DTO；不得把 `"react"` 抽象为 core 执行模式；既有 HTTP 路径、Header、字段名或事件名不得修改，Q-14 只允许新增只读会话状态 DTO/路径。
+
+## PRO-02 固化序列化与协议兼容契约
+
+- **任务名称**：建立 protocol 精确 JSON 契约测试。
+- **任务目标**：确保模块化和 Jackson 统一后，现有前端无需改动既有 SSE 消费逻辑，并为新增刷新查询提供独立 DTO。
+- **当前进度**：已完成（2026-08-01）。16 份 Golden File 覆盖运行事件、兼容 DTO 和三类会话状态响应；protocol 24 个测试、legacy 迁移对照及父 reactor 均通过，兼容结论见 `docs/refact/evidence/PRO-02-协议兼容报告.md`。
+- **设计依据**：设计文档第 13.2、21.7、22 节；架构文档第 13、18.4 节。
+- **涉及范围**：protocol Jackson 注解/配置、协议测试资源、FND-01 Golden File。
+- **前置依赖**：PRO-01、FND-01。
+- **具体执行内容**：
+  1. 对 `STREAM_CONTENT`、`ASK_HUMAN`、`TOOL_CONFIRMATION`、`END` 做双向精确 JSON 测试。
+  2. 对兼容保留的 `PLAN_*`、`TASK_THINK_*`、`STREAM_THINK` 做序列化测试。
+  3. 验证所有运行事件的 `context.mode` 兼容值、`content_id`、`tool_call_id`、confirmation/tool/invocation 标识。
+  4. 固定 END 不增加 `execution_status` 或其他字段。
+  5. 对模型可见固定 ToolResult 只断言 protocol 没有新增对应 SSE 事件、code 或 payload；具体文本与关联 ID 归 core 测试。
+  6. 固化会话状态响应的 HITL/非 HITL 样本，断言 pending interaction 的多态 JSON 与同一 SSE 事件一致。
+  7. protocol 测试使用本模块 test scope 的最小 Jackson mapper，不调用 common `JsonUtils`；Golden 夹具以 test-jar 供 common 消费测试复用。
+- **预期产出**：protocol Golden File 测试集和协议兼容报告。
+- **验收标准**：
+  - 迁移前后 Golden File 字节级或规范化 JSON 结构完全一致。
+  - `END` 精确序列化为 `{"event_type":"END"}`。
+  - 测试明确区分“DTO 可序列化”和“默认链路会生产该事件”。
+  - protocol 的 compile/test 依赖均不包含 common，reactor 中不存在 protocol→common 反向边。
+- **限制条件或注意事项**：若现有 Golden File 与已确认设计冲突，不可自行选择一方；登记差异并确认。模型可见 ToolResult 属于 common 对话模型，不新增 SSE 事件类型。

@@ -1,5 +1,5 @@
 import { fetchEventSource } from '@microsoft/fetch-event-source'
-import type { AgentSummary, ChatRequest, SseEnvelope } from '@/types/apex'
+import type { AgentSummary, ChatRequest, SessionStateView, SseEnvelope } from '@/types/apex'
 
 interface ApiResponse<T> {
   code: number
@@ -9,6 +9,7 @@ interface ApiResponse<T> {
 
 export interface ApexApiClient {
   fetchAgents(userId: string): Promise<AgentSummary[]>
+  fetchSessionState?(sessionId: string, agentKey: string, userId: string): Promise<SessionStateView>
   streamChat(
     request: ChatRequest,
     userId: string,
@@ -18,6 +19,15 @@ export interface ApexApiClient {
 }
 
 const API_BASE = '/apex-api'
+
+export class SessionStateHttpError extends Error {
+  readonly status: number
+
+  constructor(status: number) {
+    super(`加载会话状态失败（${status}）`)
+    this.status = status
+  }
+}
 
 function createHeaders(userId: string): Record<string, string> {
   return {
@@ -39,6 +49,19 @@ export function createApexApiClient(): ApexApiClient {
 
       const payload = (await response.json()) as ApiResponse<AgentSummary[]>
       return payload.data ?? []
+    },
+    async fetchSessionState(sessionId, agentKey, userId) {
+      const response = await fetch(
+        `${API_BASE}/sse/sessions/${encodeURIComponent(sessionId)}?agentKey=${encodeURIComponent(agentKey)}`,
+        { headers: createHeaders(userId) },
+      )
+
+      if (!response.ok) {
+        throw new SessionStateHttpError(response.status)
+      }
+
+      const payload = (await response.json()) as ApiResponse<SessionStateView>
+      return payload.data
     },
     async streamChat(request, userId, signal, onEnvelope) {
       await fetchEventSource(`${API_BASE}/sse/chat`, {

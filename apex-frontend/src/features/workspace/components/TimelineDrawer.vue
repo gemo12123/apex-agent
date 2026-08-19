@@ -52,10 +52,8 @@ function formatKind(kind: TimelineEntry['kind']): string {
       return '调用'
     case 'artifact':
       return '产物'
-    case 'prompt':
-      return '人工确认'
-    case 'confirmation':
-      return '工具确认'
+    case 'intervention':
+      return '人工介入'
     case 'session':
       return '会话状态'
   }
@@ -83,6 +81,7 @@ function formatKind(kind: TimelineEntry['kind']): string {
         :key="entry.id"
         class="timeline-entry"
         :class="`timeline-entry--${entry.tone}`"
+        :style="{ marginInlineStart: `${entry.depth * 14}px` }"
       >
         <button
           :data-testid="`timeline-entry-${entry.id}`"

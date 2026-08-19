@@ -70,6 +70,7 @@
 
 - `ToolConfirmHook`
 - `PlainTextTruncateHook`
+- `JsonTruncateHook`
 - `SkillExperienceAugmentHook`
 - `SkillUsageRecorderHook`
 
@@ -119,17 +120,11 @@ Vite 开发环境通过代理把 `/apex-api/*` 转发到 `http://localhost:18083
 
 主要配置文件：
 
-- `apex-agent/src/main/resources/application.yml`
+- `apex-agent/platform/src/main/resources/application.yml`
+- `apex-agent/platform/src/main/resources/application-dev.yml`
 
-需要特别注意两类配置：
-
-1. `apex.global.mcps.*`
-2. `apex.global.skills.*`
-
-当前文件里仍包含指向本机绝对路径的示例配置，例如外部 Node MCP 脚本和本地 skill 目录。落地时你需要：
-
-- 把这些路径改成你自己的路径，或
-- 先移除不需要的 MCP / skill 配置，只验证主链路
+MCP Client 通过 `spring.ai.mcp.client.*` 配置连接；发现的工具还需在
+`apex.platform.agents.*.tools` 中授权给对应 Agent。外部 MCP Server 和 Skill 目录不是仓库内置资源，落地时需要换成实际可用的地址或路径。
 
 ### 3. 启动后端
 
@@ -168,7 +163,7 @@ npm run dev
 
 ## 已知实现边界
 
-- 仓库当前不自带外部 MCP server 代码；`application.yml` 中的 MCP 命令只是示例
+- 仓库当前不自带外部 MCP Server 代码；`spring.ai.mcp.client.*` 需要指向实际可用的外部服务
 - 仓库当前不自带 `meeting-skill`、`contacts-skill` 目录；skill 路径是示例外部依赖
 - 当前资源目录没有 `default_agent` workspace；`default_agent` 主要依赖 `application.yml` 与默认 prompt 回退
 - JDBC 记忆/search 路径的 schema 与实现围绕 PostgreSQL/pgvector 设计，但 `pom.xml` 目前保留的是 `mysql-connector-java`，并将 PostgreSQL 驱动注释掉；如果你要真正启用 JDBC，请先把驱动、URL 和 schema 策略对齐

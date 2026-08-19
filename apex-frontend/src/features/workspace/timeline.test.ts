@@ -48,4 +48,51 @@ describe('buildTimelineEntries', () => {
     ])
     expect(entries.at(-1)?.defaultExpanded).toBe(true)
   })
+
+  it('递归排列父子调用，并把孤儿与循环降级为根节点', () => {
+    const session = createSessionViewModel()
+    session.stages = [
+      {
+        id: 'stage-1',
+        name: '执行阶段',
+        description: '',
+        status: 'RUNNING',
+        invocations: [
+          invocation('grandchild', 'child'),
+          invocation('orphan', 'missing'),
+          invocation('parent'),
+          invocation('child', 'parent'),
+          invocation('cycle-a', 'cycle-b'),
+          invocation('cycle-b', 'cycle-a'),
+        ],
+        artifacts: [],
+      },
+    ]
+
+    const invocationEntries = buildTimelineEntries(session)
+      .filter((entry) => entry.kind === 'invocation')
+
+    expect(invocationEntries.map((entry) => entry.id)).toEqual([
+      'invocation:orphan',
+      'invocation:parent',
+      'invocation:child',
+      'invocation:grandchild',
+      'invocation:cycle-a',
+      'invocation:cycle-b',
+    ])
+    expect(invocationEntries.map((entry) => entry.depth)).toEqual([1, 1, 2, 3, 1, 2])
+  })
 })
+
+function invocation(id: string, parentInvocationId?: string) {
+  return {
+    id,
+    ...(parentInvocationId ? { parentInvocationId } : {}),
+    stageId: 'stage-1',
+    name: id,
+    invocationType: 'tool',
+    status: 'RUNNING' as const,
+    renderType: 'json',
+    content: '',
+  }
+}

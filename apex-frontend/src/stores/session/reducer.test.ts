@@ -5,7 +5,7 @@ import {
   createSessionViewModel,
   startAssistantMessage,
 } from './reducer'
-import type { SseEnvelope } from '@/types/apex'
+import type { HumanInterventionEnvelope, SseEnvelope } from '@/types/apex'
 
 describe('session reducer', () => {
   it('appends streaming text and think content onto the current assistant turn', () => {
@@ -53,26 +53,13 @@ describe('session reducer', () => {
     expect(state.currentMode).toBe('react')
   })
 
-  it('creates and updates stages, invocations, and stage artifacts using message IDs', () => {
+  it('creates stages lazily for invocation and stage artifact events', () => {
     let state = createSessionViewModel()
     state = startAssistantMessage(state)
 
     state = applyEnvelope(state, {
-      event_type: 'PLAN_DECLARED',
-      context: { mode: 'plan-executor' },
-      messages: [
-        {
-          stage_id: 'stage-1',
-          stage_name: 'Collect context',
-          description: 'Inspect backend contracts',
-          status: 'PENDING',
-        },
-      ],
-    } satisfies SseEnvelope)
-
-    state = applyEnvelope(state, {
       event_type: 'INVOCATION_DECLARED',
-      context: { mode: 'plan-executor', stage_id: 'stage-1', executor: 'meeting_tool' },
+      context: { mode: 'react', stage_id: 'stage-1', executor: 'meeting_tool' },
       messages: [
         {
           invocation_id: 'invoke-42',
@@ -88,7 +75,7 @@ describe('session reducer', () => {
 
     state = applyEnvelope(state, {
       event_type: 'INVOCATION_CHANGE',
-      context: { mode: 'plan-executor', stage_id: 'stage-1', executor: 'meeting_tool' },
+      context: { mode: 'react', stage_id: 'stage-1', executor: 'meeting_tool' },
       messages: [
         {
           invocation_id: 'invoke-42',
@@ -106,7 +93,7 @@ describe('session reducer', () => {
 
     state = applyEnvelope(state, {
       event_type: 'ARTIFACT_DECLARED',
-      context: { mode: 'plan-executor', stage_id: 'stage-1' },
+      context: { mode: 'react', stage_id: 'stage-1' },
       messages: [
         {
           scope: 'STAGE',
@@ -123,7 +110,7 @@ describe('session reducer', () => {
 
     state = applyEnvelope(state, {
       event_type: 'ARTIFACT_CHANGE',
-      context: { mode: 'plan-executor', stage_id: 'stage-1' },
+      context: { mode: 'react', stage_id: 'stage-1' },
       messages: [
         {
           scope: 'STAGE',
@@ -140,9 +127,9 @@ describe('session reducer', () => {
     const stage = state.stages[0]
     expect(stage).toMatchObject({
       id: 'stage-1',
-      name: 'Collect context',
-      description: 'Inspect backend contracts',
-      status: 'PENDING',
+      name: '执行阶段',
+      description: '',
+      status: 'RUNNING',
     })
     expect(stage.invocations).toEqual([
       {
@@ -169,6 +156,49 @@ describe('session reducer', () => {
         complete: false,
       },
     ])
+  })
+
+  it('保存父调用并将取消变化应用到实际子节点', () => {
+    let state = applyEnvelope(createSessionViewModel(), {
+      event_type: 'INVOCATION_DECLARED',
+      context: { mode: 'react', invocation_id: 'parent' },
+      messages: [
+        {
+          invocation_id: 'child',
+          parent_invocation_id: 'parent',
+          name: 'child-tool',
+          invocation_type: 'tool',
+          complete: false,
+          render_type: 'json',
+        },
+      ],
+    } satisfies SseEnvelope)
+
+    state = applyEnvelope(state, {
+      event_type: 'INVOCATION_CHANGE',
+      context: { mode: 'react', invocation_id: 'parent' },
+      messages: [
+        {
+          invocation_id: 'child',
+          change_type: 'CONTENT_APPEND',
+          content: '已取消',
+          render_type: 'text',
+        },
+        {
+          invocation_id: 'child',
+          change_type: 'STATUS_CHANGE',
+          status: 'CANCELLED',
+        },
+      ],
+    } satisfies SseEnvelope)
+
+    expect(state.stages[0].invocations[0]).toMatchObject({
+      id: 'child',
+      parentInvocationId: 'parent',
+      status: 'CANCELLED',
+      content: '已取消',
+      renderType: 'text',
+    })
   })
 
   it('stores global artifacts separately from stage artifacts', () => {
@@ -206,174 +236,76 @@ describe('session reducer', () => {
     ])
   })
 
-  it('builds ask-human prompts and resume payloads grouped by tool call id', () => {
+  it('按批量事件顺序展开混合卡片，并只聚合已回答项', () => {
     let state = createSessionViewModel()
+    state = applyEnvelope(state, humanInterventionEnvelope())
 
-    state = applyEnvelope(state, {
-      event_type: 'ASK_HUMAN',
-      context: { mode: 'react' },
-      messages: [
-        {
-          input_type: 'SINGLE_SELECT',
-          question: 'Pick an execution mode',
-          description: 'This affects the next step',
-          options: [
-            { label: 'react', description: 'Step-by-step' },
-            { label: 'plan-executor', description: 'Plan first' },
-          ],
-          tool_call_id: 'tool-call-1',
-        },
-        {
-          input_type: 'TEXT_INPUT',
-          question: 'Any delivery notes?',
-          tool_call_id: 'tool-call-1',
-        },
-      ],
-    } satisfies SseEnvelope)
-
-    state.pendingPrompts[0].answered = true
-    state.pendingPrompts[0].answer = 'react'
-    state.pendingPrompts[1].answered = true
-    state.pendingPrompts[1].answer = 'Keep the workspace responsive.'
-
-    expect(state.pendingPrompts).toEqual([
-      {
-        id: 'tool-call-1:0',
-        index: 0,
-        inputType: 'SINGLE_SELECT',
-        question: 'Pick an execution mode',
-        description: 'This affects the next step',
-        options: [
-          { label: 'react', description: 'Step-by-step' },
-          { label: 'plan-executor', description: 'Plan first' },
-        ],
-        toolCallId: 'tool-call-1',
-        answered: true,
-        answer: 'react',
-      },
-      {
-        id: 'tool-call-1:1',
-        index: 1,
-        inputType: 'TEXT_INPUT',
-        question: 'Any delivery notes?',
-        description: undefined,
-        options: [],
-        toolCallId: 'tool-call-1',
-        answered: true,
-        answer: 'Keep the workspace responsive.',
-      },
+    expect(state.pendingInterventions.map((item) => item.kind)).toEqual([
+      'question',
+      'question',
+      'confirmation',
+    ])
+    expect(state.pendingInterventions.map((item) => item.toolCallId)).toEqual([
+      'call-1',
+      'call-1',
+      'call-2',
     ])
 
-    expect(buildHumanResponsePayload(state.pendingPrompts)).toEqual({
-      'tool-call-1': {
+    const firstQuestion = state.pendingInterventions[0]
+    const skippedQuestion = state.pendingInterventions[1]
+    const confirmation = state.pendingInterventions[2]
+    if (firstQuestion.kind !== 'question'
+      || skippedQuestion.kind !== 'question'
+      || confirmation.kind !== 'confirmation') {
+      throw new Error('人工介入卡片类型与顺序不符合预期')
+    }
+    firstQuestion.resolution = 'answered'
+    firstQuestion.answer = 'react'
+    skippedQuestion.resolution = 'skipped'
+    confirmation.resolution = 'answered'
+    confirmation.decision = 'APPROVE'
+    confirmation.updatedArgs = { room: 'B2001' }
+
+    expect(buildHumanResponsePayload(state.pendingInterventions)).toEqual({
+      'call-1': {
         interaction_type: 'ASK_HUMAN',
-        answers: {
-          '0': 'react',
-          '1': 'Keep the workspace responsive.',
-        },
+        answers: { '0': 'react' },
+      },
+      'call-2': {
+        interaction_type: 'TOOL_CONFIRMATION',
+        confirmation_id: 'confirm-2',
+        decision: 'APPROVE',
+        updated_args: { room: 'B2001' },
       },
     })
   })
 
-  it('stores tool confirmations and keeps the session waiting-confirmation when the stream ends', () => {
+  it('全部跳过时生成空 humanResponse', () => {
     let state = createSessionViewModel()
+    state = applyEnvelope(state, humanInterventionEnvelope())
+    state.pendingInterventions.forEach((item) => {
+      item.resolution = 'skipped'
+    })
 
-    state = applyEnvelope(state, {
-      event_type: 'TOOL_CONFIRMATION',
-      context: { mode: 'react', executor: 'meeting_tool' },
-      messages: [
-        {
-          confirmation_id: 'confirm-1',
-          tool_call_id: 'call-1',
-          invocation_id: 'invocation-1',
-          tool_name: 'meeting_tool',
-          tool_display_name: '会议室助手',
-          title: '预订会议室前确认',
-          description: '请确认会议信息。',
-          risk_level: 'MEDIUM',
-          editable: true,
-          confirm_label: '确认执行',
-          deny_label: '取消',
-          display_fields: [{ key: 'room', label: '会议室', value: 'A1001', type: 'text' }],
-          editable_fields: [
-            {
-              key: 'room',
-              label: '会议室',
-              input_type: 'single-select',
-              value: 'A1001',
-              required: true,
-              options: [{ label: 'A1001' }, { label: 'B2001' }],
-            },
-          ],
-        },
-      ],
-    } satisfies SseEnvelope)
-
-    state = applyEnvelope(state, {
-      event_type: 'END',
-      context: { mode: 'react' },
-      messages: [],
-    } satisfies SseEnvelope)
-
-    expect(state.pendingConfirmations).toEqual([
-      {
-        id: 'call-1:confirm-1',
-        confirmationId: 'confirm-1',
-        toolCallId: 'call-1',
-        invocationId: 'invocation-1',
-        toolName: 'meeting_tool',
-        toolDisplayName: '会议室助手',
-        title: '预订会议室前确认',
-        description: '请确认会议信息。',
-        riskLevel: 'MEDIUM',
-        editable: true,
-        confirmLabel: '确认执行',
-        denyLabel: '取消',
-        displayFields: [{ key: 'room', label: '会议室', value: 'A1001', type: 'text' }],
-        editableFields: [
-          {
-            key: 'room',
-            label: '会议室',
-            input_type: 'single-select',
-            value: 'A1001',
-            required: true,
-            options: [{ label: 'A1001' }, { label: 'B2001' }],
-          },
-        ],
-      },
-    ])
-    expect(state.status).toBe('waiting-confirmation')
+    expect(buildHumanResponsePayload(state.pendingInterventions)).toEqual({})
   })
 
-  it('marks the session as waiting-human or completed when the stream ends', () => {
-    let waitingState = createSessionViewModel()
-    waitingState = applyEnvelope(waitingState, {
-      event_type: 'ASK_HUMAN',
-      context: { mode: 'react' },
-      messages: [
-        {
-          input_type: 'CONFIRM',
-          question: 'Continue?',
-          tool_call_id: 'confirm-1',
-        },
-      ],
-    } satisfies SseEnvelope)
-
+  it('统一人工介入事件及其后的 END 都保持 waiting-intervention', () => {
+    let waitingState = applyEnvelope(createSessionViewModel(), humanInterventionEnvelope())
     waitingState = applyEnvelope(waitingState, {
       event_type: 'END',
       context: { mode: 'react' },
       messages: [],
     } satisfies SseEnvelope)
 
-    let completedState = createSessionViewModel()
-    completedState = startAssistantMessage(completedState)
+    let completedState = startAssistantMessage(createSessionViewModel())
     completedState = applyEnvelope(completedState, {
       event_type: 'END',
       context: { mode: 'react' },
       messages: [],
     } satisfies SseEnvelope)
 
-    expect(waitingState.status).toBe('waiting-human')
+    expect(waitingState.status).toBe('waiting-intervention')
     expect(completedState.status).toBe('completed')
   })
 
@@ -395,28 +327,24 @@ describe('session reducer', () => {
     expect(state.status).toBe('error')
   })
 
-  it('keeps waiting-confirmation when END carries HUMAN_IN_THE_LOOP execution status', () => {
-    let state = createSessionViewModel()
+  it('TASK_ERROR 后的裸 END 保持 error 状态', () => {
+    let state = startAssistantMessage(createSessionViewModel())
     state = applyEnvelope(state, {
-      event_type: 'TOOL_CONFIRMATION',
+      event_type: 'TASK_ERROR',
       context: { mode: 'react' },
-      messages: [
-        {
-          confirmation_id: 'confirm-1',
-          tool_call_id: 'tool-call-1',
-          invocation_id: 'invoke-1',
-          tool_name: 'deploy_tool',
-          tool_display_name: 'Deploy Tool',
-          title: 'Continue?',
-          risk_level: 'MEDIUM',
-          editable: false,
-          confirm_label: 'Approve',
-          deny_label: 'Deny',
-          display_fields: [],
-          editable_fields: [],
-        },
-      ],
+      messages: [{ message: 'model down' }],
     } satisfies SseEnvelope)
+    state = applyEnvelope(state, {
+      event_type: 'END',
+      context: {},
+      messages: [],
+    } satisfies SseEnvelope)
+
+    expect(state.status).toBe('error')
+  })
+
+  it('END 携带 HUMAN_IN_THE_LOOP 时保持统一等待状态', () => {
+    let state = applyEnvelope(createSessionViewModel(), humanInterventionEnvelope())
 
     state = applyEnvelope(state, {
       event_type: 'END',
@@ -424,29 +352,59 @@ describe('session reducer', () => {
       messages: [],
     } satisfies SseEnvelope)
 
-    expect(state.status).toBe('waiting-confirmation')
-  })
-
-  it('preserves legacy waiting behavior when END has no execution_status', () => {
-    let state = createSessionViewModel()
-    state = applyEnvelope(state, {
-      event_type: 'ASK_HUMAN',
-      context: { mode: 'react' },
-      messages: [
-        {
-          input_type: 'TEXT_INPUT',
-          question: 'Need more input',
-          tool_call_id: 'ask-1',
-        },
-      ],
-    } satisfies SseEnvelope)
-
-    state = applyEnvelope(state, {
-      event_type: 'END',
-      context: { mode: 'react' },
-      messages: [],
-    } satisfies SseEnvelope)
-
-    expect(state.status).toBe('waiting-human')
+    expect(state.status).toBe('waiting-intervention')
   })
 })
+
+function humanInterventionEnvelope(): HumanInterventionEnvelope {
+  return {
+    event_type: 'HUMAN_INTERVENTION',
+    context: { mode: 'react' },
+    messages: [
+      {
+        interaction_type: 'ASK_HUMAN',
+        tool_call_id: 'call-1',
+        invocation_id: 'invocation-1',
+        tool_name: 'ask_human',
+        questions: [
+          {
+            input_type: 'SINGLE_SELECT',
+            question: 'Pick an execution mode',
+            description: 'This affects the next step',
+            options: [{ label: 'react' }, { label: 'plan-executor' }],
+          },
+          {
+            input_type: 'TEXT_INPUT',
+            question: 'Any delivery notes?',
+            options: [],
+          },
+        ],
+      },
+      {
+        interaction_type: 'TOOL_CONFIRMATION',
+        confirmation_id: 'confirm-2',
+        tool_call_id: 'call-2',
+        invocation_id: 'invocation-2',
+        tool_name: 'meeting_tool',
+        tool_display_name: '会议室助手',
+        title: '预订会议室前确认',
+        description: '请确认会议信息。',
+        risk_level: 'MEDIUM',
+        editable: true,
+        confirm_label: '确认执行',
+        deny_label: '取消',
+        display_fields: [{ key: 'room', label: '会议室', value: 'A1001', type: 'text' }],
+        editable_fields: [
+          {
+            key: 'room',
+            label: '会议室',
+            input_type: 'single-select',
+            value: 'A1001',
+            required: true,
+            options: [{ label: 'A1001' }, { label: 'B2001' }],
+          },
+        ],
+      },
+    ],
+  }
+}

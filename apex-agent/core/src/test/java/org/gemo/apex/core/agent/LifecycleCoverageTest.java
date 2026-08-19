@@ -1,0 +1,641 @@
+package org.gemo.apex.core.agent;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.util.*;
+import java.util.function.Function;
+import org.gemo.apex.common.agent.AgentDefinitionSnapshot;
+import org.gemo.apex.common.execution.AgentRequest;
+import org.gemo.apex.common.execution.IterationStatus;
+import org.gemo.apex.common.execution.SessionStatus;
+import org.gemo.apex.common.hook.*;
+import org.gemo.apex.common.hook.context.*;
+import org.gemo.apex.common.hook.operation.*;
+import org.gemo.apex.common.hook.result.*;
+import org.gemo.apex.common.model.ModelResponse;
+import org.gemo.apex.common.snapshot.ExecutionErrorSnapshot;
+import org.gemo.apex.common.snapshot.ExecutionErrorType;
+import org.gemo.apex.common.tool.ToolCall;
+import org.gemo.apex.common.tool.ToolResult;
+import org.gemo.apex.core.event.AgentEventEmitter;
+import org.gemo.apex.core.event.AgentEventFactory;
+import org.gemo.apex.core.lifecycle.LifecycleDispatcher;
+import org.gemo.apex.core.tool.ToolCallCoordinator;
+import org.gemo.apex.core.tool.ToolCatalog;
+import org.gemo.apex.core.tool.ToolResultFactory;
+import org.gemo.apex.extension.hook.LifecycleHook;
+import org.junit.jupiter.api.Test;
+
+class LifecycleCoverageTest {
+    /** 十一个生命周期均由同一调度器按定义触发 */
+    @Test
+    void dispatchesAllElevenLifecycleStagesByDefinitionThroughSameDispatcher() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        Map<HookPoint, Integer> counts = new EnumMap<>(HookPoint.class);
+        Map<HookPoint, List<HookBinding>> bindings = new EnumMap<>(HookPoint.class);
+        for (HookPoint point : HookPoint.values()) {
+            String name = "hook-" + point;
+            fixture.hooks.put(name, hook(point, counts));
+            bindings.put(
+                    point,
+                    List.of(new HookBinding("id-" + point, name, 0, true, List.of(), Map.of())));
+        }
+        fixture.tool(
+                "tool",
+                (call, context, observer) ->
+                        new ToolResult(call.toolCallId(), call.name(), "ok", Map.of()));
+        fixture.definition = fixture.definition(bindings, Set.of("tool"), Set.of("tool"));
+        fixture.compact = true;
+        fixture.modelResponses.add(
+                new ModelResponse(
+                        "",
+                        List.of(new ToolCall("call-1", "tool", 0, Map.of(), Map.of())),
+                        Map.of()));
+        fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
+
+        AgentRunOutcome outcome =
+                new ApexAgentFactory()
+                        .createNew(
+                                new AgentRequest("session-1", "demo", "user-1", "你好"),
+                                fixture.ports())
+                        .run();
+
+        assertInstanceOf(AgentRunOutcome.Completed.class, outcome, outcome.toString());
+        assertEquals(1, counts.get(HookPoint.AGENT_BUILD));
+        assertEquals(1, counts.get(HookPoint.TURN_START));
+        assertEquals(2, counts.get(HookPoint.ITERATION_START));
+        assertEquals(2, counts.get(HookPoint.PRE_MESSAGE_COMPRESSION));
+        assertEquals(2, counts.get(HookPoint.POST_MESSAGE_COMPRESSION));
+        assertEquals(2, counts.get(HookPoint.PRE_MODEL_CALL));
+        assertEquals(2, counts.get(HookPoint.POST_MODEL_CALL));
+        assertEquals(1, counts.get(HookPoint.PRE_TOOL_CALL));
+        assertEquals(1, counts.get(HookPoint.POST_TOOL_CALL));
+        assertEquals(2, counts.get(HookPoint.ITERATION_END));
+        assertEquals(1, counts.get(HookPoint.TURN_END));
+    }
+
+    /** Hook普通异常只跳过当前Binding并继续后续Hook */
+    @Test
+    void ordinaryHookExceptionSkipsOnlyCurrentBindingAndContinuesSubsequentHooks() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        List<String> invoked = new ArrayList<>();
+        fixture.hooks.put(
+                "broken",
+                loopHook(
+                        context -> {
+                            invoked.add("broken");
+                            throw new IllegalStateException("boom");
+                        }));
+        fixture.hooks.put(
+                "next",
+                loopHook(
+                        context -> {
+                            invoked.add("next");
+                            return new ContinueLoop(HookMutations.none());
+                        }));
+        fixture.definition =
+                fixture.definition(
+                        Map.of(
+                                HookPoint.TURN_START,
+                                List.of(
+                                        new HookBinding(
+                                                "b", "broken", 0, true, List.of(), Map.of()),
+                                        new HookBinding(
+                                                "a", "next", 1, true, List.of(), Map.of()))),
+                        Set.of(),
+                        Set.of());
+        fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
+
+        ApexAgent agent =
+                new ApexAgentFactory()
+                        .createNew(
+                                new AgentRequest("session-1", "demo", "user-1", "你好"),
+                                fixture.ports());
+        AgentRunOutcome outcome = agent.run();
+
+        assertInstanceOf(AgentRunOutcome.Completed.class, outcome, outcome.toString());
+        assertEquals(List.of("broken", "next"), invoked);
+        var error = assertSingleError(agent, ExecutionErrorType.HOOK);
+        assertEquals(1, error.turnNo());
+        assertNull(error.iterationNo());
+        assertEquals(HookPoint.TURN_START, error.hookPoint());
+        assertEquals("b", error.hookId());
+        assertEquals("第 1 个 Turn 的 TURN_START Hook b 执行失败", error.message());
+    }
+
+    @Test
+    void agentBuildHookExceptionIsPersistedAndDoesNotStopLaterBuildHooks() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        Map<HookPoint, Integer> counts = new EnumMap<>(HookPoint.class);
+        fixture.hooks.put("broken-build", throwingHook(HookPoint.AGENT_BUILD));
+        fixture.hooks.put("next-build", hook(HookPoint.AGENT_BUILD, counts));
+        fixture.definition =
+                fixture.definition(
+                        Map.of(
+                                HookPoint.AGENT_BUILD,
+                                List.of(
+                                        new HookBinding(
+                                                "broken",
+                                                "broken-build",
+                                                0,
+                                                true,
+                                                List.of(),
+                                                Map.of()),
+                                        new HookBinding(
+                                                "next",
+                                                "next-build",
+                                                1,
+                                                true,
+                                                List.of(),
+                                                Map.of()))),
+                        Set.of(),
+                        Set.of());
+        fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
+
+        ApexAgent agent =
+                new ApexAgentFactory()
+                        .createNew(
+                                new AgentRequest("session-build", "demo", "user-1", "你好"),
+                                fixture.ports());
+        AgentRunOutcome outcome = agent.run();
+
+        assertInstanceOf(AgentRunOutcome.Completed.class, outcome);
+        assertEquals(1, counts.get(HookPoint.AGENT_BUILD));
+        var error = assertSingleError(agent, ExecutionErrorType.HOOK);
+        assertEquals(HookPoint.AGENT_BUILD, error.hookPoint());
+        assertEquals("broken", error.hookId());
+    }
+
+    @Test
+    void retriesModelThreeTimesThenRunsTerminalHooksAndPersistsFailure() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        Map<HookPoint, Integer> counts = new EnumMap<>(HookPoint.class);
+        bindCountingHook(fixture, counts, HookPoint.ITERATION_END);
+        bindCountingHook(fixture, counts, HookPoint.TURN_END);
+        fixture.definition =
+                fixture.definition(
+                        Map.of(
+                                HookPoint.ITERATION_END,
+                                List.of(binding(HookPoint.ITERATION_END)),
+                                HookPoint.TURN_END,
+                                List.of(binding(HookPoint.TURN_END))),
+                        Set.of(),
+                        Set.of());
+        fixture.modelFailure = new IllegalStateException("model down");
+        ApexAgent agent =
+                new ApexAgentFactory()
+                        .createNew(
+                                new AgentRequest("session-model", "demo", "user-1", "你好"),
+                                fixture.ports());
+
+        AgentRunOutcome outcome = agent.run();
+
+        assertInstanceOf(AgentRunOutcome.Failed.class, outcome);
+        assertEquals(4, fixture.modelCalls);
+        assertEquals(1, counts.get(HookPoint.ITERATION_END));
+        assertEquals(1, counts.get(HookPoint.TURN_END));
+        assertEquals(SessionStatus.FAILED, agent.snapshot().status());
+        assertEquals(
+                IterationStatus.FAILED, agent.snapshot().activeTurn().currentIteration().status());
+        var error = assertSingleError(agent, ExecutionErrorType.MODEL);
+        assertEquals(1, error.iterationNo());
+        assertNull(error.hookPoint());
+        assertNull(error.hookId());
+        assertEquals("model down", error.message());
+    }
+
+    @Test
+    void stopsRetryingAfterModelCallSucceeds() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        fixture.modelFailures.add(new IllegalStateException("first"));
+        fixture.modelFailures.add(new IllegalStateException("second"));
+        fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
+        ApexAgent agent =
+                new ApexAgentFactory()
+                        .createNew(
+                                new AgentRequest("session-retry", "demo", "user-1", "你好"),
+                                fixture.ports());
+
+        AgentRunOutcome outcome = agent.run();
+
+        assertInstanceOf(AgentRunOutcome.Completed.class, outcome);
+        assertEquals(3, fixture.modelCalls);
+        assertTrue(agent.snapshot().executionErrors().isEmpty());
+    }
+
+    @Test
+    void cancellationRunsIterationEndAndTurnEndAfterCancellationIsObserved() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        Map<HookPoint, Integer> counts = new EnumMap<>(HookPoint.class);
+        bindCountingHook(fixture, counts, HookPoint.POST_TOOL_CALL);
+        bindCountingHook(fixture, counts, HookPoint.ITERATION_END);
+        bindCountingHook(fixture, counts, HookPoint.TURN_END);
+        fixture.tool(
+                "cancel",
+                (call, context, observer) -> {
+                    fixture.token.cancel();
+                    context.cancellationToken().throwIfCancellationRequested();
+                    throw new AssertionError();
+                });
+        fixture.definition =
+                fixture.definition(
+                        Map.of(
+                                HookPoint.POST_TOOL_CALL,
+                                List.of(binding(HookPoint.POST_TOOL_CALL)),
+                                HookPoint.ITERATION_END,
+                                List.of(binding(HookPoint.ITERATION_END)),
+                                HookPoint.TURN_END,
+                                List.of(binding(HookPoint.TURN_END))),
+                        Set.of("cancel"),
+                        Set.of("cancel"));
+        fixture.modelResponses.add(
+                new ModelResponse(
+                        "",
+                        List.of(new ToolCall("call-1", "cancel", 0, Map.of(), Map.of())),
+                        Map.of()));
+        ApexAgent agent =
+                new ApexAgentFactory()
+                        .createNew(
+                                new AgentRequest("session-cancel", "demo", "user-1", "你好"),
+                                fixture.ports());
+
+        AgentRunOutcome outcome = agent.run();
+
+        assertInstanceOf(AgentRunOutcome.Cancelled.class, outcome);
+        assertEquals(SessionStatus.CANCELLED, agent.snapshot().status());
+        assertEquals(
+                IterationStatus.CANCELLED,
+                agent.snapshot().activeTurn().currentIteration().status());
+        assertEquals(0, counts.getOrDefault(HookPoint.POST_TOOL_CALL, 0));
+        assertEquals(1, counts.get(HookPoint.ITERATION_END));
+        assertEquals(1, counts.get(HookPoint.TURN_END));
+    }
+
+    /** Hook非法工具变更不会留下部分状态 */
+    @Test
+    void illegalHookToolChangesDoNotLeavePartialState() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        fixture.hooks.put(
+                "illegal",
+                loopHook(
+                        context ->
+                                new ContinueLoop(
+                                        new HookMutations(
+                                                List.of(),
+                                                new ToolActivationDelta(
+                                                        Set.of("unknown"), Set.of())))));
+        fixture.definition =
+                fixture.definition(
+                        Map.of(
+                                HookPoint.TURN_START,
+                                List.of(
+                                        new HookBinding(
+                                                "illegal", "illegal", 0, true, List.of(),
+                                                Map.of()))),
+                        Set.of(),
+                        Set.of());
+        fixture.modelResponses.add(new ModelResponse("不应调用", List.of(), Map.of()));
+        ApexAgent agent =
+                new ApexAgentFactory()
+                        .createNew(
+                                new AgentRequest("session-1", "demo", "user-1", "你好"),
+                                fixture.ports());
+
+        AgentRunOutcome outcome = agent.run();
+
+        assertInstanceOf(AgentRunOutcome.Failed.class, outcome);
+        assertTrue(agent.snapshot().enabledTools().isEmpty());
+        assertEquals(0, fixture.modelCalls);
+    }
+
+    /** 工具Binding应支持精确与星号匹配并向Hook暴露自身配置 */
+    @Test
+    void toolBindingSupportsExactAndWildcardMatchingAndExposesItsConfigurationToHook() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        List<String> invoked = new ArrayList<>();
+        fixture.hooks.put(
+                "capture",
+                preToolHook(
+                        context -> {
+                            invoked.add(
+                                    context.binding().id()
+                                            + ":"
+                                            + context.binding().options().get("label"));
+                            return new ContinuePreToolCall(
+                                    HookMutations.none(),
+                                    new ToolCallPatch(context.toolCall().arguments()));
+                        }));
+        fixture.tool(
+                "search_web",
+                (call, context, observer) ->
+                        new ToolResult(call.toolCallId(), call.name(), "ok", Map.of()));
+        fixture.tool(
+                "lookup",
+                (call, context, observer) ->
+                        new ToolResult(call.toolCallId(), call.name(), "unused", Map.of()));
+        fixture.definition =
+                fixture.definition(
+                        Map.of(
+                                HookPoint.PRE_TOOL_CALL,
+                                List.of(
+                                        new HookBinding(
+                                                "glob",
+                                                "capture",
+                                                0,
+                                                true,
+                                                List.of("search_*"),
+                                                Map.of("label", "glob")),
+                                        new HookBinding(
+                                                "exact",
+                                                "capture",
+                                                1,
+                                                true,
+                                                List.of("search_web"),
+                                                Map.of("label", "exact")),
+                                        new HookBinding(
+                                                "other",
+                                                "capture",
+                                                2,
+                                                true,
+                                                List.of("lookup"),
+                                                Map.of("label", "other")),
+                                        new HookBinding(
+                                                "disabled",
+                                                "capture",
+                                                3,
+                                                false,
+                                                List.of("*"),
+                                                Map.of("label", "disabled")))),
+                        Set.of("search_web", "lookup"),
+                        Set.of("search_web"));
+        fixture.modelResponses.add(
+                new ModelResponse(
+                        "",
+                        List.of(new ToolCall("call-1", "search_web", 0, Map.of(), Map.of())),
+                        Map.of()));
+        fixture.modelResponses.add(new ModelResponse("完成", List.of(), Map.of()));
+
+        AgentRunOutcome outcome =
+                new ApexAgentFactory()
+                        .createNew(
+                                new AgentRequest("session-1", "demo", "user-1", "你好"),
+                                fixture.ports())
+                        .run();
+
+        assertInstanceOf(AgentRunOutcome.Completed.class, outcome, outcome.toString());
+        assertEquals(List.of("glob:glob", "exact:exact"), invoked);
+    }
+
+    /** 新工具批次不应伪造人工提交 */
+    @Test
+    void doesNotExposeHumanSubmissionDuringFreshToolBatch() {
+        CoreTestFixture fixture = new CoreTestFixture();
+        List<Object> observed = new ArrayList<>();
+        fixture.hooks.put(
+                "ask-hook",
+                preToolHook(
+                        context -> {
+                            observed.add(context.humanSubmission());
+                            return new ContinuePreToolCall(
+                                    HookMutations.none(),
+                                    new ToolCallPatch(context.toolCall().arguments()));
+                        }));
+        fixture.tool(
+                "ask_human",
+                (call, context, observer) -> {
+                    observed.add(context.humanSubmission());
+                    return new ToolResult(call.toolCallId(), call.name(), "ok", Map.of());
+                });
+        fixture.definition =
+                fixture.definition(
+                        Map.of(
+                                HookPoint.PRE_TOOL_CALL,
+                                List.of(
+                                        new HookBinding(
+                                                "ask",
+                                                "ask-hook",
+                                                0,
+                                                true,
+                                                List.of("ask_*"),
+                                                Map.of()))),
+                        Set.of("ask_human"),
+                        Set.of("ask_human"));
+        AgentPorts ports = fixture.ports();
+        ApexAgent fresh =
+                new ApexAgentFactory()
+                        .createNew(new AgentRequest("session-1", "demo", "user-1", "你好"), ports);
+        ApexAgentContext context =
+                new ApexAgentContext(
+                        ports,
+                        new AgentDefinitionSnapshot(fixture.definition),
+                        new ToolCatalog(List.copyOf(fixture.tools.values())),
+                        fresh.snapshot(),
+                        ports.windowManager()
+                                .prepare(
+                                        new org.gemo.apex.common.conversation
+                                                .ConversationWindowRequest(
+                                                new org.gemo.apex.common.conversation
+                                                        .ConversationQuery("session-1"))),
+                        null,
+                        org.gemo.apex.common.shared.SharedDataStores.create(
+                                fresh.snapshot().sharedData()));
+        context.startIteration(1);
+        ToolCall call = new ToolCall("call-1", "ask_human", 0, Map.of(), Map.of());
+        context.updateIteration(
+                null,
+                new ModelResponse("", List.of(call), Map.of()),
+                List.of(),
+                IterationStatus.IN_PROGRESS,
+                null);
+        AgentEventFactory events = new AgentEventFactory();
+        ToolCallCoordinator coordinator =
+                new ToolCallCoordinator(
+                        new LifecycleDispatcher(),
+                        new ToolResultFactory(),
+                        new AgentEventEmitter(ports.eventPublisher(), events),
+                        events);
+
+        var outcome = coordinator.process(context, List.of(call));
+
+        assertInstanceOf(ToolCallCoordinator.ToolCallsOutcome.Completed.class, outcome);
+        assertEquals(Arrays.asList(null, null), observed);
+    }
+
+    private void bindCountingHook(
+            CoreTestFixture fixture, Map<HookPoint, Integer> counts, HookPoint point) {
+        fixture.hooks.put(point.name(), hook(point, counts));
+    }
+
+    private HookBinding binding(HookPoint point) {
+        return new HookBinding("id-" + point, point.name(), 0, true, List.of(), Map.of());
+    }
+
+    private ExecutionErrorSnapshot assertSingleError(
+            ApexAgent agent, ExecutionErrorType expectedType) {
+        ExecutionErrorSnapshot error =
+                assertDoesNotThrow(() -> agent.snapshot().executionErrors().getFirst());
+        assertEquals(1, agent.snapshot().executionErrors().size());
+        assertEquals(expectedType, error.type());
+        return error;
+    }
+
+    private LifecycleHook<TurnStartContext, LoopHookResult> loopHook(
+            Function<TurnStartContext, LoopHookResult> function) {
+        return new LifecycleHook<>() {
+            @Override
+            public String name() {
+                return "turnStart";
+            }
+
+            @Override
+            public HookTypeDescriptor descriptor() {
+                return new HookTypeDescriptor(
+                        HookPoint.TURN_START, TurnStartContext.class, LoopHookResult.class);
+            }
+
+            @Override
+            public LoopHookResult apply(TurnStartContext context) {
+                return function.apply(context);
+            }
+        };
+    }
+
+    private LifecycleHook<PreToolCallContext, PreToolCallHookResult> preToolHook(
+            Function<PreToolCallContext, PreToolCallHookResult> function) {
+        return new LifecycleHook<>() {
+            @Override
+            public String name() {
+                return "preToolCall";
+            }
+
+            @Override
+            public HookTypeDescriptor descriptor() {
+                return new HookTypeDescriptor(
+                        HookPoint.PRE_TOOL_CALL,
+                        PreToolCallContext.class,
+                        PreToolCallHookResult.class);
+            }
+
+            @Override
+            public PreToolCallHookResult apply(PreToolCallContext context) {
+                return function.apply(context);
+            }
+        };
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private LifecycleHook<?, ?> hook(HookPoint point, Map<HookPoint, Integer> counts) {
+        Class contextType = contextType(point);
+        Class resultType = resultType(point);
+        return new LifecycleHook() {
+            @Override
+            public String name() {
+                return point.name();
+            }
+
+            @Override
+            public HookTypeDescriptor descriptor() {
+                return new HookTypeDescriptor(point, contextType, resultType);
+            }
+
+            @Override
+            public LifecycleHookResult apply(HookContextView context) {
+                counts.merge(point, 1, Integer::sum);
+                return result(point, context);
+            }
+        };
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private LifecycleHook<?, ?> throwingHook(HookPoint point) {
+        Class contextType = contextType(point);
+        Class resultType = resultType(point);
+        return new LifecycleHook() {
+            @Override
+            public String name() {
+                return "throwing-" + point;
+            }
+
+            @Override
+            public HookTypeDescriptor descriptor() {
+                return new HookTypeDescriptor(point, contextType, resultType);
+            }
+
+            @Override
+            public LifecycleHookResult apply(HookContextView context) {
+                throw new IllegalStateException("boom");
+            }
+        };
+    }
+
+    private LifecycleHookResult result(HookPoint point, HookContextView context) {
+        return switch (point) {
+            case AGENT_BUILD -> new ContinueAgentBuild(List.of());
+            case TURN_START, ITERATION_START, ITERATION_END ->
+                    new ContinueLoop(HookMutations.none());
+            case PRE_MESSAGE_COMPRESSION -> {
+                var value = (PreMessageCompressionContext) context;
+                yield new ContinuePreMessageCompression(
+                        HookMutations.none(),
+                        new ConversationCompactionRequestPatch(value.request()));
+            }
+            case POST_MESSAGE_COMPRESSION -> {
+                var value = (PostMessageCompressionContext) context;
+                yield new ContinuePostMessageCompression(
+                        HookMutations.none(),
+                        new ConversationCompactionResultPatch(value.result()));
+            }
+            case PRE_MODEL_CALL -> {
+                yield new ContinuePreModelCall(HookMutations.none());
+            }
+            case POST_MODEL_CALL -> {
+                var value = (PostModelCallContext) context;
+                yield new ContinuePostModelCall(
+                        HookMutations.none(), new ModelResponsePatch(value.response()));
+            }
+            case PRE_TOOL_CALL -> {
+                var value = (PreToolCallContext) context;
+                yield new ContinuePreToolCall(
+                        HookMutations.none(), new ToolCallPatch(value.toolCall().arguments()));
+            }
+            case POST_TOOL_CALL -> {
+                var value = (PostToolCallContext) context;
+                yield new ContinuePostToolCall(
+                        HookMutations.none(),
+                        new ToolResultPatch(
+                                value.toolResult().content(), value.toolResult().metadata()));
+            }
+            case TURN_END -> new ContinueTurnEnd();
+        };
+    }
+
+    private Class<? extends HookContextView> contextType(HookPoint point) {
+        return switch (point) {
+            case AGENT_BUILD -> AgentBuildContext.class;
+            case TURN_START -> TurnStartContext.class;
+            case ITERATION_START -> IterationStartContext.class;
+            case PRE_MESSAGE_COMPRESSION -> PreMessageCompressionContext.class;
+            case POST_MESSAGE_COMPRESSION -> PostMessageCompressionContext.class;
+            case PRE_MODEL_CALL -> PreModelCallContext.class;
+            case POST_MODEL_CALL -> PostModelCallContext.class;
+            case PRE_TOOL_CALL -> PreToolCallContext.class;
+            case POST_TOOL_CALL -> PostToolCallContext.class;
+            case ITERATION_END -> IterationEndContext.class;
+            case TURN_END -> TurnEndContext.class;
+        };
+    }
+
+    private Class<? extends LifecycleHookResult> resultType(HookPoint point) {
+        return switch (point) {
+            case AGENT_BUILD -> AgentBuildHookResult.class;
+            case TURN_START, ITERATION_START, ITERATION_END -> LoopHookResult.class;
+            case PRE_MESSAGE_COMPRESSION -> PreMessageCompressionHookResult.class;
+            case POST_MESSAGE_COMPRESSION -> PostMessageCompressionHookResult.class;
+            case PRE_MODEL_CALL -> PreModelCallHookResult.class;
+            case POST_MODEL_CALL -> PostModelCallHookResult.class;
+            case PRE_TOOL_CALL -> PreToolCallHookResult.class;
+            case POST_TOOL_CALL -> PostToolCallHookResult.class;
+            case TURN_END -> TurnEndHookResult.class;
+        };
+    }
+}

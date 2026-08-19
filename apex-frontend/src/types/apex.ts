@@ -13,6 +13,13 @@ export interface AgentSummary {
   name: string
 }
 
+export interface SessionStateView {
+  sessionId: string
+  agentKey: string
+  executionStatus: string
+  pendingInteraction: HumanInterventionEnvelope | null
+}
+
 export interface EnvelopeContext {
   mode?: 'react' | 'plan-executor' | string
   stage_id?: string
@@ -28,25 +35,13 @@ export interface StreamMessage {
   content: string
 }
 
-export interface PlanMessage {
-  stage_id: string
-  stage_name: string
-  description: string
-  status: string
-}
-
-export interface PlanChangeMessage {
-  change_type: 'STATUS_CHANGE' | 'PLAN_CHANGE' | 'TRY_REPLAN'
-  stage_id?: string
-  status?: string
-  operation?: 'ADD_STAGE' | 'DELETE_STAGE' | 'UPDATE_STAGE'
-  stage_name?: string
-  description?: string
-  new_stage_id?: string
+export interface TaskErrorDetail {
+  message: string
 }
 
 export interface InvocationDeclaredDetail {
   invocation_id: string
+  parent_invocation_id?: string
   name: string
   invocation_type: string
   click_effect?: string
@@ -89,12 +84,19 @@ export interface AskHumanOption {
   description?: string
 }
 
-export interface AskHumanDetail {
+export interface AskHumanQuestionDetail {
   input_type: 'TEXT_INPUT' | 'SINGLE_SELECT' | 'CONFIRM' | 'MULTI_SELECT'
   question: string
   description?: string
   options?: AskHumanOption[]
+}
+
+export interface AskHumanInterventionDetail {
+  interaction_type: 'ASK_HUMAN'
   tool_call_id: string
+  invocation_id: string
+  tool_name: string
+  questions: AskHumanQuestionDetail[]
 }
 
 export interface ToolConfirmationDisplayField {
@@ -114,6 +116,7 @@ export interface ToolConfirmationEditableField {
 }
 
 export interface ToolConfirmationDetail {
+  interaction_type: 'TOOL_CONFIRMATION'
   confirmation_id: string
   tool_call_id: string
   invocation_id: string
@@ -137,27 +140,27 @@ export interface SseEnvelopeBase<TType extends string, TMessages> {
 
 export type StreamThinkEnvelope = SseEnvelopeBase<'STREAM_THINK', StreamMessage>
 export type StreamContentEnvelope = SseEnvelopeBase<'STREAM_CONTENT', StreamMessage>
-export type PlanDeclaredEnvelope = SseEnvelopeBase<'PLAN_DECLARED', PlanMessage>
-export type PlanChangeEnvelope = SseEnvelopeBase<'PLAN_CHANGE', PlanChangeMessage>
 export type InvocationDeclaredEnvelope = SseEnvelopeBase<'INVOCATION_DECLARED', InvocationDeclaredDetail>
 export type InvocationChangeEnvelope = SseEnvelopeBase<'INVOCATION_CHANGE', InvocationChangeDetail>
 export type ArtifactDeclaredEnvelope = SseEnvelopeBase<'ARTIFACT_DECLARED', ArtifactDeclaredDetail>
 export type ArtifactChangeEnvelope = SseEnvelopeBase<'ARTIFACT_CHANGE', ArtifactChangeDetail>
-export type AskHumanEnvelope = SseEnvelopeBase<'ASK_HUMAN', AskHumanDetail>
-export type ToolConfirmationEnvelope = SseEnvelopeBase<'TOOL_CONFIRMATION', ToolConfirmationDetail>
+export type TaskErrorEnvelope = SseEnvelopeBase<'TASK_ERROR', TaskErrorDetail>
+export type HumanInterventionDetail = AskHumanInterventionDetail | ToolConfirmationDetail
+export type HumanInterventionEnvelope = SseEnvelopeBase<
+  'HUMAN_INTERVENTION',
+  HumanInterventionDetail
+>
 export type EndEnvelope = SseEnvelopeBase<'END', never>
 
 export type SseEnvelope =
   | StreamThinkEnvelope
   | StreamContentEnvelope
-  | PlanDeclaredEnvelope
-  | PlanChangeEnvelope
   | InvocationDeclaredEnvelope
   | InvocationChangeEnvelope
   | ArtifactDeclaredEnvelope
   | ArtifactChangeEnvelope
-  | AskHumanEnvelope
-  | ToolConfirmationEnvelope
+  | TaskErrorEnvelope
+  | HumanInterventionEnvelope
   | EndEnvelope
 
 export interface TextFlowRecord {
@@ -168,10 +171,11 @@ export interface TextFlowRecord {
 
 export interface InvocationRecord {
   id: string
+  parentInvocationId?: string
   stageId: string
   name: string
   invocationType: string
-  status: 'PENDING' | 'RUNNING' | 'COMPLETE' | 'FAILED'
+  status: 'PENDING' | 'RUNNING' | 'COMPLETE' | 'FAILED' | 'CANCELLED'
   renderType: string
   content: string
   executor?: string
@@ -191,18 +195,22 @@ export interface ArtifactRecord {
 
 export interface HumanPromptRecord {
   id: string
+  kind: 'question'
   index: number
-  inputType: AskHumanDetail['input_type']
+  inputType: AskHumanQuestionDetail['input_type']
   question: string
   description?: string
   options: AskHumanOption[]
   toolCallId: string
-  answered: boolean
+  invocationId: string
+  toolName: string
+  resolution: 'pending' | 'answered' | 'skipped'
   answer?: string | string[]
 }
 
 export interface ToolConfirmationRecord {
   id: string
+  kind: 'confirmation'
   confirmationId: string
   toolCallId: string
   invocationId: string
@@ -216,7 +224,12 @@ export interface ToolConfirmationRecord {
   denyLabel: string
   displayFields: ToolConfirmationDisplayField[]
   editableFields: ToolConfirmationEditableField[]
+  resolution: 'pending' | 'answered' | 'skipped'
+  decision?: 'APPROVE' | 'DENY'
+  updatedArgs?: Record<string, unknown>
 }
+
+export type PendingInterventionRecord = HumanPromptRecord | ToolConfirmationRecord
 
 export type HumanResponseEntry =
   | {
@@ -261,8 +274,7 @@ export interface SessionViewModel {
   status:
     | 'idle'
     | 'streaming'
-    | 'waiting-human'
-    | 'waiting-confirmation'
+    | 'waiting-intervention'
     | 'completed'
     | 'aborted'
     | 'error'
@@ -270,6 +282,5 @@ export interface SessionViewModel {
   messages: MessageRecord[]
   stages: StageRecord[]
   globalArtifacts: ArtifactRecord[]
-  pendingPrompts: HumanPromptRecord[]
-  pendingConfirmations: ToolConfirmationRecord[]
+  pendingInterventions: PendingInterventionRecord[]
 }

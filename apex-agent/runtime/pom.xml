@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>org.gemo.apex</groupId><artifactId>apex-agent</artifactId><version>1.0-SNAPSHOT</version></parent>
+  <artifactId>apex-agent-runtime</artifactId>
+  <dependencies>
+    <dependency><groupId>org.gemo.apex</groupId><artifactId>apex-agent-protocol</artifactId><version>${project.version}</version></dependency>
+    <dependency><groupId>org.gemo.apex</groupId><artifactId>apex-agent-common</artifactId><version>${project.version}</version></dependency>
+    <dependency><groupId>org.gemo.apex</groupId><artifactId>apex-agent-core-extension</artifactId><version>${project.version}</version></dependency>
+    <dependency><groupId>org.gemo.apex</groupId><artifactId>apex-agent-core</artifactId><version>${project.version}</version></dependency>
+    <dependency><groupId>org.gemo.apex</groupId><artifactId>apex-agent-kit</artifactId><version>${project.version}</version></dependency>
+    <dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-databind</artifactId></dependency>
+    <dependency><groupId>org.yaml</groupId><artifactId>snakeyaml</artifactId></dependency>
+    <dependency><groupId>org.springframework</groupId><artifactId>spring-core</artifactId></dependency>
+    <dependency><groupId>org.springframework.ai</groupId><artifactId>spring-ai-model</artifactId></dependency>
+    <dependency><groupId>io.projectreactor</groupId><artifactId>reactor-core</artifactId></dependency>
+    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter-api</artifactId><scope>test</scope></dependency>
+  </dependencies>
+  <build><plugins><plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-dependency-plugin</artifactId><executions><execution><id>依赖声明检查</id><phase>verify</phase><goals><goal>analyze-only</goal></goals></execution></executions></plugin></plugins></build>
+</project>

@@ -1,9 +1,9 @@
 import { formatRuntimeStatus, formatSessionStatus, toneFromStatus } from '@/features/workspace/presentation'
-import type { SessionViewModel } from '@/types/apex'
+import type { InvocationRecord, SessionViewModel } from '@/types/apex'
 
 export interface TimelineEntry {
   id: string
-  kind: 'stage' | 'invocation' | 'artifact' | 'prompt' | 'confirmation' | 'session'
+  kind: 'stage' | 'invocation' | 'artifact' | 'intervention' | 'session'
   title: string
   subtitle: string
   tone: ReturnType<typeof toneFromStatus>
@@ -11,6 +11,7 @@ export interface TimelineEntry {
   badge?: string
   exportFileName?: string
   defaultExpanded: boolean
+  depth: number
 }
 
 export function buildTimelineEntries(session: SessionViewModel): TimelineEntry[] {
@@ -25,9 +26,10 @@ export function buildTimelineEntries(session: SessionViewModel): TimelineEntry[]
       tone: toneFromStatus(stage.status),
       body: stage.description,
       defaultExpanded: false,
+      depth: 0,
     })
 
-    stage.invocations.forEach((invocation) => {
+    nestedInvocations(stage.invocations).forEach(({ invocation, depth }) => {
       entries.push({
         id: `invocation:${invocation.id}`,
         kind: 'invocation',
@@ -36,6 +38,7 @@ export function buildTimelineEntries(session: SessionViewModel): TimelineEntry[]
         tone: toneFromStatus(invocation.status),
         body: invocation.content,
         defaultExpanded: false,
+        depth,
       })
     })
 
@@ -49,6 +52,7 @@ export function buildTimelineEntries(session: SessionViewModel): TimelineEntry[]
         body: artifact.content,
         exportFileName: `${artifact.artifactName}.md`,
         defaultExpanded: false,
+        depth: 1,
       })
     })
   })
@@ -63,30 +67,22 @@ export function buildTimelineEntries(session: SessionViewModel): TimelineEntry[]
       body: artifact.content,
       exportFileName: `${artifact.artifactName}.md`,
       defaultExpanded: false,
+      depth: 0,
     })
   })
 
-  if (session.pendingPrompts.length > 0) {
+  if (session.pendingInterventions.length > 0) {
     entries.push({
-      id: 'prompt:pending',
-      kind: 'prompt',
-      title: '等待人工确认',
-      subtitle: `${session.pendingPrompts.length} 个问题待回复`,
+      id: 'intervention:pending',
+      kind: 'intervention',
+      title: '等待人工介入',
+      subtitle: `${session.pendingInterventions.length} 张卡片待处理`,
       tone: 'warning',
-      body: session.pendingPrompts.map((prompt) => prompt.question).join('\n'),
+      body: session.pendingInterventions
+        .map((item) => item.kind === 'question' ? item.question : item.title)
+        .join('\n'),
       defaultExpanded: false,
-    })
-  }
-
-  if (session.pendingConfirmations.length > 0) {
-    entries.push({
-      id: 'confirmation:pending',
-      kind: 'confirmation',
-      title: '等待工具确认',
-      subtitle: `${session.pendingConfirmations.length} 个确认待处理`,
-      tone: 'warning',
-      body: session.pendingConfirmations.map((item) => item.title).join('\n'),
-      defaultExpanded: false,
+      depth: 0,
     })
   }
 
@@ -97,7 +93,42 @@ export function buildTimelineEntries(session: SessionViewModel): TimelineEntry[]
     subtitle: formatSessionStatus(session.status),
     tone: session.status === 'completed' ? 'success' : session.status === 'error' ? 'danger' : 'idle',
     defaultExpanded: true,
+    depth: 0,
   })
 
   return entries
+}
+
+function nestedInvocations(
+  invocations: InvocationRecord[],
+): Array<{ invocation: InvocationRecord; depth: number }> {
+  const byId = new Map(invocations.map((invocation) => [invocation.id, invocation]))
+  const children = new Map<string, InvocationRecord[]>()
+  const roots: InvocationRecord[] = []
+
+  invocations.forEach((invocation) => {
+    const parentId = invocation.parentInvocationId
+    if (!parentId || parentId === invocation.id || !byId.has(parentId)) {
+      roots.push(invocation)
+      return
+    }
+    const siblings = children.get(parentId) ?? []
+    siblings.push(invocation)
+    children.set(parentId, siblings)
+  })
+
+  const ordered: Array<{ invocation: InvocationRecord; depth: number }> = []
+  const visited = new Set<string>()
+  const visit = (invocation: InvocationRecord, depth: number): void => {
+    if (visited.has(invocation.id)) {
+      return
+    }
+    visited.add(invocation.id)
+    ordered.push({ invocation, depth })
+    children.get(invocation.id)?.forEach((child) => visit(child, depth + 1))
+  }
+
+  roots.forEach((root) => visit(root, 1))
+  invocations.forEach((invocation) => visit(invocation, 1))
+  return ordered
 }

@@ -1,0 +1,1 @@
+{"event_type":"ARTIFACT_CHANGE","context":{"mode":"react"},"messages":[{"scope":"GLOBAL","change_type":"CONTENT_APPEND","source":"agent","artifact_id":"artifact-1","artifact_name":"report","artifact_type":"markdown","content":" more"}]}

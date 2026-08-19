@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { getApexApiClient } from '@/services/apex-api'
+import { getApexApiClient, SessionStateHttpError } from '@/services/apex-api'
 import {
   applyEnvelope,
   appendUserMessage,
@@ -12,10 +12,46 @@ import type {
   AgentSummary,
   ChatRequest,
   HumanPromptRecord,
+  PendingInterventionRecord,
   ToolConfirmationRecord,
 } from '@/types/apex'
 
 const USER_ID_STORAGE_KEY = 'apex:user-id'
+const ACTIVE_SESSION_STORAGE_KEY = 'apex:active-session:v1'
+
+interface ActiveSessionLocator {
+  userId: string
+  agentKey: string
+  sessionId: string
+}
+
+function readActiveSession(): ActiveSessionLocator | null {
+  const raw = localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY)
+  if (!raw) return null
+  try {
+    const value = JSON.parse(raw) as Partial<ActiveSessionLocator>
+    if (!value.userId?.trim() || !value.agentKey?.trim() || !value.sessionId?.trim()) {
+      localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY)
+      return null
+    }
+    return value as ActiveSessionLocator
+  } catch {
+    localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY)
+    return null
+  }
+}
+
+function saveActiveSession(locator: ActiveSessionLocator): void {
+  localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, JSON.stringify(locator))
+}
+
+function clearActiveSession(): void {
+  localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY)
+}
+
+function shouldRetainActiveSession(status: string): boolean {
+  return status === 'waiting-intervention'
+}
 
 function defaultUserId(): string {
   return localStorage.getItem(USER_ID_STORAGE_KEY) ?? import.meta.env.VITE_APEX_USER_ID ?? 'demo-user'
@@ -51,6 +87,34 @@ export const useSessionStore = defineStore('session', () => {
           ? selectedAgentKey.value
           : nextAgents[0].agentKey
       }
+
+      const locator = readActiveSession()
+      if (!locator) return
+      if (locator.userId !== userId.value
+        || !nextAgents.some((agent) => agent.agentKey === locator.agentKey)) {
+        clearActiveSession()
+        return
+      }
+      const client = getApexApiClient()
+      if (!client.fetchSessionState) return
+      try {
+        const state = await client.fetchSessionState(locator.sessionId, locator.agentKey, locator.userId)
+        if (state.executionStatus !== 'HUMAN_IN_THE_LOOP' || !state.pendingInteraction) {
+          clearActiveSession()
+          return
+        }
+        selectedAgentKey.value = locator.agentKey
+        session.value = createSessionViewModel()
+        session.value.sessionId = locator.sessionId
+        session.value.agentKey = locator.agentKey
+        session.value = applyEnvelope(session.value, state.pendingInteraction)
+      } catch (error) {
+        if (error instanceof SessionStateHttpError && error.status === 404) {
+          clearActiveSession()
+          return
+        }
+        errorMessage.value = error instanceof Error ? error.message : '加载会话状态失败。'
+      }
     } catch (error) {
       errorMessage.value = error instanceof Error ? error.message : '加载 Agent 列表失败。'
       agents.value = [{ agentKey: 'default_agent', name: '默认 Agent' }]
@@ -61,11 +125,18 @@ export const useSessionStore = defineStore('session', () => {
 
   function setUserId(nextUserId: string): void {
     const trimmedValue = nextUserId.trim() || 'demo-user'
+    if (trimmedValue !== userId.value) {
+      clearActiveSession()
+      resetSession()
+    }
     userId.value = trimmedValue
     localStorage.setItem(USER_ID_STORAGE_KEY, trimmedValue)
   }
 
   function setSelectedAgent(agentKey: string): void {
+    if (agentKey !== selectedAgentKey.value) {
+      clearActiveSession()
+    }
     selectedAgentKey.value = agentKey
   }
 
@@ -74,6 +145,7 @@ export const useSessionStore = defineStore('session', () => {
     activeController.value = null
     errorMessage.value = ''
     session.value = createSessionViewModel()
+    clearActiveSession()
   }
 
   async function sendPrompt(query: string): Promise<void> {
@@ -83,12 +155,13 @@ export const useSessionStore = defineStore('session', () => {
 
     const sessionId = session.value.sessionId ?? crypto.randomUUID()
     session.value.sessionId = sessionId
+    session.value.agentKey = selectedAgentKey.value
+    saveActiveSession({ userId: userId.value, agentKey: selectedAgentKey.value, sessionId })
 
     errorMessage.value = ''
     session.value = appendUserMessage(session.value, query.trim())
     session.value = startAssistantMessage(session.value)
-    session.value.pendingPrompts = []
-    session.value.pendingConfirmations = []
+    session.value.pendingInterventions = []
 
     await runChat({
       sessionId,
@@ -98,23 +171,64 @@ export const useSessionStore = defineStore('session', () => {
     })
   }
 
-  async function answerPrompt(prompt: HumanPromptRecord, answer: string | string[]): Promise<void> {
-    const targetPrompt = session.value.pendingPrompts.find((item) => item.id === prompt.id)
+  function answerPrompt(prompt: HumanPromptRecord, answer: string | string[]): void {
+    const targetPrompt = session.value.pendingInterventions.find(
+      (item): item is HumanPromptRecord => item.id === prompt.id && item.kind === 'question',
+    )
     if (!targetPrompt) {
       return
     }
 
-    targetPrompt.answered = true
+    targetPrompt.resolution = 'answered'
     targetPrompt.answer = answer
+  }
 
-    if (!session.value.pendingPrompts.every((item) => item.answered)) {
+  function answerConfirmation(
+    confirmation: ToolConfirmationRecord,
+    decision: 'APPROVE' | 'DENY',
+    updatedArgs: Record<string, unknown> = {},
+  ): void {
+    const targetConfirmation = session.value.pendingInterventions.find(
+      (item): item is ToolConfirmationRecord =>
+        item.id === confirmation.id && item.kind === 'confirmation',
+    )
+    if (!targetConfirmation) {
       return
     }
 
-    const payload = buildHumanResponsePayload(session.value.pendingPrompts)
+    targetConfirmation.resolution = 'answered'
+    targetConfirmation.decision = decision
+    targetConfirmation.updatedArgs = decision === 'APPROVE' && Object.keys(updatedArgs).length > 0
+      ? { ...updatedArgs }
+      : undefined
+  }
+
+  function skipIntervention(intervention: PendingInterventionRecord): void {
+    const target = session.value.pendingInterventions.find((item) => item.id === intervention.id)
+    if (!target) {
+      return
+    }
+
+    target.resolution = 'skipped'
+    if (target.kind === 'question') {
+      target.answer = undefined
+    } else {
+      target.decision = undefined
+      target.updatedArgs = undefined
+    }
+  }
+
+  async function submitInterventions(): Promise<void> {
+    const interventions = session.value.pendingInterventions
+    if (interventions.length === 0
+      || interventions.some((item) => item.resolution === 'pending')) {
+      return
+    }
+
+    const payload = buildHumanResponsePayload(interventions)
     const sessionId = session.value.sessionId ?? crypto.randomUUID()
     session.value.sessionId = sessionId
-    session.value.pendingPrompts = []
+    session.value.pendingInterventions = []
     errorMessage.value = ''
 
     await runChat({
@@ -126,38 +240,11 @@ export const useSessionStore = defineStore('session', () => {
     })
   }
 
-  async function submitConfirmation(
-    confirmation: ToolConfirmationRecord,
-    decision: 'APPROVE' | 'DENY',
-    updatedArgs: Record<string, unknown> = {},
-  ): Promise<void> {
-    const sessionId = session.value.sessionId ?? crypto.randomUUID()
-    session.value.sessionId = sessionId
-    session.value.pendingConfirmations = []
-    errorMessage.value = ''
-
-    await runChat({
-      sessionId,
-      query: '',
-      type: 'HUMAN_RESPONSE',
-      agentKey: selectedAgentKey.value,
-      humanResponse: {
-        [confirmation.toolCallId]: {
-          interaction_type: 'TOOL_CONFIRMATION',
-          confirmation_id: confirmation.confirmationId,
-          decision,
-          ...(decision === 'APPROVE' && Object.keys(updatedArgs).length > 0
-            ? { updated_args: updatedArgs }
-            : {}),
-        },
-      },
-    })
-  }
-
   function stopStream(): void {
     activeController.value?.abort()
     activeController.value = null
     session.value.status = 'aborted'
+    clearActiveSession()
   }
 
   async function runChat(request: ChatRequest): Promise<void> {
@@ -168,6 +255,10 @@ export const useSessionStore = defineStore('session', () => {
 
     try {
       await getApexApiClient().streamChat(request, userId.value, controller.signal, (envelope) => {
+        if (envelope.event_type === 'TASK_ERROR') {
+          const message = envelope.messages[0]?.message
+          errorMessage.value = message?.trim() ? message : 'Agent 执行失败。'
+        }
         session.value = applyEnvelope(session.value, envelope)
       })
     } catch (error) {
@@ -182,11 +273,23 @@ export const useSessionStore = defineStore('session', () => {
       if (activeController.value === controller) {
         activeController.value = null
       }
+      if (shouldRetainActiveSession(session.value.status)) {
+        if (session.value.sessionId) {
+          saveActiveSession({
+            userId: userId.value,
+            agentKey: selectedAgentKey.value,
+            sessionId: session.value.sessionId,
+          })
+        }
+      } else {
+        clearActiveSession()
+      }
     }
   }
 
   return {
     agents,
+    answerConfirmation,
     answerPrompt,
     errorMessage,
     hasStarted,
@@ -198,8 +301,9 @@ export const useSessionStore = defineStore('session', () => {
     session,
     setSelectedAgent,
     setUserId,
+    skipIntervention,
     stopStream,
-    submitConfirmation,
+    submitInterventions,
     userId,
   }
 })
