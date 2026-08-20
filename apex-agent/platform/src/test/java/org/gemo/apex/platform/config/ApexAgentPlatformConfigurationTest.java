@@ -21,6 +21,7 @@ import org.gemo.apex.extension.skill.SkillProvider;
 import org.gemo.apex.kit.hook.AvailableSkillsPromptHook;
 import org.gemo.apex.kit.hook.SkillActivationStateHook;
 import org.gemo.apex.kit.hook.TodoMiddleware;
+import org.gemo.apex.kit.hook.ToolResultTruncateHook;
 import org.gemo.apex.kit.tool.ActivateSkillTool;
 import org.gemo.apex.kit.tool.ReadSkillResourceTool;
 import org.gemo.apex.kit.tool.WriteTodosTool;
@@ -42,6 +43,15 @@ import org.springframework.test.context.support.TestPropertySourceUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 class ApexAgentPlatformConfigurationTest {
+    @Test
+    void registersToolResultTruncateHookWithNewStableName() {
+        ToolResultTruncateHook hook =
+                new ApexAgentPlatformConfiguration().toolResultTruncateHook();
+
+        assertEquals(ToolResultTruncateHook.REGISTRATION_NAME, hook.name());
+        assertEquals("toolResultTruncateHook", hook.name());
+    }
+
     @Test
     void exposesFinalSkillRegistryToSpringConsumersWithoutSelfAggregation() {
         AtomicInteger metadataLoads = new AtomicInteger();

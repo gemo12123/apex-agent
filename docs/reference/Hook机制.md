@@ -409,48 +409,49 @@ TURN_START 提前结束时尚未创建 Iteration，因此不会分发 ITERATION_
 | `ToolConfirmHook` | PRE_TOOL_CALL | 首次调用请求工具确认；恢复后放行，拒绝和可编辑参数合并由 core 处理 |
 | `AskHumanInterventionHook` | PRE_TOOL_CALL | 把 `ask_human` ToolCall 转换为问题介入；非法问题定义转为 BlockTool |
 | `PlainTextTruncateHook` | POST_TOOL_CALL | 截断过长纯文本 ToolResult，默认上限为 4000 个 Unicode 码点 |
-| `JsonTruncateHook` | POST_TOOL_CALL | 超长 JSON ToolResult 结构化截断并落盘完整原文，返回 preview + truncation_info + full_result_file |
+| `ToolResultTruncateHook` | POST_TOOL_CALL | 按估算 token 预算自适应截断 JSON 或文本 ToolResult，并落盘完整原文 |
 | `SkillActivationStateHook` | POST_TOOL_CALL | 从 ToolResult metadata 读取 Skill 名并声明激活状态 |
 | `TodoMiddleware` | PRE_MODEL_CALL | 维护带稳定 payload 标记的持久化 SYSTEM/TEXT Todo 上下文；状态变化时 Replace、重复时 Remove、压缩淘汰后重新 Append |
 | `CompositeLifecycleHook` | 任意单一结果族 | 顺序调用相同 descriptor 的 Hook，遇到非 Continue 结果立即短路 |
 
 `CompositeLifecycleHook` 不合并多个 Continue 结果。如果所有子 Hook 都返回 Continue，只有最后一个 Continue 结果会交给 core 应用；前面返回的 Mutation 和 Patch 不会自动累积。需要组合修改时，应实现一个明确合并结果的专用 Hook，或使用多个独立 Binding 让 dispatcher 逐项应用。
 
-### JsonTruncateHook
+### ToolResultTruncateHook
 
-`JsonTruncateHook` 在 POST_TOOL_CALL 对超长 JSON ToolResult 做结构化截断：内容较小时原样透传；超过阈值时解析 JSON 递归截断、把完整原文落盘到本地文件，并返回一个信封。它不覆盖 `PlainTextTruncateHook` 的纯文本能力，非 JSON 内容始终原样返回。
+`ToolResultTruncateHook` 在 POST_TOOL_CALL 对超预算 ToolResult 做 JSON 感知截断。`maxSize` 使用与模型请求容量估算一致的轻量规则 `ceil(String.length() / 4)`；内容未超预算时原样透传且不落盘，超预算时把完整原文落盘，并保证最终完整信封的估算 token 数不超过预算。它与 `PlainTextTruncateHook` 是两种独立策略，不应在同一工具结果上重复绑定。
+
+JSON 识别最多解包一层：第一次解析得到对象或数组时直接结构化处理；得到字符串节点时，仅把 `asText()` 再解析一次，第二次得到对象或数组才按结构化 JSON 处理。第二次仍为字符串、标量或非法 JSON 时按普通文本处理。未触发截断时不会因为解析而改变原始格式。
 
 信封格式：
 
 ```json
 {
-  "truncated": true,
-  "data_preview": { "e": [ { "k": "value-0" }, { "k": "value-1" }, { "k": "value-2" } ] },
-  "truncation_info": {
-    "$.e": { "type": "array", "original_length": 1000, "kept": 3 }
-  },
-  "full_result_file": {
-    "file_path": "/abs/path/tool-<uuid>.json",
-    "content_type": "application/json"
+  "data": { "e": [ { "k": "value-0" }, { "k": "value-1" } ] },
+  "_result": {
+    "truncated": true,
+    "file": "tool-<uuid>.json",
+    "content_type": "application/json",
+    "original_size_bytes": 12345,
+    "truncations": [
+      { "path": "$.e", "type": "array", "original_length": 1000, "kept": 2 }
+    ]
   }
 }
 ```
 
 截断规则：
 
-- 数组保留前 `maxArrayElements` 个真实元素，记录 `original_length` 与 `kept`，大元素继续递归截断。
-- 对象保留前 `maxObjectFields` 个字段，记录 `original_fields` 与 `kept`，字段值继续递归截断。
-- 超长字符串按 Unicode 码点截断到 `maxStringLength`，记录 `original_length` 与 `kept`。
-- 截断信息统一放在 `truncation_info`，以 JSONPath（`$`、`$.e`、`$.e[0]`）为键，不混入数组元素。
+- JSON 对象优先把数组保留到前 2 项，仍超预算时再按 Unicode 码点动态缩短字符串；如果仍无法满足预算，数组继续降为 1 项。每次修改后都重新计算完整信封预算。
+- 根数组只有在非空且全部元素都是对象时才结构化处理，并固定保留第一个对象；其内部数组最多保留 1 项。空数组、标量数组和混合数组按文本处理。
+- 对象只含大量字段、数字等无法安全缩减内容时，把原始 JSON 作为字符串预览并动态截断。
+- 普通文本、普通 JSON 字符串和超过一层的字符串包裹 JSON 均按文本处理，使用二分查找保留预算内最长码点前缀，不切断代理对或 Emoji。
+- `truncations` 记录实际修改并限制条数和路径长度；诊断信息同样计入最终预算。
 
 binding options（均在构造默认值基础上可按 binding 覆盖）：
 
 | 键 | 默认值 | 说明 |
 | --- | --- | --- |
-| `maxSize` | 8000 | 触发截断的 Unicode 码点阈值 |
-| `maxArrayElements` | 3 | 数组保留样例数 |
-| `maxObjectFields` | 10 | 对象保留字段数 |
-| `maxStringLength` | 200 | 字符串保留码点数 |
+| `maxSize` | 8000 | 完整 ToolResult 正文的估算 token 预算，最小值为 1024 |
 | `outputDir` | 系统临时目录 | 完整原文落盘目录 |
 
 绑定示例：
@@ -458,16 +459,16 @@ binding options（均在构造默认值基础上可按 binding 覆盖）：
 ```yaml
 hooks:
   POST_TOOL_CALL:
-    - id: json-truncate
-      hook: jsonTruncateHook
+    - id: tool-result-truncate
+      hook: toolResultTruncateHook
       order: 100
       enabled: true
+      tools: ["*"]
       options:
-        maxSize: 12000
-        maxArrayElements: 5
+        maxSize: 8000
 ```
 
-写盘失败时 Hook 回退为原样透传，避免在无法持久化时截断导致完整数据丢失。
+超预算原文按输入类型使用 `.json` 或 `.txt` 后缀；合法 JSON 即使最终以字符串预览兜底，仍使用 `application/json` 和 `.json`。`original_size_bytes` 是真实 UTF-8 字节数。写盘失败时仍返回满足预算的截断信封，并通过 `_result.storage_failed` 标记原文未落盘。
 
 ## 当前默认启用状态
 

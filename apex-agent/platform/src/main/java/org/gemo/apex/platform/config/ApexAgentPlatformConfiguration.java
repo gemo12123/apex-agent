@@ -12,11 +12,11 @@ import org.gemo.apex.extension.skill.SkillProvider;
 import org.gemo.apex.extension.tool.AgentTool;
 import org.gemo.apex.kit.hook.AskHumanInterventionHook;
 import org.gemo.apex.kit.hook.AvailableSkillsPromptHook;
-import org.gemo.apex.kit.hook.JsonTruncateHook;
 import org.gemo.apex.kit.hook.PlainTextTruncateHook;
 import org.gemo.apex.kit.hook.SkillActivationStateHook;
 import org.gemo.apex.kit.hook.TodoMiddleware;
 import org.gemo.apex.kit.hook.ToolConfirmHook;
+import org.gemo.apex.kit.hook.ToolResultTruncateHook;
 import org.gemo.apex.kit.tool.ActivateSkillTool;
 import org.gemo.apex.kit.tool.AskHumanTool;
 import org.gemo.apex.kit.tool.WriteTodosTool;
@@ -171,10 +171,10 @@ public class ApexAgentPlatformConfiguration {
         return new PlainTextTruncateHook();
     }
 
-    /** 内置 Hook：结构化截断超长 JSON 工具结果并落盘完整原文。 */
+    /** 内置 Hook：按预算自适应截断工具结果并落盘完整原文。 */
     @Bean
-    JsonTruncateHook jsonTruncateHook() {
-        return new JsonTruncateHook();
+    ToolResultTruncateHook toolResultTruncateHook() {
+        return new ToolResultTruncateHook();
     }
 
     /** 内置 Hook：从 activate_skill 结果提取 Skill 激活状态增量。 */
