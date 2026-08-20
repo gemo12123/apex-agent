@@ -67,7 +67,10 @@ class ToolResultTruncateHookTest {
         JsonNode metadata = envelope.get("_result");
         assertEquals("application/json", metadata.get("content_type").asText());
         assertTrue(metadata.get("file").asText().endsWith(".json"));
-        assertTrue(Files.exists(tempDir.resolve(metadata.get("file").asText())));
+        assertEquals(1, Path.of(metadata.get("file").asText()).getNameCount());
+        assertTrue(
+                Files.exists(
+                        tempDir.resolve("session-1").resolve(metadata.get("file").asText())));
     }
 
     @Test
@@ -80,7 +83,9 @@ class ToolResultTruncateHookTest {
 
         assertTrue(envelope.get("data").isObject());
         assertEquals("application/json", envelope.get("_result").get("content_type").asText());
-        Path storedFile = tempDir.resolve(envelope.get("_result").get("file").asText());
+        Path storedFile =
+                tempDir.resolve("session-1")
+                        .resolve(envelope.get("_result").get("file").asText());
         String storedContent = Files.readString(storedFile);
         assertEquals(inner, storedContent);
         assertTrue(JsonUtils.parseTree(storedContent).isObject());
@@ -226,6 +231,28 @@ class ToolResultTruncateHookTest {
         assertTrue(metadata.get("storage_failed").asBoolean());
         assertFalse(metadata.has("file"));
         assertWithinBudget(envelope.toString(), MIN_BUDGET);
+    }
+
+    @Test
+    void sanitizesSessionIdIntoOneSafeDirectoryLevel(@TempDir Path tempDir) {
+        ToolResultTruncateHook hook = new ToolResultTruncateHook(MIN_BUDGET, tempDir);
+        ToolResult result = result("x".repeat(10000));
+        PostToolCallContext context =
+                new PostToolCallContext(
+                        "../unsafe/session",
+                        KitFixtures.binding("truncate", List.of("*"), Map.of()),
+                        KitFixtures.call("tool", Map.of()),
+                        result);
+
+        ContinuePostToolCall patched =
+                assertInstanceOf(ContinuePostToolCall.class, hook.apply(context));
+        JsonNode envelope = JsonUtils.parseTree(patched.patch().content());
+        Path fileReference = Path.of(envelope.get("_result").get("file").asText());
+
+        assertEquals(1, fileReference.getNameCount());
+        assertFalse(fileReference.toString().contains("/"));
+        assertFalse(fileReference.toString().contains("\\"));
+        assertTrue(Files.exists(tempDir.resolve("___unsafe_session").resolve(fileReference)));
     }
 
     @Test

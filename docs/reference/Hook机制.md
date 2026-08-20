@@ -452,7 +452,7 @@ binding options（均在构造默认值基础上可按 binding 覆盖）：
 | 键 | 默认值 | 说明 |
 | --- | --- | --- |
 | `maxSize` | 8000 | 完整 ToolResult 正文的估算 token 预算，最小值为 1024 |
-| `outputDir` | 系统临时目录 | 完整正文落盘目录 |
+| `outputDir` | 系统临时目录 | 完整正文落盘根目录，实际文件位于 `{outputDir}/{sessionId}/` |
 
 绑定示例：
 
@@ -468,7 +468,7 @@ hooks:
         maxSize: 8000
 ```
 
-超预算正文按输入类型使用 `.json` 或 `.txt` 后缀；合法 JSON 即使最终以字符串预览兜底，仍使用 `application/json` 和 `.json`。普通 JSON 和文本保存原始正文，字符串包裹的对象或数组保存单层解包后的结构化正文；`original_size_bytes` 始终表示原始 ToolResult 的真实 UTF-8 字节数。写盘失败时仍返回满足预算的截断信封，并通过 `_result.storage_failed` 标记正文未落盘。
+超预算正文按输入类型使用 `.json` 或 `.txt` 后缀；合法 JSON 即使最终以字符串预览兜底，仍使用 `application/json` 和 `.json`。普通 JSON 和文本保存原始正文，字符串包裹的对象或数组保存单层解包后的结构化正文；`original_size_bytes` 始终表示原始 ToolResult 的真实 UTF-8 字节数。文件实际写入 `{outputDir}/{sessionId}/<工具名>-<uuid>.<扩展名>`，但 `_result.file` 只向智能体返回文件名，不暴露 `sessionId` 目录层级；`sessionId` 会被规范化为一个安全目录段。当前不增加 `agentName` 层级，后续可在 `outputDir` 与 `sessionId` 之间插入。写盘失败时仍返回满足预算的截断信封，并通过 `_result.storage_failed` 标记正文未落盘。
 
 ## 当前默认启用状态
 

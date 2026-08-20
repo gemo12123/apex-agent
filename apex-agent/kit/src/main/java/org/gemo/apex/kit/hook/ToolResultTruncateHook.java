@@ -36,6 +36,7 @@ public final class ToolResultTruncateHook
     private static final int OBJECT_ARRAY_SAMPLE_SIZE = 2;
     private static final int ROOT_ARRAY_SAMPLE_SIZE = 1;
     private static final int MAX_FILE_PREFIX_CODE_POINTS = 64;
+    private static final int MAX_SESSION_DIRECTORY_CODE_POINTS = 128;
     private static final int MAX_TRUNCATION_ENTRIES = 8;
     private static final int MAX_TRUNCATION_PATH_CODE_POINTS = 128;
     private static final String JSON_CONTENT_TYPE = "application/json";
@@ -89,6 +90,7 @@ public final class ToolResultTruncateHook
         StorageResult storage =
                 writeFullResult(
                         parsed.persistedContent(),
+                        context.sessionId(),
                         context.toolCall().name(),
                         extension,
                         resolveOutputDir(options));
@@ -408,12 +410,18 @@ public final class ToolResultTruncateHook
     }
 
     private StorageResult writeFullResult(
-            String content, String toolName, String extension, Path directory) {
+            String content,
+            String sessionId,
+            String toolName,
+            String extension,
+            Path outputDirectory) {
         try {
-            Files.createDirectories(directory);
+            String sessionDirectoryName = sanitizeSessionDirectoryName(sessionId);
+            Path sessionDirectory = outputDirectory.resolve(sessionDirectoryName);
+            Files.createDirectories(sessionDirectory);
             String prefix = limitCodePoints(sanitizeToolName(toolName), MAX_FILE_PREFIX_CODE_POINTS);
             String fileName = prefix + "-" + UUID.randomUUID() + extension;
-            Files.writeString(directory.resolve(fileName), content, StandardCharsets.UTF_8);
+            Files.writeString(sessionDirectory.resolve(fileName), content, StandardCharsets.UTF_8);
             return new StorageResult(fileName, false);
         } catch (IOException | SecurityException exception) {
             return new StorageResult(null, true);
@@ -500,6 +508,15 @@ public final class ToolResultTruncateHook
     private static String sanitizeToolName(String name) {
         String sanitized = name == null ? "" : name.replaceAll("[^A-Za-z0-9._-]", "_");
         return sanitized.isBlank() ? "tool" : sanitized;
+    }
+
+    private static String sanitizeSessionDirectoryName(String sessionId) {
+        String sanitized = sessionId.replaceAll("[^A-Za-z0-9_-]", "_");
+        sanitized = limitCodePoints(sanitized, MAX_SESSION_DIRECTORY_CODE_POINTS);
+        if (sanitized.isBlank()) {
+            return "session";
+        }
+        return sanitized;
     }
 
     private static String appendPath(String path, String fieldName) {
