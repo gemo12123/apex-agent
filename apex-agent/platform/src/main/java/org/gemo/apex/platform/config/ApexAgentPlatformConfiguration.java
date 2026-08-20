@@ -19,6 +19,7 @@ import org.gemo.apex.kit.hook.ToolConfirmHook;
 import org.gemo.apex.kit.hook.ToolResultTruncateHook;
 import org.gemo.apex.kit.tool.ActivateSkillTool;
 import org.gemo.apex.kit.tool.AskHumanTool;
+import org.gemo.apex.kit.tool.InspectToolResultTool;
 import org.gemo.apex.kit.tool.WriteTodosTool;
 import org.gemo.apex.platform.execution.UserContextTaskDecorator;
 import org.gemo.apex.platform.skill.RuntimeSkillRegistry;
@@ -152,6 +153,12 @@ public class ApexAgentPlatformConfiguration {
     @Bean
     WriteTodosTool writeTodosTool() {
         return new WriteTodosTool();
+    }
+
+    /** 内置工具：检查当前 Session 中已落盘的完整工具结果。 */
+    @Bean
+    InspectToolResultTool inspectToolResultTool() {
+        return new InspectToolResultTool();
     }
 
     @Bean

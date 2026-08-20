@@ -468,11 +468,46 @@ hooks:
         maxSize: 8000
 ```
 
-超预算正文按输入类型使用 `.json` 或 `.txt` 后缀；合法 JSON 即使最终以字符串预览兜底，仍使用 `application/json` 和 `.json`。普通 JSON 和文本保存原始正文，字符串包裹的对象或数组保存单层解包后的结构化正文；`original_size_bytes` 始终表示原始 ToolResult 的真实 UTF-8 字节数。文件实际写入 `{outputDir}/{sessionId}/<工具名>-<uuid>.<扩展名>`，但 `_result.file` 只向智能体返回文件名，不暴露 `sessionId` 目录层级；`sessionId` 会被规范化为一个安全目录段。当前不增加 `agentName` 层级，后续可在 `outputDir` 与 `sessionId` 之间插入。写盘失败时仍返回满足预算的截断信封，并通过 `_result.storage_failed` 标记正文未落盘。
+超预算正文按输入类型使用 `.json` 或 `.txt` 后缀；合法 JSON 即使最终以字符串预览兜底，仍使用 `application/json` 和 `.json`。普通 JSON 和文本保存原始正文，字符串包裹的对象或数组保存单层解包后的结构化正文；`original_size_bytes` 始终表示原始 ToolResult 的真实 UTF-8 字节数。文件实际写入 `{outputDir}/{sessionId}/<工具名>-<uuid>.<扩展名>`，但 `_result.file` 只向智能体返回文件名，不暴露 `sessionId` 目录层级。`sessionId` 必须匹配 `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`；非法值不会被改写，而是按写盘失败处理。成功写盘后，文件名、实际 `outputDir` 和内容类型以 `NEVER` 策略登记到当前 Session 共享数据，因此 binding 覆盖的目录仍可由后续读取工具定位，其他 Session 即使获知文件名也不能读取。写盘失败时仍返回满足预算的截断信封，并通过 `_result.storage_failed` 标记正文未落盘。
+
+### inspect_tool_result
+
+platform 注册内置 `InspectToolResultTool`，稳定工具名为 `inspect_tool_result`。它只接受之前截断信封 `_result.file` 中的纯文件名，并根据当前 Session 共享数据恢复 `{outputDir}/{sessionId}/{filename}`；未登记、跨 Session、文件缺失、路径穿越与符号链接文件统一返回 `FILE_NOT_FOUND`，不会向模型暴露本地路径。
+
+V1 operation：
+
+| operation | 用途 | 关键参数 |
+| --- | --- | --- |
+| `inspect` | 查看 artifact 类型和建议访问方式，不返回业务预览 | 无 |
+| `structure` | 查看 JSONPath 求值结果的 shape | `path`，默认 `$` |
+| `slice` | 按 Java UTF-16 offset 读取原始文本片段 | `offset`、可选 `limit` |
+| `search` | 大小写敏感的 literal substring 定位 | `search_text`、可选结果数和上下文 |
+| `json` | 执行 JSONPath，再做可选数组切片和字段投影 | `path`、`array_offset`、`array_limit`、`select` |
+
+`path` 直接交给固定版本的 Jayway JSONPath。字段、下标、通配符和数组切片属于稳定推荐用法；filter、递归下降、union、函数等高级表达式不会被工具层拦截，只要当前 Jayway 能执行就返回结果，但不承诺跨依赖版本保持行为。工具不使用 `SUPPRESS_EXCEPTIONS`：非法表达式返回 `INVALID_JSON_PATH`，确定路径缺失返回 `JSON_PATH_NOT_FOUND`。
+
+`json` 未传数组参数时表示请求完整 JSONPath 结果，不会静默取首屏；只有完整 path/selection 能在 20000 字符的完整 ToolResult envelope 内返回时才提供 `value`，否则返回 `json_value_not_returned`、结构和收窄建议。`select` 只做 dotted-field projection，不改变 JSONPath 已选择的元素集合和顺序。Inspector 自己保证输出预算，并用 ToolResult metadata 标记为已受限，避免被 `ToolResultTruncateHook` 再次落盘。
+
+启用示例：
+
+```yaml
+tools:
+  available: [inspect_tool_result]
+  default-enabled: [inspect_tool_result]
+hooks:
+  POST_TOOL_CALL:
+    - id: tool-result-truncate
+      hook: toolResultTruncateHook
+      order: 100
+      enabled: true
+      tools: ["*"]
+```
+
+推荐 JSON 先 `structure` 再 `json`，文本先 `search` 再 `slice`；不要用连续 slice 把完整文件重新搬入模型上下文。本期不设置 artifact 文件大小上限、不做流式读取，也不提供文件自动清理。
 
 ## 当前默认启用状态
 
-platform 当前默认注册 `AvailableSkillsPromptHook`、`ToolConfirmHook`、`WriteTodosTool` 和 `TodoMiddleware`，但默认 `default_agent` 没有配置任何 Hook：
+platform 当前默认注册 `AvailableSkillsPromptHook`、`ToolConfirmHook`、`WriteTodosTool`、`InspectToolResultTool` 和 `TodoMiddleware`，但默认 `default_agent` 没有配置任何 Hook 或工具：
 
 ```yaml
 tools:

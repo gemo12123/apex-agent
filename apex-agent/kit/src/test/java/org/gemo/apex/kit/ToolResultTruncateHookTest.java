@@ -16,7 +16,10 @@ import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.common.hook.context.PostToolCallContext;
 import org.gemo.apex.common.hook.result.ContinuePostToolCall;
 import org.gemo.apex.common.json.JsonUtils;
+import org.gemo.apex.common.shared.SharedDataStore;
+import org.gemo.apex.common.shared.SharedDataStores;
 import org.gemo.apex.common.tool.ToolResult;
+import org.gemo.apex.kit.artifact.ToolResultArtifactStore;
 import org.gemo.apex.kit.hook.ToolResultTruncateHook;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -234,7 +237,8 @@ class ToolResultTruncateHookTest {
     }
 
     @Test
-    void sanitizesSessionIdIntoOneSafeDirectoryLevel(@TempDir Path tempDir) {
+    void rejectsUnsafeSessionIdInsteadOfChangingDirectoryName(@TempDir Path tempDir)
+            throws Exception {
         ToolResultTruncateHook hook = new ToolResultTruncateHook(MIN_BUDGET, tempDir);
         ToolResult result = result("x".repeat(10000));
         PostToolCallContext context =
@@ -247,12 +251,59 @@ class ToolResultTruncateHookTest {
         ContinuePostToolCall patched =
                 assertInstanceOf(ContinuePostToolCall.class, hook.apply(context));
         JsonNode envelope = JsonUtils.parseTree(patched.patch().content());
-        Path fileReference = Path.of(envelope.get("_result").get("file").asText());
+        JsonNode metadata = envelope.get("_result");
+        assertTrue(metadata.get("storage_failed").asBoolean());
+        assertFalse(metadata.has("file"));
+        try (var files = Files.list(tempDir)) {
+            assertEquals(0, files.count());
+        }
+    }
 
-        assertEquals(1, fileReference.getNameCount());
-        assertFalse(fileReference.toString().contains("/"));
-        assertFalse(fileReference.toString().contains("\\"));
-        assertTrue(Files.exists(tempDir.resolve("___unsafe_session").resolve(fileReference)));
+    @Test
+    void registersStoredArtifactInSessionSharedData(@TempDir Path tempDir) {
+        SharedDataStore sharedData = SharedDataStores.create();
+        ToolResult result = result("x".repeat(10000));
+        PostToolCallContext context =
+                new PostToolCallContext(
+                        "session-1",
+                        KitFixtures.binding("truncate", List.of("*"), Map.of()),
+                        KitFixtures.call("tool", Map.of()),
+                        result,
+                        sharedData);
+
+        ContinuePostToolCall patched =
+                assertInstanceOf(
+                        ContinuePostToolCall.class,
+                        new ToolResultTruncateHook(MIN_BUDGET, tempDir).apply(context));
+        String fileName =
+                JsonUtils.parseTree(patched.patch().content())
+                        .get("_result")
+                        .get("file")
+                        .asText();
+
+        assertTrue(sharedData.containsKey(ToolResultArtifactStore.SHARED_DATA_KEY));
+        assertTrue(
+                new ToolResultArtifactStore()
+                        .resolve(sharedData, "session-1", fileName)
+                        .isPresent());
+    }
+
+    @Test
+    void doesNotTruncateAlreadyBoundedInspectorResult(@TempDir Path tempDir) throws Exception {
+        ToolResult result =
+                new ToolResult(
+                        "call-1",
+                        "inspect_tool_result",
+                        "x".repeat(10000),
+                        Map.of(ToolResultTruncateHook.BOUNDED_RESULT_METADATA_KEY, true));
+
+        ContinuePostToolCall kept =
+                apply(new ToolResultTruncateHook(MIN_BUDGET, tempDir), result);
+
+        assertEquals(result.content(), kept.patch().content());
+        try (var files = Files.list(tempDir)) {
+            assertEquals(0, files.count());
+        }
     }
 
     @Test
@@ -272,6 +323,16 @@ class ToolResultTruncateHookTest {
         ContinuePostToolCall patched =
                 assertInstanceOf(ContinuePostToolCall.class, hook.apply(context));
         assertWithinBudget(patched.patch().content(), MIN_BUDGET);
+        String fileName =
+                JsonUtils.parseTree(patched.patch().content())
+                        .get("_result")
+                        .get("file")
+                        .asText();
+        assertTrue(Files.isRegularFile(tempDir.resolve("session-1").resolve(fileName)));
+        assertTrue(
+                new ToolResultArtifactStore()
+                        .resolve(context.sharedData(), "session-1", fileName)
+                        .isPresent());
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new ToolResultTruncateHook(MIN_BUDGET - 1, tempDir));

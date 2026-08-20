@@ -4,15 +4,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import org.gemo.apex.common.exception.JsonDecodingException;
 import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.common.hook.HookTypeDescriptor;
@@ -23,6 +20,7 @@ import org.gemo.apex.common.hook.result.ContinuePostToolCall;
 import org.gemo.apex.common.hook.result.PostToolCallHookResult;
 import org.gemo.apex.common.json.JsonUtils;
 import org.gemo.apex.extension.hook.LifecycleHook;
+import org.gemo.apex.kit.artifact.ToolResultArtifactStore;
 
 /** 对超预算工具结果做 JSON 感知截断，并把完整可复用正文落盘。 */
 public final class ToolResultTruncateHook
@@ -30,13 +28,12 @@ public final class ToolResultTruncateHook
     public static final String REGISTRATION_NAME = "toolResultTruncateHook";
     public static final String OPTION_MAX_SIZE = "maxSize";
     public static final String OPTION_OUTPUT_DIR = "outputDir";
+    public static final String BOUNDED_RESULT_METADATA_KEY = "apex.tool-result.bounded";
     public static final int DEFAULT_MAX_SIZE = 8000;
     public static final int MIN_MAX_SIZE = 1024;
 
     private static final int OBJECT_ARRAY_SAMPLE_SIZE = 2;
     private static final int ROOT_ARRAY_SAMPLE_SIZE = 1;
-    private static final int MAX_FILE_PREFIX_CODE_POINTS = 64;
-    private static final int MAX_SESSION_DIRECTORY_CODE_POINTS = 128;
     private static final int MAX_TRUNCATION_ENTRIES = 8;
     private static final int MAX_TRUNCATION_PATH_CODE_POINTS = 128;
     private static final String JSON_CONTENT_TYPE = "application/json";
@@ -50,6 +47,7 @@ public final class ToolResultTruncateHook
 
     private final int maxSize;
     private final Path outputDir;
+    private final ToolResultArtifactStore artifactStore;
 
     public ToolResultTruncateHook() {
         this(
@@ -58,11 +56,16 @@ public final class ToolResultTruncateHook
     }
 
     public ToolResultTruncateHook(int maxSize, Path outputDir) {
+        this(maxSize, outputDir, new ToolResultArtifactStore());
+    }
+
+    ToolResultTruncateHook(int maxSize, Path outputDir, ToolResultArtifactStore artifactStore) {
         this.maxSize = requireMaxSize(maxSize);
         if (outputDir == null) {
             throw new IllegalArgumentException("outputDir 不能为空");
         }
         this.outputDir = outputDir;
+        this.artifactStore = java.util.Objects.requireNonNull(artifactStore, "artifactStore");
     }
 
     @Override
@@ -77,6 +80,10 @@ public final class ToolResultTruncateHook
 
     @Override
     public PostToolCallHookResult apply(PostToolCallContext context) {
+        if (Boolean.TRUE.equals(
+                context.toolResult().metadata().get(BOUNDED_RESULT_METADATA_KEY))) {
+            return keep(context);
+        }
         String content = context.toolResult().content();
         Map<String, Object> options = context.binding().options();
         int budget = resolveMaxSize(options);
@@ -87,13 +94,15 @@ public final class ToolResultTruncateHook
         ParsedContent parsed = parseContent(content);
         String contentType = parsed.structured() == null ? TEXT_CONTENT_TYPE : JSON_CONTENT_TYPE;
         String extension = parsed.structured() == null ? ".txt" : ".json";
-        StorageResult storage =
-                writeFullResult(
-                        parsed.persistedContent(),
+        ToolResultArtifactStore.StoreResult storage =
+                artifactStore.store(
+                        context.sharedData(),
                         context.sessionId(),
+                        resolveOutputDir(options),
                         context.toolCall().name(),
                         extension,
-                        resolveOutputDir(options));
+                        contentType,
+                        parsed.persistedContent());
         EnvelopeMetadata metadata =
                 new EnvelopeMetadata(
                         storage.fileName(),
@@ -409,25 +418,6 @@ public final class ToolResultTruncateHook
         }
     }
 
-    private StorageResult writeFullResult(
-            String content,
-            String sessionId,
-            String toolName,
-            String extension,
-            Path outputDirectory) {
-        try {
-            String sessionDirectoryName = sanitizeSessionDirectoryName(sessionId);
-            Path sessionDirectory = outputDirectory.resolve(sessionDirectoryName);
-            Files.createDirectories(sessionDirectory);
-            String prefix = limitCodePoints(sanitizeToolName(toolName), MAX_FILE_PREFIX_CODE_POINTS);
-            String fileName = prefix + "-" + UUID.randomUUID() + extension;
-            Files.writeString(sessionDirectory.resolve(fileName), content, StandardCharsets.UTF_8);
-            return new StorageResult(fileName, false);
-        } catch (IOException | SecurityException exception) {
-            return new StorageResult(null, true);
-        }
-    }
-
     private int resolveMaxSize(Map<String, Object> options) {
         Object raw = options.get(OPTION_MAX_SIZE);
         if (raw == null) {
@@ -505,20 +495,6 @@ public final class ToolResultTruncateHook
         return prefixByCodePoints(value, maxLength);
     }
 
-    private static String sanitizeToolName(String name) {
-        String sanitized = name == null ? "" : name.replaceAll("[^A-Za-z0-9._-]", "_");
-        return sanitized.isBlank() ? "tool" : sanitized;
-    }
-
-    private static String sanitizeSessionDirectoryName(String sessionId) {
-        String sanitized = sessionId.replaceAll("[^A-Za-z0-9_-]", "_");
-        sanitized = limitCodePoints(sanitized, MAX_SESSION_DIRECTORY_CODE_POINTS);
-        if (sanitized.isBlank()) {
-            return "session";
-        }
-        return sanitized;
-    }
-
     private static String appendPath(String path, String fieldName) {
         if (fieldName.matches("[A-Za-z_][A-Za-z0-9_]*")) {
             return path + "." + fieldName;
@@ -534,8 +510,6 @@ public final class ToolResultTruncateHook
     }
 
     private record ParsedContent(JsonNode structured, String text, String persistedContent) {}
-
-    private record StorageResult(String fileName, boolean failed) {}
 
     private record EnvelopeMetadata(
             String fileName,

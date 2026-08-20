@@ -23,6 +23,7 @@ import org.gemo.apex.kit.hook.SkillActivationStateHook;
 import org.gemo.apex.kit.hook.TodoMiddleware;
 import org.gemo.apex.kit.hook.ToolResultTruncateHook;
 import org.gemo.apex.kit.tool.ActivateSkillTool;
+import org.gemo.apex.kit.tool.InspectToolResultTool;
 import org.gemo.apex.kit.tool.ReadSkillResourceTool;
 import org.gemo.apex.kit.tool.WriteTodosTool;
 import org.gemo.apex.platform.skill.RuntimeSkillRegistry;
@@ -50,6 +51,51 @@ class ApexAgentPlatformConfigurationTest {
 
         assertEquals(ToolResultTruncateHook.REGISTRATION_NAME, hook.name());
         assertEquals("toolResultTruncateHook", hook.name());
+    }
+
+    @Test
+    void registersToolResultInspectorWithStableName() {
+        InspectToolResultTool tool =
+                new ApexAgentPlatformConfiguration().inspectToolResultTool();
+
+        assertEquals(InspectToolResultTool.NAME, tool.definition().name());
+        assertEquals("inspect_tool_result", tool.definition().name());
+    }
+
+    @Test
+    void leavesToolResultInspectorDisabledByAgentDefaults() {
+        ApexAgentPlatformProperties.Tools defaults =
+                new ApexAgentPlatformProperties.Tools();
+
+        assertFalse(defaults.getAvailable().contains(InspectToolResultTool.NAME));
+        assertFalse(defaults.getDefaultEnabled().contains(InspectToolResultTool.NAME));
+    }
+
+    @Test
+    void resolvesToolResultInspectorWhenExplicitlyConfigured() {
+        DefaultListableBeanFactory beans = beans();
+        beans.registerSingleton(
+                "inspectToolResultTool",
+                new ApexAgentPlatformConfiguration().inspectToolResultTool());
+        RequestBoundAgentEventPublisherFactory publishers =
+                new RequestBoundAgentEventPublisherFactory();
+
+        try (var runtime = createRuntime(beans, inspectorDefinitions(), publishers)) {
+            var publisher = new SseEmitterAgentEventPublisher(new SseEmitter());
+            assertInstanceOf(
+                    AgentRunOutcome.Completed.class,
+                    publishers
+                            .prepare(
+                                    "inspect",
+                                    "default",
+                                    "u",
+                                    publisher,
+                                    () ->
+                                            runtime.newAgent(
+                                                    new AgentRequest(
+                                                            "inspect", "default", "u", "q")))
+                            .run());
+        }
     }
 
     @Test
@@ -452,6 +498,32 @@ class ApexAgentPlatformConfigurationTest {
                                                 true,
                                                 List.of(ActivateSkillTool.NAME),
                                                 Map.of()))));
+        return new AgentDefinitionProvider() {
+            @Override
+            public AgentDefinition load(String agentKey) {
+                return definition;
+            }
+
+            @Override
+            public List<AgentMetadata> listAgents() {
+                return List.of(definition.metadata());
+            }
+        };
+    }
+
+    private static AgentDefinitionProvider inspectorDefinitions() {
+        AgentDefinition definition =
+                new AgentDefinition(
+                        "1.0.0",
+                        new AgentMetadata("default", "默认", "测试"),
+                        new PromptDefinition("系统", 2),
+                        new MessageCompressionDefinition(false, 10),
+                        new ToolSetDefinition(
+                                Set.of(InspectToolResultTool.NAME),
+                                Set.of(InspectToolResultTool.NAME)),
+                        Set.of(),
+                        Map.of(),
+                        Map.of());
         return new AgentDefinitionProvider() {
             @Override
             public AgentDefinition load(String agentKey) {
