@@ -468,11 +468,11 @@ hooks:
         maxSize: 8000
 ```
 
-超预算正文按输入类型使用 `.json` 或 `.txt` 后缀；合法 JSON 即使最终以字符串预览兜底，仍使用 `application/json` 和 `.json`。普通 JSON 和文本保存原始正文，字符串包裹的对象或数组保存单层解包后的结构化正文；`original_size_bytes` 始终表示原始 ToolResult 的真实 UTF-8 字节数。文件实际写入 `{outputDir}/{sessionId}/<工具名>-<uuid>.<扩展名>`，但 `_result.file` 只向智能体返回文件名，不暴露 `sessionId` 目录层级。`sessionId` 必须匹配 `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`；非法值不会被改写，而是按写盘失败处理。成功写盘后，文件名、实际 `outputDir` 和内容类型以 `NEVER` 策略登记到当前 Session 共享数据，因此 binding 覆盖的目录仍可由后续读取工具定位，其他 Session 即使获知文件名也不能读取。写盘失败时仍返回满足预算的截断信封，并通过 `_result.storage_failed` 标记正文未落盘。
+超预算正文按输入类型使用 `.json` 或 `.txt` 后缀；合法 JSON 即使最终以字符串预览兜底，仍使用 `application/json` 和 `.json`。普通 JSON 和文本保存原始正文，字符串包裹的对象或数组保存单层解包后的结构化正文；`original_size_bytes` 始终表示原始 ToolResult 的真实 UTF-8 字节数。文件实际写入 `{outputDir}/{安全化 sessionId}/<工具名>-<uuid>.<扩展名>`，但 `_result.file` 只向智能体返回文件名，不暴露目录层级。成功写盘后，Hook 以 `NEVER` 策略将 `apex.tool-result.artifacts` 写入当前 Session 共享数据；其稳定值形状为 `filename -> {fileName, path: 绝对规范化文件路径, contentType: MIME 类型}`。读取工具只依赖此契约，不依赖 Hook 的落盘实现；其他 Session 没有对应共享数据项时不能读取。写盘或登记失败时仍返回满足预算的截断信封，并通过 `_result.storage_failed` 标记正文未落盘。
 
 ### inspect_tool_result
 
-platform 注册内置 `InspectToolResultTool`，稳定工具名为 `inspect_tool_result`。它只接受之前截断信封 `_result.file` 中的纯文件名，并根据当前 Session 共享数据恢复 `{outputDir}/{sessionId}/{filename}`；未登记、跨 Session、文件缺失、路径穿越与符号链接文件统一返回 `FILE_NOT_FOUND`，不会向模型暴露本地路径。
+platform 注册内置 `InspectToolResultTool`，稳定工具名为 `inspect_tool_result`。它只接受之前截断信封 `_result.file` 中的纯文件名，并根据当前 Session 的 `apex.tool-result.artifacts` 契约取得文件描述符；未登记、跨 Session、文件缺失、路径穿越与符号链接文件统一返回 `FILE_NOT_FOUND`，不会向模型暴露本地路径。
 
 V1 operation：
 

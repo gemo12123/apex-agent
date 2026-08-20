@@ -12,24 +12,26 @@ import com.jayway.jsonpath.PathNotFoundException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.gemo.apex.common.exception.JsonDecodingException;
 import org.gemo.apex.common.json.JsonUtils;
+import org.gemo.apex.common.shared.SharedDataStore;
 import org.gemo.apex.common.tool.ToolCall;
 import org.gemo.apex.common.tool.ToolDefinition;
 import org.gemo.apex.common.tool.ToolExecutionContext;
 import org.gemo.apex.common.tool.ToolResult;
 import org.gemo.apex.extension.tool.AgentTool;
 import org.gemo.apex.extension.tool.ToolExecutionObserver;
-import org.gemo.apex.kit.artifact.ToolResultArtifactStore;
+import org.gemo.apex.kit.artifact.ToolResultArtifactDescriptor;
 import org.gemo.apex.kit.hook.ToolResultTruncateHook;
 
 /** 检查、搜索并定向读取当前 Session 中已落盘的完整工具结果。 */
@@ -62,16 +64,6 @@ public final class InspectToolResultTool implements AgentTool {
                     """,
                     Map.of());
 
-    private final ToolResultArtifactStore artifactStore;
-
-    public InspectToolResultTool() {
-        this(new ToolResultArtifactStore());
-    }
-
-    InspectToolResultTool(ToolResultArtifactStore artifactStore) {
-        this.artifactStore = Objects.requireNonNull(artifactStore, "artifactStore");
-    }
-
     @Override
     public ToolDefinition definition() {
         return DEFINITION;
@@ -95,8 +87,7 @@ public final class InspectToolResultTool implements AgentTool {
                             parsed.error()));
         }
         Request request = parsed.request();
-        Optional<ToolResultArtifactStore.ArtifactHandle> resolved =
-                artifactStore.resolve(context.sharedData(), context.sessionId(), request.filename());
+        Optional<ArtifactHandle> resolved = resolve(context.sharedData(), request.filename());
         if (resolved.isEmpty()) {
             return result(
                     call,
@@ -110,7 +101,7 @@ public final class InspectToolResultTool implements AgentTool {
         context.cancellationToken().throwIfCancellationRequested();
         LoadedArtifact artifact;
         try {
-            ToolResultArtifactStore.ArtifactHandle handle = resolved.get();
+            ArtifactHandle handle = resolved.get();
             long sizeBytes = Files.size(handle.path());
             String content = Files.readString(handle.path(), StandardCharsets.UTF_8);
             artifact = new LoadedArtifact(handle.contentType(), content, sizeBytes);
@@ -134,6 +125,38 @@ public final class InspectToolResultTool implements AgentTool {
                     case JSON -> json(request, artifact);
                 };
         return result(call, envelope);
+    }
+
+    private Optional<ArtifactHandle> resolve(SharedDataStore sharedData, String fileName) {
+        Object raw = sharedData.get(ToolResultArtifactDescriptor.SHARED_DATA_KEY);
+        if (!(raw instanceof Map<?, ?> artifacts)) {
+            return Optional.empty();
+        }
+        Object rawDescriptor = artifacts.get(fileName);
+        if (!(rawDescriptor instanceof Map<?, ?> descriptor)) {
+            return Optional.empty();
+        }
+        Optional<ToolResultArtifactDescriptor> parsed =
+                ToolResultArtifactDescriptor.fromSharedDataValue(descriptor);
+        if (parsed.isEmpty() || !parsed.get().fileName().equals(fileName)) {
+            return Optional.empty();
+        }
+        ToolResultArtifactDescriptor artifact = parsed.get();
+
+        try {
+            Path candidate = Path.of(artifact.path()).toAbsolutePath().normalize();
+            if (!candidate.getFileName().toString().equals(fileName)
+                    || !Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)) {
+                return Optional.empty();
+            }
+            Path realPath = candidate.toRealPath(LinkOption.NOFOLLOW_LINKS);
+            if (!Files.isRegularFile(realPath, LinkOption.NOFOLLOW_LINKS)) {
+                return Optional.empty();
+            }
+            return Optional.of(new ArtifactHandle(realPath, artifact.contentType()));
+        } catch (IOException | RuntimeException exception) {
+            return Optional.empty();
+        }
     }
 
     private Map<String, Object> inspect(Request request, LoadedArtifact artifact) {
@@ -926,6 +949,8 @@ public final class InspectToolResultTool implements AgentTool {
     }
 
     private record LoadedArtifact(String contentType, String content, long sizeBytes) {}
+
+    private record ArtifactHandle(Path path, String contentType) {}
 
     private record ArraySelection(
             JsonNode value, boolean applied, int offset, int limit, boolean hasMore) {}

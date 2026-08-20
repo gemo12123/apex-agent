@@ -4,12 +4,17 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.gemo.apex.common.exception.JsonDecodingException;
 import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.common.hook.HookTypeDescriptor;
@@ -19,8 +24,10 @@ import org.gemo.apex.common.hook.operation.ToolResultPatch;
 import org.gemo.apex.common.hook.result.ContinuePostToolCall;
 import org.gemo.apex.common.hook.result.PostToolCallHookResult;
 import org.gemo.apex.common.json.JsonUtils;
+import org.gemo.apex.common.shared.SharedDataCleanupPolicy;
+import org.gemo.apex.common.shared.SharedDataStore;
 import org.gemo.apex.extension.hook.LifecycleHook;
-import org.gemo.apex.kit.artifact.ToolResultArtifactStore;
+import org.gemo.apex.kit.artifact.ToolResultArtifactDescriptor;
 
 /** 对超预算工具结果做 JSON 感知截断，并把完整可复用正文落盘。 */
 public final class ToolResultTruncateHook
@@ -34,6 +41,8 @@ public final class ToolResultTruncateHook
 
     private static final int OBJECT_ARRAY_SAMPLE_SIZE = 2;
     private static final int ROOT_ARRAY_SAMPLE_SIZE = 1;
+    private static final int MAX_FILE_PREFIX_CODE_POINTS = 64;
+    private static final int MAX_SESSION_DIRECTORY_CODE_POINTS = 128;
     private static final int MAX_TRUNCATION_ENTRIES = 8;
     private static final int MAX_TRUNCATION_PATH_CODE_POINTS = 128;
     private static final String JSON_CONTENT_TYPE = "application/json";
@@ -47,7 +56,6 @@ public final class ToolResultTruncateHook
 
     private final int maxSize;
     private final Path outputDir;
-    private final ToolResultArtifactStore artifactStore;
 
     public ToolResultTruncateHook() {
         this(
@@ -56,16 +64,11 @@ public final class ToolResultTruncateHook
     }
 
     public ToolResultTruncateHook(int maxSize, Path outputDir) {
-        this(maxSize, outputDir, new ToolResultArtifactStore());
-    }
-
-    ToolResultTruncateHook(int maxSize, Path outputDir, ToolResultArtifactStore artifactStore) {
         this.maxSize = requireMaxSize(maxSize);
         if (outputDir == null) {
             throw new IllegalArgumentException("outputDir 不能为空");
         }
         this.outputDir = outputDir;
-        this.artifactStore = java.util.Objects.requireNonNull(artifactStore, "artifactStore");
     }
 
     @Override
@@ -94,15 +97,15 @@ public final class ToolResultTruncateHook
         ParsedContent parsed = parseContent(content);
         String contentType = parsed.structured() == null ? TEXT_CONTENT_TYPE : JSON_CONTENT_TYPE;
         String extension = parsed.structured() == null ? ".txt" : ".json";
-        ToolResultArtifactStore.StoreResult storage =
-                artifactStore.store(
-                        context.sharedData(),
+        StorageResult storage =
+                writeFullResult(
+                        parsed.persistedContent(),
                         context.sessionId(),
-                        resolveOutputDir(options),
                         context.toolCall().name(),
                         extension,
-                        contentType,
-                        parsed.persistedContent());
+                        resolveOutputDir(options),
+                        context.sharedData(),
+                        contentType);
         EnvelopeMetadata metadata =
                 new EnvelopeMetadata(
                         storage.fileName(),
@@ -437,6 +440,75 @@ public final class ToolResultTruncateHook
         return Path.of(String.valueOf(raw));
     }
 
+    private StorageResult writeFullResult(
+            String content,
+            String sessionId,
+            String toolName,
+            String extension,
+            Path outputDirectory,
+            SharedDataStore sharedData,
+            String contentType) {
+        Path createdFile = null;
+        try {
+            String sessionDirectoryName = sanitizeSessionDirectoryName(sessionId);
+            Path sessionDirectory = outputDirectory.resolve(sessionDirectoryName);
+            Files.createDirectories(sessionDirectory);
+            String prefix = limitCodePoints(sanitizeToolName(toolName), MAX_FILE_PREFIX_CODE_POINTS);
+            String fileName = prefix + "-" + UUID.randomUUID() + extension;
+            createdFile = sessionDirectory.resolve(fileName);
+            Files.writeString(
+                    createdFile,
+                    content,
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE_NEW,
+                    StandardOpenOption.WRITE);
+            registerArtifact(sharedData, fileName, createdFile, contentType);
+            return new StorageResult(fileName, false);
+        } catch (IOException | RuntimeException exception) {
+            deleteOrphan(createdFile);
+            return new StorageResult(null, true);
+        }
+    }
+
+    private void registerArtifact(
+            SharedDataStore sharedData,
+            String fileName,
+            Path artifactPath,
+            String contentType) {
+        Map<String, Object> artifacts = new LinkedHashMap<>();
+        Object raw = sharedData.get(ToolResultArtifactDescriptor.SHARED_DATA_KEY);
+        if (raw instanceof Map<?, ?> existing) {
+            existing.forEach(
+                    (key, value) -> {
+                        if (key instanceof String name) {
+                            artifacts.put(name, value);
+                        }
+                    });
+        }
+        artifacts.put(
+                fileName,
+                new ToolResultArtifactDescriptor(
+                                fileName,
+                                artifactPath.toAbsolutePath().normalize().toString(),
+                                contentType)
+                        .toSharedDataValue());
+        sharedData.put(
+                ToolResultArtifactDescriptor.SHARED_DATA_KEY,
+                artifacts,
+                SharedDataCleanupPolicy.NEVER);
+    }
+
+    private static void deleteOrphan(Path path) {
+        if (path == null) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException | SecurityException ignored) {
+            // 无法登记的孤立文件不影响截断信封返回。
+        }
+    }
+
     private static int requireMaxSize(int value) {
         if (value < MIN_MAX_SIZE) {
             throw new IllegalArgumentException("maxSize 必须 >= " + MIN_MAX_SIZE);
@@ -495,6 +567,17 @@ public final class ToolResultTruncateHook
         return prefixByCodePoints(value, maxLength);
     }
 
+    private static String sanitizeToolName(String name) {
+        String sanitized = name == null ? "" : name.replaceAll("[^A-Za-z0-9._-]", "_");
+        return sanitized.isBlank() ? "tool" : sanitized;
+    }
+
+    private static String sanitizeSessionDirectoryName(String sessionId) {
+        String sanitized = sessionId.replaceAll("[^A-Za-z0-9_-]", "_");
+        sanitized = limitCodePoints(sanitized, MAX_SESSION_DIRECTORY_CODE_POINTS);
+        return sanitized.isBlank() ? "session" : sanitized;
+    }
+
     private static String appendPath(String path, String fieldName) {
         if (fieldName.matches("[A-Za-z_][A-Za-z0-9_]*")) {
             return path + "." + fieldName;
@@ -510,6 +593,8 @@ public final class ToolResultTruncateHook
     }
 
     private record ParsedContent(JsonNode structured, String text, String persistedContent) {}
+
+    private record StorageResult(String fileName, boolean failed) {}
 
     private record EnvelopeMetadata(
             String fileName,

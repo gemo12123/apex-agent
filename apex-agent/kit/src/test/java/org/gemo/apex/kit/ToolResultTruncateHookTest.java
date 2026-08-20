@@ -16,10 +16,12 @@ import org.gemo.apex.common.hook.HookPoint;
 import org.gemo.apex.common.hook.context.PostToolCallContext;
 import org.gemo.apex.common.hook.result.ContinuePostToolCall;
 import org.gemo.apex.common.json.JsonUtils;
+import org.gemo.apex.common.shared.SharedDataCleanupPolicy;
+import org.gemo.apex.common.shared.SharedDataEntry;
 import org.gemo.apex.common.shared.SharedDataStore;
 import org.gemo.apex.common.shared.SharedDataStores;
 import org.gemo.apex.common.tool.ToolResult;
-import org.gemo.apex.kit.artifact.ToolResultArtifactStore;
+import org.gemo.apex.kit.artifact.ToolResultArtifactDescriptor;
 import org.gemo.apex.kit.hook.ToolResultTruncateHook;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -237,8 +239,60 @@ class ToolResultTruncateHookTest {
     }
 
     @Test
-    void rejectsUnsafeSessionIdInsteadOfChangingDirectoryName(@TempDir Path tempDir)
-            throws Exception {
+    void removesArtifactWhenSharedDataRegistrationFails(@TempDir Path tempDir) throws Exception {
+        SharedDataStore rejectingStore =
+                new SharedDataStore() {
+                    @Override
+                    public Object get(String key) {
+                        return null;
+                    }
+
+                    @Override
+                    public boolean containsKey(String key) {
+                        return false;
+                    }
+
+                    @Override
+                    public void put(String key, Object value, SharedDataCleanupPolicy cleanupPolicy) {
+                        throw new IllegalStateException("shared data unavailable");
+                    }
+
+                    @Override
+                    public void setCleanupPolicy(String key, SharedDataCleanupPolicy cleanupPolicy) {
+                        throw new UnsupportedOperationException();
+                    }
+
+                    @Override
+                    public SharedDataEntry remove(String key) {
+                        return null;
+                    }
+
+                    @Override
+                    public Map<String, SharedDataEntry> entries() {
+                        return Map.of();
+                    }
+                };
+        PostToolCallContext context =
+                new PostToolCallContext(
+                        "session-1",
+                        KitFixtures.binding("truncate", List.of("*"), Map.of()),
+                        KitFixtures.call("tool", Map.of()),
+                        result("x".repeat(10000)),
+                        rejectingStore);
+
+        ContinuePostToolCall patched =
+                assertInstanceOf(
+                        ContinuePostToolCall.class,
+                        new ToolResultTruncateHook(MIN_BUDGET, tempDir).apply(context));
+
+        assertTrue(JsonUtils.parseTree(patched.patch().content()).get("_result").get("storage_failed").asBoolean());
+        try (var files = Files.list(tempDir.resolve("session-1"))) {
+            assertEquals(0, files.count());
+        }
+    }
+
+    @Test
+    void sanitizesUnsafeSessionIdIntoOneSafeDirectoryLevel(@TempDir Path tempDir) {
         ToolResultTruncateHook hook = new ToolResultTruncateHook(MIN_BUDGET, tempDir);
         ToolResult result = result("x".repeat(10000));
         PostToolCallContext context =
@@ -251,12 +305,12 @@ class ToolResultTruncateHookTest {
         ContinuePostToolCall patched =
                 assertInstanceOf(ContinuePostToolCall.class, hook.apply(context));
         JsonNode envelope = JsonUtils.parseTree(patched.patch().content());
-        JsonNode metadata = envelope.get("_result");
-        assertTrue(metadata.get("storage_failed").asBoolean());
-        assertFalse(metadata.has("file"));
-        try (var files = Files.list(tempDir)) {
-            assertEquals(0, files.count());
-        }
+        Path fileReference = Path.of(envelope.get("_result").get("file").asText());
+
+        assertEquals(1, fileReference.getNameCount());
+        assertFalse(fileReference.toString().contains("/"));
+        assertFalse(fileReference.toString().contains("\\\\"));
+        assertTrue(Files.exists(tempDir.resolve("___unsafe_session").resolve(fileReference)));
     }
 
     @Test
@@ -281,11 +335,20 @@ class ToolResultTruncateHookTest {
                         .get("file")
                         .asText();
 
-        assertTrue(sharedData.containsKey(ToolResultArtifactStore.SHARED_DATA_KEY));
-        assertTrue(
-                new ToolResultArtifactStore()
-                        .resolve(sharedData, "session-1", fileName)
-                        .isPresent());
+        assertTrue(sharedData.containsKey(ToolResultArtifactDescriptor.SHARED_DATA_KEY));
+        assertEquals(
+                SharedDataCleanupPolicy.NEVER,
+                sharedData.entries().get(ToolResultArtifactDescriptor.SHARED_DATA_KEY).cleanupPolicy());
+        Map<?, ?> artifacts =
+                assertInstanceOf(
+                        Map.class, sharedData.get(ToolResultArtifactDescriptor.SHARED_DATA_KEY));
+        ToolResultArtifactDescriptor descriptor =
+                ToolResultArtifactDescriptor.fromSharedDataValue(artifacts.get(fileName)).orElseThrow();
+        assertEquals(fileName, descriptor.fileName());
+        assertEquals("text/plain", descriptor.contentType());
+        assertEquals(
+                tempDir.resolve("session-1").resolve(fileName).toAbsolutePath().normalize().toString(),
+                descriptor.path());
     }
 
     @Test
@@ -329,10 +392,11 @@ class ToolResultTruncateHookTest {
                         .get("file")
                         .asText();
         assertTrue(Files.isRegularFile(tempDir.resolve("session-1").resolve(fileName)));
-        assertTrue(
-                new ToolResultArtifactStore()
-                        .resolve(context.sharedData(), "session-1", fileName)
-                        .isPresent());
+        Map<?, ?> artifacts =
+                assertInstanceOf(
+                        Map.class,
+                        context.sharedData().get(ToolResultArtifactDescriptor.SHARED_DATA_KEY));
+        assertTrue(artifacts.containsKey(fileName));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new ToolResultTruncateHook(MIN_BUDGET - 1, tempDir));

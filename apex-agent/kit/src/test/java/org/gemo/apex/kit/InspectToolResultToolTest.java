@@ -7,17 +7,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import org.gemo.apex.common.json.JsonUtils;
+import org.gemo.apex.common.shared.SharedDataCleanupPolicy;
 import org.gemo.apex.common.shared.SharedDataStore;
 import org.gemo.apex.common.shared.SharedDataStores;
 import org.gemo.apex.common.tool.ToolCall;
 import org.gemo.apex.common.tool.ToolExecutionContext;
 import org.gemo.apex.common.tool.ToolResult;
-import org.gemo.apex.kit.artifact.ToolResultArtifactStore;
+import org.gemo.apex.kit.artifact.ToolResultArtifactDescriptor;
 import org.gemo.apex.kit.hook.ToolResultTruncateHook;
 import org.gemo.apex.kit.tool.InspectToolResultTool;
 import org.junit.jupiter.api.Test;
@@ -282,7 +284,7 @@ class InspectToolResultToolTest {
                         Map.of("operation", "inspect"));
         JsonNode otherSessionResponse =
                 execute(
-                        fixture.sharedData(),
+                        SharedDataStores.create(),
                         "session-2",
                         fixture.fileName(),
                         Map.of("operation", "inspect"));
@@ -336,18 +338,25 @@ class InspectToolResultToolTest {
 
     private Fixture fixture(Path root, String content, String extension, String contentType) {
         SharedDataStore sharedData = SharedDataStores.create();
-        ToolResultArtifactStore.StoreResult stored =
-                new ToolResultArtifactStore()
-                        .store(
-                                sharedData,
-                                "session-1",
-                                root,
-                                "source_tool",
-                                extension,
-                                contentType,
-                                content);
-        assertFalse(stored.failed());
-        return new Fixture(sharedData, stored.fileName());
+        String fileName = "source_tool-11111111-1111-1111-1111-111111111111" + extension;
+        Path artifact = root.resolve("session-1").resolve(fileName);
+        try {
+            Files.createDirectories(artifact.getParent());
+            Files.writeString(artifact, content);
+        } catch (IOException exception) {
+            throw new IllegalStateException(exception);
+        }
+        sharedData.put(
+                ToolResultArtifactDescriptor.SHARED_DATA_KEY,
+                Map.of(
+                        fileName,
+                        new ToolResultArtifactDescriptor(
+                                        fileName,
+                                        artifact.toAbsolutePath().normalize().toString(),
+                                        contentType)
+                                .toSharedDataValue()),
+                SharedDataCleanupPolicy.NEVER);
+        return new Fixture(sharedData, fileName);
     }
 
     private JsonNode execute(
