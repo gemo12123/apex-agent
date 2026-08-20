@@ -629,6 +629,7 @@ public final class ToolCallCoordinator {
                 context.snapshot().sessionId(),
                 context.snapshot().currentTurnNo(),
                 context.allocateSortNo(),
+                context.snapshot().activeTurn().currentIteration().iterationNo(),
                 MessageRole.TOOL,
                 MessageType.TOOL_RESULT,
                 result.content(),

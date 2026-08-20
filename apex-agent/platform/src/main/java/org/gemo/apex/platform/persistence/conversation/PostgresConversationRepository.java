@@ -56,7 +56,7 @@ public class PostgresConversationRepository implements ConversationRepository {
         List<AgentMessageEntry> messages =
                 jdbc.query(
                         """
-                SELECT id,session_id,turn_no,sort_no,role,message_type,content,payload,created_time
+                SELECT id,session_id,turn_no,sort_no,iteration_no,role,message_type,content,payload,created_time
                  FROM apex_agent_dialogue_message
                  WHERE session_id=? AND compacted=FALSE ORDER BY sort_no
                 """,
@@ -66,6 +66,7 @@ public class PostgresConversationRepository implements ConversationRepository {
                                         rs.getString("session_id"),
                                         rs.getLong("turn_no"),
                                         rs.getLong("sort_no"),
+                                        (Integer) rs.getObject("iteration_no"),
                                         MessageRole.valueOf(rs.getString("role")),
                                         MessageType.valueOf(rs.getString("message_type")),
                                         rs.getString("content"),
@@ -216,14 +217,15 @@ public class PostgresConversationRepository implements ConversationRepository {
         int changed =
                 jdbc.update(
                         """
-                INSERT INTO apex_agent_dialogue_message(id,session_id,turn_no,sort_no,role,message_type,
-                    content,payload,compacted,created_time) VALUES (?,?,?,?,?,?,?,?,FALSE,?)
+                INSERT INTO apex_agent_dialogue_message(id,session_id,turn_no,sort_no,iteration_no,role,message_type,
+                    content,payload,compacted,created_time) VALUES (?,?,?,?,?,?,?,?,?,FALSE,?)
                 ON CONFLICT DO NOTHING
                 """,
                         entry.entryId(),
                         entry.sessionId(),
                         entry.turnNo(),
                         entry.sortNo(),
+                        entry.iterationNo(),
                         entry.role().name(),
                         entry.messageType().name(),
                         entry.content(),
@@ -279,7 +281,7 @@ public class PostgresConversationRepository implements ConversationRepository {
     private List<StoredMessage> loadStoredMessages(String condition, Object... arguments) {
         return jdbc.query(
                 """
-                SELECT id,session_id,turn_no,sort_no,role,message_type,content,payload,
+                SELECT id,session_id,turn_no,sort_no,iteration_no,role,message_type,content,payload,
                     compacted,created_time
                 FROM apex_agent_dialogue_message WHERE
                 """
@@ -291,6 +293,7 @@ public class PostgresConversationRepository implements ConversationRepository {
                                         rs.getString("session_id"),
                                         rs.getLong("turn_no"),
                                         rs.getLong("sort_no"),
+                                        (Integer) rs.getObject("iteration_no"),
                                         MessageRole.valueOf(rs.getString("role")),
                                         MessageType.valueOf(rs.getString("message_type")),
                                         rs.getString("content"),
@@ -307,6 +310,7 @@ public class PostgresConversationRepository implements ConversationRepository {
                 && left.sessionId().equals(right.sessionId())
                 && left.turnNo() == right.turnNo()
                 && left.sortNo() == right.sortNo()
+                && java.util.Objects.equals(left.iterationNo(), right.iterationNo())
                 && left.role() == right.role()
                 && left.messageType() == right.messageType()
                 && java.util.Objects.equals(left.content(), right.content())

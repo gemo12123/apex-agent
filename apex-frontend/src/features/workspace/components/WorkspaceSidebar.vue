@@ -8,11 +8,12 @@ const props = defineProps<{
   selectedAgentKey: string
   userId: string
   hasStarted: boolean
-  historyItems: Array<{ id: string; title: string; active?: boolean }>
+  historyItems: Array<{ id: string; title: string; subtitle?: string; active?: boolean }>
 }>()
 
 const emit = defineEmits<{
   (event: 'new-chat'): void
+  (event: 'select-history', id: string): void
   (event: 'save-settings', payload: { agentKey: string; userId: string }): void
 }>()
 
@@ -95,8 +96,10 @@ function handleSaveSettings(payload: { agentKey: string; userId: string }): void
         class="workspace-sidebar__history-item"
         :class="{ 'workspace-sidebar__history-item--active': item.active }"
         type="button"
+        @click="emit('select-history', item.id)"
       >
         {{ item.title }}
+        <small v-if="item.subtitle" class="workspace-sidebar__history-subtitle">{{ item.subtitle }}</small>
       </button>
 
       <p v-if="historyItems.length === 0" class="workspace-sidebar__empty">
@@ -200,6 +203,13 @@ function handleSaveSettings(payload: { agentKey: string; userId: string }): void
   border-color: var(--border);
   background: rgba(255, 255, 255, 0.78);
   color: var(--text-strong);
+}
+
+.workspace-sidebar__history-subtitle {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
 }
 
 .workspace-sidebar__empty {

@@ -16,6 +16,28 @@ import org.gemo.apex.protocol.event.detail.AskHumanQuestionDetail;
 import org.gemo.apex.protocol.event.detail.HumanInterventionDetail;
 
 public final class AgentEventFactory {
+    public TurnStartMessage turnStart(long turnNo) {
+        return TurnStartMessage.builder().context(context(Map.of("turn_no", turnNo, "execution_status", "IN_PROGRESS"))).build();
+    }
+
+    public IterationStartMessage iterationStart(long turnNo, int iterationNo, boolean resumed) {
+        return IterationStartMessage.builder()
+                .context(context(Map.of("turn_no", turnNo, "iteration_no", iterationNo, "resumed", resumed, "execution_status", "IN_PROGRESS")))
+                .build();
+    }
+
+    public IterationEndMessage iterationEnd(long turnNo, int iterationNo, String status) {
+        return IterationEndMessage.builder()
+                .context(context(Map.of("turn_no", turnNo, "iteration_no", iterationNo, "execution_status", required(status, "status"))))
+                .build();
+    }
+
+    public TurnEndMessage turnEnd(long turnNo, String status) {
+        return TurnEndMessage.builder()
+                .context(context(Map.of("turn_no", turnNo, "execution_status", required(status, "status"))))
+                .build();
+    }
+
     public InvocationDeclaredMessage invocationDeclared(
             String invocationId, String toolName, Map<String, Object> arguments) {
         String requiredInvocationId = required(invocationId, "invocationId");

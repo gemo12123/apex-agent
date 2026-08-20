@@ -20,6 +20,42 @@ export interface SessionStateView {
   pendingInteraction: HumanInterventionEnvelope | null
 }
 
+export interface SessionHistorySummary {
+  sessionId: string
+  agentKey: string
+  sessionSummary: string | null
+  executionStatus: string
+  lastActiveTime: string
+}
+
+export interface ConversationHistoryBlock {
+  type: 'content' | 'tool'
+  id: string | null
+  content: string | null
+  toolName: string | null
+  arguments: Record<string, unknown> | null
+  resolvedArguments: Record<string, unknown> | null
+  result: string | null
+}
+
+export interface ConversationHistoryIteration {
+  no: number
+  blocks: ConversationHistoryBlock[]
+}
+
+export interface ConversationHistoryTurn {
+  no: number
+  question: string
+  iterations: ConversationHistoryIteration[]
+}
+
+export interface ConversationHistoryView {
+  sessionId: string
+  agentKey: string
+  executionStatus: string
+  turns: ConversationHistoryTurn[]
+}
+
 export interface EnvelopeContext {
   mode?: 'react' | 'plan-executor' | string
   stage_id?: string
@@ -29,6 +65,9 @@ export interface EnvelopeContext {
   execution_status?: 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'HUMAN_IN_THE_LOOP' | string
   error_code?: string
   error_message?: string
+  turn_no?: number
+  iteration_no?: number
+  resumed?: boolean
 }
 
 export interface StreamMessage {
@@ -151,6 +190,10 @@ export type HumanInterventionEnvelope = SseEnvelopeBase<
   HumanInterventionDetail
 >
 export type EndEnvelope = SseEnvelopeBase<'END', never>
+export type TurnStartEnvelope = SseEnvelopeBase<'TURN_START', never>
+export type IterationStartEnvelope = SseEnvelopeBase<'ITERATION_START', never>
+export type IterationEndEnvelope = SseEnvelopeBase<'ITERATION_END', never>
+export type TurnEndEnvelope = SseEnvelopeBase<'TURN_END', never>
 
 export type SseEnvelope =
   | StreamThinkEnvelope
@@ -161,6 +204,10 @@ export type SseEnvelope =
   | ArtifactChangeEnvelope
   | TaskErrorEnvelope
   | HumanInterventionEnvelope
+  | TurnStartEnvelope
+  | IterationStartEnvelope
+  | IterationEndEnvelope
+  | TurnEndEnvelope
   | EndEnvelope
 
 export interface TextFlowRecord {

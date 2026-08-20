@@ -3,6 +3,7 @@ CREATE TABLE apex_agent_session (
     user_id VARCHAR(128) NOT NULL,
     agent_key VARCHAR(128) NOT NULL,
     status VARCHAR(32) NOT NULL,
+    session_summary VARCHAR(255) NULL,
     current_turn_no BIGINT NOT NULL,
     agent_definition_snapshot TEXT NOT NULL,
     enabled_tool_names TEXT NOT NULL,
@@ -21,6 +22,7 @@ CREATE TABLE apex_agent_dialogue_message (
     session_id VARCHAR(128) NOT NULL,
     turn_no BIGINT NOT NULL,
     sort_no BIGINT NOT NULL,
+    iteration_no INTEGER NULL,
     role VARCHAR(32) NOT NULL,
     message_type VARCHAR(64) NOT NULL,
     content TEXT,
@@ -31,6 +33,7 @@ CREATE TABLE apex_agent_dialogue_message (
 );
 
 CREATE INDEX idx_dialogue_message_session ON apex_agent_dialogue_message (session_id, sort_no);
+CREATE INDEX idx_dialogue_message_history ON apex_agent_dialogue_message (session_id, turn_no, iteration_no, sort_no);
 
 CREATE TABLE apex_agent_dialogue_summary (
     session_id VARCHAR(128) PRIMARY KEY,

@@ -151,6 +151,7 @@ public final class ModelStepExecutor {
                         context.snapshot().sessionId(),
                         context.snapshot().currentTurnNo(),
                         context.allocateSortNo(),
+                        context.snapshot().activeTurn().currentIteration().iterationNo(),
                         MessageRole.ASSISTANT,
                         context.modelResponse().toolCalls().isEmpty()
                                 ? MessageType.TEXT

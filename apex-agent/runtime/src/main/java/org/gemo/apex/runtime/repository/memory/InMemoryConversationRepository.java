@@ -50,6 +50,7 @@ public final class InMemoryConversationRepository implements ConversationReposit
                         old.sessionId(),
                         old.turnNo(),
                         old.sortNo(),
+                        old.iterationNo(),
                         write.role(),
                         write.messageType(),
                         write.content(),

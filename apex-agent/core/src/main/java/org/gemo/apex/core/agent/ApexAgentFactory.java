@@ -78,6 +78,7 @@ public final class ApexAgentFactory {
                         request.sessionId(),
                         turnNo,
                         nextSort,
+                        null,
                         MessageRole.USER,
                         MessageType.TEXT,
                         request.query(),

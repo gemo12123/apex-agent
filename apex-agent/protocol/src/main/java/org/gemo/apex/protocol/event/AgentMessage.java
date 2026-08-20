@@ -33,7 +33,11 @@ import lombok.experimental.SuperBuilder;
     @JsonSubTypes.Type(value = EndMessage.class, name = AgentEventType.END),
     @JsonSubTypes.Type(
             value = HumanInterventionMessage.class,
-            name = AgentEventType.HUMAN_INTERVENTION)
+            name = AgentEventType.HUMAN_INTERVENTION),
+    @JsonSubTypes.Type(value = TurnStartMessage.class, name = AgentEventType.TURN_START),
+    @JsonSubTypes.Type(value = IterationStartMessage.class, name = AgentEventType.ITERATION_START),
+    @JsonSubTypes.Type(value = IterationEndMessage.class, name = AgentEventType.ITERATION_END),
+    @JsonSubTypes.Type(value = TurnEndMessage.class, name = AgentEventType.TURN_END)
 })
 public abstract class AgentMessage {
     @JsonIgnore private String eventType;

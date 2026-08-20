@@ -12,6 +12,7 @@ import org.gemo.apex.runtime.api.AgentPreparationException;
 import org.gemo.apex.runtime.api.ApexAgentRuntime;
 import org.gemo.apex.runtime.execution.ApexAgentExecution;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.task.TaskRejectedException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -27,16 +28,32 @@ public class ChatService {
     private final RequestBoundAgentEventPublisherFactory publishers;
     private final Executor executor;
     private final long timeout;
+    private final ConversationHistoryQueryService history;
 
+    @Autowired
     public ChatService(
             ApexAgentRuntime runtime,
             RequestBoundAgentEventPublisherFactory publishers,
             @Qualifier("agentExecutionExecutor") Executor executor,
+            ApexAgentPlatformProperties properties,
+            ConversationHistoryQueryService history) {
+        this.runtime = runtime;
+        this.publishers = publishers;
+        this.executor = executor;
+        this.timeout = properties.getSseTimeoutMillis();
+        this.history = history;
+    }
+
+    public ChatService(
+            ApexAgentRuntime runtime,
+            RequestBoundAgentEventPublisherFactory publishers,
+            Executor executor,
             ApexAgentPlatformProperties properties) {
         this.runtime = runtime;
         this.publishers = publishers;
         this.executor = executor;
         this.timeout = properties.getSseTimeoutMillis();
+        this.history = null;
     }
 
     /** 创建 SSE 通道、同步准备 execution，再将实际执行提交到带用户上下文的线程池。 */
@@ -58,6 +75,9 @@ public class ChatService {
             }
             publisher.completeFromExecution();
             return emitter;
+        }
+        if (request.getType() == RequestType.NEW && history != null) {
+            history.initializeSummary(request.getSessionId(), userId, request.getAgentKey(), request.getQuery());
         }
         publisher.bind(execution);
         if (publisher.isClosed()) {

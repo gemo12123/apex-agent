@@ -30,6 +30,7 @@ public final class ApexAgent {
     private final ApexAgentContext context;
     private final LifecycleDispatcher dispatcher;
     private final AgentEventEmitter emitter;
+    private final AgentEventFactory events;
     private final ModelRequestPreparer preparer;
     private final ModelStepExecutor modelStep;
     private final ToolCallCoordinator tools;
@@ -37,12 +38,12 @@ public final class ApexAgent {
     ApexAgent(ApexAgentContext context) {
         this.context = context;
         this.dispatcher = new LifecycleDispatcher();
-        AgentEventFactory eventFactory = new AgentEventFactory();
-        this.emitter = new AgentEventEmitter(context.ports().eventPublisher(), eventFactory);
+        this.events = new AgentEventFactory();
+        this.emitter = new AgentEventEmitter(context.ports().eventPublisher(), events);
         this.preparer = new ModelRequestPreparer(dispatcher);
-        this.modelStep = new ModelStepExecutor(dispatcher, emitter, eventFactory);
+        this.modelStep = new ModelStepExecutor(dispatcher, emitter, events);
         this.tools =
-                new ToolCallCoordinator(dispatcher, new ToolResultFactory(), emitter, eventFactory);
+                new ToolCallCoordinator(dispatcher, new ToolResultFactory(), emitter, events);
     }
 
     /**
@@ -90,6 +91,7 @@ public final class ApexAgent {
                 if (turnStart instanceof LifecycleDispatchOutcome.EndTurn end) {
                     return finalizeTurn(end.reason(), true, false);
                 }
+                emitter.publish(events.turnStart(context.snapshot().currentTurnNo()));
             }
             int maxIterations = context.definition().definition().prompt().maxIterations();
             // 一次 Iteration 只对应一次模型调用及其返回的全部工具调用。
@@ -111,6 +113,11 @@ public final class ApexAgent {
                 if (iterationStart instanceof LifecycleDispatchOutcome.EndTurn end) {
                     return finalizeTurn(end.reason(), true, true);
                 }
+                emitter.publish(
+                        events.iterationStart(
+                                context.snapshot().currentTurnNo(),
+                                iterationNo,
+                                context.resumedRequest()));
                 ModelRequestPreparer.PreparationOutcome prepared =
                         preparer.prepare(context, iterationNo == maxIterations);
                 if (prepared instanceof ModelRequestPreparer.PreparationOutcome.EndTurn end) {
@@ -223,6 +230,10 @@ public final class ApexAgent {
         context.cleanupSharedData(SharedDataCleanupPolicy.TURN_END);
         context.completeTurn(endedByHook);
         context.save();
+        emitter.publish(
+                events.turnEnd(
+                        context.snapshot().currentTurnNo(),
+                        context.snapshot().activeTurn().status().name()));
         return endedByHook
                 ? new AgentRunOutcome.EndedByHook(reason)
                 : new AgentRunOutcome.Completed();
@@ -241,6 +252,11 @@ public final class ApexAgent {
                                         current.sharedData()),
                         Set.of());
         context.cleanupSharedData(SharedDataCleanupPolicy.ITERATION_END);
+        emitter.publish(
+                events.iterationEnd(
+                        context.snapshot().currentTurnNo(),
+                        context.snapshot().activeTurn().currentIteration().iterationNo(),
+                        context.snapshot().activeTurn().currentIteration().status().name()));
         return outcome;
     }
 

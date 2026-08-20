@@ -611,6 +611,9 @@ public final class ApexAgentContext {
                                     snapshot.sessionId(),
                                     snapshot.currentTurnNo(),
                                     allocateSortNo(),
+                                    snapshot.activeTurn().currentIteration() == null
+                                            ? null
+                                            : snapshot.activeTurn().currentIteration().iterationNo(),
                                     append.role(),
                                     append.messageType(),
                                     append.content(),
@@ -628,6 +631,7 @@ public final class ApexAgentContext {
                                     old.sessionId(),
                                     old.turnNo(),
                                     old.sortNo(),
+                                    old.iterationNo(),
                                     replace.role(),
                                     replace.messageType(),
                                     replace.content(),
@@ -707,6 +711,7 @@ public final class ApexAgentContext {
                 && left.sessionId().equals(right.sessionId())
                 && left.turnNo() == right.turnNo()
                 && left.sortNo() == right.sortNo()
+                && java.util.Objects.equals(left.iterationNo(), right.iterationNo())
                 && left.role() == right.role()
                 && left.messageType() == right.messageType()
                 && Objects.equals(left.content(), right.content())

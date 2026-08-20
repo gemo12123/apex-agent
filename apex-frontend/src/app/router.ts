@@ -8,5 +8,10 @@ export const router = createRouter({
       name: 'workspace',
       component: () => import('@/features/workspace/pages/WorkspacePage.vue'),
     },
+    {
+      path: '/conversation',
+      name: 'conversation',
+      component: () => import('@/features/conversation/pages/ConversationPage.vue'),
+    },
   ],
 })

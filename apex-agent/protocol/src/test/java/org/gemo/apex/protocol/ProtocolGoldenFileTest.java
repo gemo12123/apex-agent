@@ -24,9 +24,13 @@ import org.gemo.apex.protocol.event.EndMessage;
 import org.gemo.apex.protocol.event.HumanInterventionMessage;
 import org.gemo.apex.protocol.event.InvocationChangeMessage;
 import org.gemo.apex.protocol.event.InvocationDeclaredMessage;
+import org.gemo.apex.protocol.event.IterationEndMessage;
+import org.gemo.apex.protocol.event.IterationStartMessage;
 import org.gemo.apex.protocol.event.StreamContentMessage;
 import org.gemo.apex.protocol.event.StreamThinkMessage;
 import org.gemo.apex.protocol.event.TaskErrorMessage;
+import org.gemo.apex.protocol.event.TurnEndMessage;
+import org.gemo.apex.protocol.event.TurnStartMessage;
 import org.gemo.apex.protocol.request.SessionStateView;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -127,7 +131,11 @@ class ProtocolGoldenFileTest {
                         "invocation-declared-nested.json", InvocationDeclaredMessage.class, true),
                 Arguments.of("invocation-change.json", InvocationChangeMessage.class, true),
                 Arguments.of("artifact-declared.compat.json", ArtifactDeclaredMessage.class, false),
-                Arguments.of("artifact-change.compat.json", ArtifactChangeMessage.class, false));
+                Arguments.of("artifact-change.compat.json", ArtifactChangeMessage.class, false),
+                Arguments.of("turn-start.json", TurnStartMessage.class, true),
+                Arguments.of("iteration-start.json", IterationStartMessage.class, true),
+                Arguments.of("iteration-end.json", IterationEndMessage.class, true),
+                Arguments.of("turn-end.json", TurnEndMessage.class, true));
     }
 
     static Stream<Arguments> sessionGoldenFiles() {

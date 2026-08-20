@@ -1,0 +1,1 @@
+{"event_type":"INVOCATION_DECLARED","context":{"invocation_id":"parent-1","mode":"react"},"messages":[{"invocation_id":"child-1","parent_invocation_id":"parent-1","name":"Search","invocation_type":"tool","click_effect":"none","content":"{\"query\":\"Apex\"}","complete":false,"render_type":"json"}]}

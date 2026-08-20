@@ -1,5 +1,12 @@
 import { fetchEventSource } from '@microsoft/fetch-event-source'
-import type { AgentSummary, ChatRequest, SessionStateView, SseEnvelope } from '@/types/apex'
+import type {
+  AgentSummary,
+  ChatRequest,
+  ConversationHistoryView,
+  SessionHistorySummary,
+  SessionStateView,
+  SseEnvelope,
+} from '@/types/apex'
 
 interface ApiResponse<T> {
   code: number
@@ -10,6 +17,8 @@ interface ApiResponse<T> {
 export interface ApexApiClient {
   fetchAgents(userId: string): Promise<AgentSummary[]>
   fetchSessionState?(sessionId: string, agentKey: string, userId: string): Promise<SessionStateView>
+  fetchSessions?(userId: string): Promise<SessionHistorySummary[]>
+  fetchSessionHistory?(sessionId: string, userId: string): Promise<ConversationHistoryView>
   streamChat(
     request: ChatRequest,
     userId: string,
@@ -61,6 +70,21 @@ export function createApexApiClient(): ApexApiClient {
       }
 
       const payload = (await response.json()) as ApiResponse<SessionStateView>
+      return payload.data
+    },
+    async fetchSessions(userId) {
+      const response = await fetch(`${API_BASE}/sse/sessions`, { headers: createHeaders(userId) })
+      if (!response.ok) throw new Error(`加载历史会话失败（${response.status}）`)
+      const payload = (await response.json()) as ApiResponse<SessionHistorySummary[]>
+      return payload.data ?? []
+    },
+    async fetchSessionHistory(sessionId, userId) {
+      const response = await fetch(
+        `${API_BASE}/sse/sessions/${encodeURIComponent(sessionId)}/history`,
+        { headers: createHeaders(userId) },
+      )
+      if (!response.ok) throw new SessionStateHttpError(response.status)
+      const payload = (await response.json()) as ApiResponse<ConversationHistoryView>
       return payload.data
     },
     async streamChat(request, userId, signal, onEnvelope) {
