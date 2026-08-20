@@ -24,7 +24,7 @@ import org.gemo.apex.common.hook.result.PostToolCallHookResult;
 import org.gemo.apex.common.json.JsonUtils;
 import org.gemo.apex.extension.hook.LifecycleHook;
 
-/** 对超预算工具结果做 JSON 感知截断，并把完整原文落盘。 */
+/** 对超预算工具结果做 JSON 感知截断，并把完整可复用正文落盘。 */
 public final class ToolResultTruncateHook
         implements LifecycleHook<PostToolCallContext, PostToolCallHookResult> {
     public static final String REGISTRATION_NAME = "toolResultTruncateHook";
@@ -88,7 +88,7 @@ public final class ToolResultTruncateHook
         String extension = parsed.structured() == null ? ".txt" : ".json";
         StorageResult storage =
                 writeFullResult(
-                        content,
+                        parsed.persistedContent(),
                         context.toolCall().name(),
                         extension,
                         resolveOutputDir(options));
@@ -386,17 +386,17 @@ public final class ToolResultTruncateHook
     private ParsedContent parseContent(String content) {
         JsonNode first = tryParse(content);
         if (first != null && (first.isObject() || first.isArray())) {
-            return new ParsedContent(first, null);
+            return new ParsedContent(first, null, content);
         }
         if (first != null && first.isTextual()) {
             String decoded = first.asText();
             JsonNode second = tryParse(decoded);
             if (second != null && (second.isObject() || second.isArray())) {
-                return new ParsedContent(second, null);
+                return new ParsedContent(second, null, decoded);
             }
-            return new ParsedContent(null, decoded);
+            return new ParsedContent(null, decoded, content);
         }
-        return new ParsedContent(null, content);
+        return new ParsedContent(null, content, content);
     }
 
     private JsonNode tryParse(String content) {
@@ -516,7 +516,7 @@ public final class ToolResultTruncateHook
                         context.toolResult().content(), context.toolResult().metadata()));
     }
 
-    private record ParsedContent(JsonNode structured, String text) {}
+    private record ParsedContent(JsonNode structured, String text, String persistedContent) {}
 
     private record StorageResult(String fileName, boolean failed) {}
 

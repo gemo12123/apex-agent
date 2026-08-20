@@ -71,7 +71,7 @@ class ToolResultTruncateHookTest {
     }
 
     @Test
-    void unwrapsOneJsonStringLayerAsStructuredJson(@TempDir Path tempDir) {
+    void unwrapsOneJsonStringLayerAsStructuredJson(@TempDir Path tempDir) throws Exception {
         String inner = "{\"items\":[{\"value\":\"" + "x".repeat(9000) + "\"}]}";
         String wrapped = JsonUtils.toJson(inner);
 
@@ -80,6 +80,13 @@ class ToolResultTruncateHookTest {
 
         assertTrue(envelope.get("data").isObject());
         assertEquals("application/json", envelope.get("_result").get("content_type").asText());
+        Path storedFile = tempDir.resolve(envelope.get("_result").get("file").asText());
+        String storedContent = Files.readString(storedFile);
+        assertEquals(inner, storedContent);
+        assertTrue(JsonUtils.parseTree(storedContent).isObject());
+        assertEquals(
+                wrapped.getBytes(StandardCharsets.UTF_8).length,
+                envelope.get("_result").get("original_size_bytes").asLong());
         assertWithinBudget(envelope.toString(), MIN_BUDGET);
     }
 

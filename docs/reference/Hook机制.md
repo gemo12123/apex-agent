@@ -409,7 +409,7 @@ TURN_START 提前结束时尚未创建 Iteration，因此不会分发 ITERATION_
 | `ToolConfirmHook` | PRE_TOOL_CALL | 首次调用请求工具确认；恢复后放行，拒绝和可编辑参数合并由 core 处理 |
 | `AskHumanInterventionHook` | PRE_TOOL_CALL | 把 `ask_human` ToolCall 转换为问题介入；非法问题定义转为 BlockTool |
 | `PlainTextTruncateHook` | POST_TOOL_CALL | 截断过长纯文本 ToolResult，默认上限为 4000 个 Unicode 码点 |
-| `ToolResultTruncateHook` | POST_TOOL_CALL | 按估算 token 预算自适应截断 JSON 或文本 ToolResult，并落盘完整原文 |
+| `ToolResultTruncateHook` | POST_TOOL_CALL | 按估算 token 预算自适应截断 JSON 或文本 ToolResult，并落盘完整可复用正文 |
 | `SkillActivationStateHook` | POST_TOOL_CALL | 从 ToolResult metadata 读取 Skill 名并声明激活状态 |
 | `TodoMiddleware` | PRE_MODEL_CALL | 维护带稳定 payload 标记的持久化 SYSTEM/TEXT Todo 上下文；状态变化时 Replace、重复时 Remove、压缩淘汰后重新 Append |
 | `CompositeLifecycleHook` | 任意单一结果族 | 顺序调用相同 descriptor 的 Hook，遇到非 Continue 结果立即短路 |
@@ -418,9 +418,9 @@ TURN_START 提前结束时尚未创建 Iteration，因此不会分发 ITERATION_
 
 ### ToolResultTruncateHook
 
-`ToolResultTruncateHook` 在 POST_TOOL_CALL 对超预算 ToolResult 做 JSON 感知截断。`maxSize` 使用与模型请求容量估算一致的轻量规则 `ceil(String.length() / 4)`；内容未超预算时原样透传且不落盘，超预算时把完整原文落盘，并保证最终完整信封的估算 token 数不超过预算。它与 `PlainTextTruncateHook` 是两种独立策略，不应在同一工具结果上重复绑定。
+`ToolResultTruncateHook` 在 POST_TOOL_CALL 对超预算 ToolResult 做 JSON 感知截断。`maxSize` 使用与模型请求容量估算一致的轻量规则 `ceil(String.length() / 4)`；内容未超预算时原样透传且不落盘，超预算时把完整可复用正文落盘，并保证最终完整信封的估算 token 数不超过预算。它与 `PlainTextTruncateHook` 是两种独立策略，不应在同一工具结果上重复绑定。
 
-JSON 识别最多解包一层：第一次解析得到对象或数组时直接结构化处理；得到字符串节点时，仅把 `asText()` 再解析一次，第二次得到对象或数组才按结构化 JSON 处理。第二次仍为字符串、标量或非法 JSON 时按普通文本处理。未触发截断时不会因为解析而改变原始格式。
+JSON 识别最多解包一层：第一次解析得到对象或数组时直接结构化处理；得到字符串节点时，仅把 `asText()` 再解析一次，第二次得到对象或数组才按结构化 JSON 处理。第二次仍为字符串、标量或非法 JSON 时按普通文本处理。未触发截断时不会因为解析而改变原始格式；触发截断后，字符串包裹的结构化 JSON 会把解包后的对象或数组正文写入 `.json` 文件，避免文件根节点仍是字符串。
 
 信封格式：
 
@@ -452,7 +452,7 @@ binding options（均在构造默认值基础上可按 binding 覆盖）：
 | 键 | 默认值 | 说明 |
 | --- | --- | --- |
 | `maxSize` | 8000 | 完整 ToolResult 正文的估算 token 预算，最小值为 1024 |
-| `outputDir` | 系统临时目录 | 完整原文落盘目录 |
+| `outputDir` | 系统临时目录 | 完整正文落盘目录 |
 
 绑定示例：
 
@@ -468,7 +468,7 @@ hooks:
         maxSize: 8000
 ```
 
-超预算原文按输入类型使用 `.json` 或 `.txt` 后缀；合法 JSON 即使最终以字符串预览兜底，仍使用 `application/json` 和 `.json`。`original_size_bytes` 是真实 UTF-8 字节数。写盘失败时仍返回满足预算的截断信封，并通过 `_result.storage_failed` 标记原文未落盘。
+超预算正文按输入类型使用 `.json` 或 `.txt` 后缀；合法 JSON 即使最终以字符串预览兜底，仍使用 `application/json` 和 `.json`。普通 JSON 和文本保存原始正文，字符串包裹的对象或数组保存单层解包后的结构化正文；`original_size_bytes` 始终表示原始 ToolResult 的真实 UTF-8 字节数。写盘失败时仍返回满足预算的截断信封，并通过 `_result.storage_failed` 标记正文未落盘。
 
 ## 当前默认启用状态
 
